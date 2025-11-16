@@ -191,8 +191,4 @@ cd frontend
 ## 📞 联系方式
 
 - 开发者: jetwong
-- 项目地址: https://github.com/your-repo
-
-## 📄 许可证
-
-[MIT License](./LICENSE)
+- 项目地址: https://github.com/JetWong0810/football-betting-system
