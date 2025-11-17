@@ -37,6 +37,22 @@
     </view>
 
     <scroll-view class="content-wrapper" scroll-y>
+      <!-- 主标签切换：记录 / 分析 -->
+      <view class="main-tabs-wrapper">
+        <view class="main-tabs-list">
+          <view class="main-tab-item" :class="{ active: mainTab === 'records' }" @tap="mainTab = 'records'"> 
+            <text class="tab-icon">📝</text>
+            <text>记录</text>
+          </view>
+          <view class="main-tab-item" :class="{ active: mainTab === 'analysis' }" @tap="mainTab = 'analysis'"> 
+            <text class="tab-icon">📊</text>
+            <text>分析</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 记录标签页 -->
+      <view v-if="mainTab === 'records'">
       <!-- 标签切换 -->
       <view class="tabs-wrapper">
         <view class="tabs-list">
@@ -123,49 +139,62 @@
           </view>
         </view>
       </view>
-    </scroll-view>
+      </view>
 
-    <!-- 表单弹窗 -->
-    <view v-if="showDialog" class="dialog-overlay" @tap="closeDialog">
-      <view class="dialog-content" @tap.stop>
-        <view class="dialog-header">
-          <text class="dialog-title">{{ editingBet ? "编辑投注记录" : "新增投注记录" }}</text>
-          <button class="close-btn" @tap="closeDialog">×</button>
+      <!-- 分析标签页 -->
+      <view v-else-if="mainTab === 'analysis'" class="analysis-wrapper">
+        <view class="analysis-section">
+          <text class="section-title">盈亏趋势</text>
+          <ChartProfit :series="statStore.trendSeries" />
         </view>
-        <scroll-view class="dialog-body" scroll-y>
-          <BetForm ref="betFormRef" :editing-bet="editingBet" :is-editing-betting="isEditingBetting" :hide-submit-button="true" @submit="handleSubmit" @cancelEdit="cancelEdit" />
-        </scroll-view>
-        <view class="dialog-footer">
-          <view v-if="isEditingBetting" class="footer-buttons">
-            <button class="cancel-footer-btn" @tap="closeDialog">取消</button>
-            <button class="settle-btn" @tap="handleSettle">结算</button>
+
+        <view class="analysis-section">
+          <text class="section-title">玩法盈亏占比</text>
+          <ChartPie :dataset="statStore.pieDataset" />
           </view>
-          <view v-else class="footer-buttons">
-            <button class="save-footer-btn" @tap="() => submitFormWithStatus('saved')">保存</button>
-            <button class="bet-footer-btn" @tap="() => submitFormWithStatus('betting')">投注</button>
+
+        <view class="analysis-section">
+          <text class="section-title">周度盈亏</text>
+          <view v-if="!weekList.length" class="empty-state">
+            <view class="empty-icon-wrapper">
+              <text class="empty-icon">-</text>
+          </view>
+            <text class="empty-text">暂无数据</text>
+        </view>
+          <view v-else class="weekly">
+            <view v-for="row in weekList" :key="row.week" class="weekly-row">
+              <view class="week">{{ row.week }}</view>
+              <view class="meta">投入 {{ formatCurrency(row.stake) }}</view>
+              <view class="meta" :class="{ win: row.profit >= 0, lose: row.profit < 0 }">
+                盈亏 {{ formatCurrency(row.profit) }}
+      </view>
+    </view>
           </view>
         </view>
       </view>
-    </view>
+    </scroll-view>
+
+    <!-- 投注记录弹窗 -->
+    <BetRecordDialog v-model:visible="showDialog" :editing-bet="editingBet" @success="handleRecordSuccess" />
   </view>
 </template>
 
 <script setup>
 import dayjs from "dayjs";
-import BetForm from "@/components/BetForm.vue";
+import BetRecordDialog from "@/components/BetRecordDialog.vue";
+import ChartPie from "@/components/ChartPie.vue";
+import ChartProfit from "@/components/ChartProfit.vue";
 import { useBetStore } from "@/stores/betStore";
+import { useStatStore } from "@/stores/statStore";
 import { ref, computed } from "vue";
+import { formatCurrency } from "@/utils/formatters";
 
 const betStore = useBetStore();
+const statStore = useStatStore();
+const mainTab = ref("records");
 const editingBet = ref(null);
 const activeTab = ref("all");
 const showDialog = ref(false);
-const betFormRef = ref(null);
-
-// 判断是否在编辑"投注中"的记录
-const isEditingBetting = computed(() => {
-  return editingBet.value && editingBet.value.status === "betting";
-});
 
 // 计算总投注金额
 const totalAmount = computed(() => {
@@ -180,60 +209,21 @@ const displayedBets = computed(() => {
   return betStore.bets;
 });
 
+// 周度数据列表
+const weekList = computed(() => {
+  return Object.entries(statStore.periodStats)
+    .map(([week, payload]) => ({ week, ...payload }))
+    .sort((a, b) => a.week.localeCompare(b.week));
+});
+
 function showFormDialog() {
   editingBet.value = null;
   showDialog.value = true;
-  // 打开新增弹窗时，确保表单是干净的
-  setTimeout(() => {
-    if (betFormRef.value && betFormRef.value.resetForm) {
-      betFormRef.value.resetForm();
-    }
-  }, 50);
 }
 
-function closeDialog() {
-  showDialog.value = false;
+function handleRecordSuccess() {
+  // 记录添加/更新成功后，清除编辑状态
   editingBet.value = null;
-  // 延迟重置表单，确保动画完成后再清空
-  setTimeout(() => {
-    if (betFormRef.value && betFormRef.value.resetForm) {
-      betFormRef.value.resetForm();
-    }
-  }, 300);
-}
-
-function submitFormWithStatus(status) {
-  // 触发 BetForm 的提交方法，传递状态
-  if (betFormRef.value && betFormRef.value.handleSubmitWithStatus) {
-    betFormRef.value.handleSubmitWithStatus(status);
-  }
-}
-
-function handleSubmit(payload) {
-  try {
-    if (payload.id) {
-      betStore.updateBet(payload.id, payload);
-      editingBet.value = null;
-      uni.showToast({ title: "记录已更新", icon: "success" });
-    } else {
-      betStore.addBet(payload);
-      const statusText = payload.status === "betting" ? "投注成功" : "保存成功";
-      uni.showToast({ title: statusText, icon: "success" });
-    }
-    closeDialog(); // closeDialog 中会自动重置表单
-  } catch (error) {
-    uni.showToast({ title: error.message || "操作失败", icon: "none" });
-  }
-}
-
-// 处理结算
-function handleSettle() {
-  if (!editingBet.value) return;
-
-  // 触发表单提交，将状态改为settled
-  if (betFormRef.value && betFormRef.value.handleSubmitWithStatus) {
-    betFormRef.value.handleSubmitWithStatus("settled");
-  }
 }
 
 function removeBet(id) {
@@ -266,11 +256,6 @@ function startEdit(bet) {
 
   editingBet.value = bet;
   showDialog.value = true;
-}
-
-function cancelEdit() {
-  editingBet.value = null;
-  closeDialog();
 }
 
 function formatDate(value) {
@@ -486,9 +471,50 @@ function getParlayTypeLabel(bet) {
   width: 100%;
 }
 
+/* 主标签切换 */
+.main-tabs-wrapper {
+  margin: 24rpx 0 20rpx;
+}
+
+.main-tabs-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #ffffff;
+  border-radius: 16rpx;
+  padding: 6rpx;
+  border: 1px solid rgba(13, 148, 136, 0.1);
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+  gap: 8rpx;
+}
+
+.main-tab-item {
+  padding: 16rpx;
+  text-align: center;
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #6b7280;
+  border-radius: 12rpx;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+}
+
+.main-tab-item .tab-icon {
+  font-size: 24rpx;
+}
+
+.main-tab-item.active {
+  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
+}
+
 /* 标签切换 */
 .tabs-wrapper {
-  margin: 24rpx 0 20rpx;
+  margin: 0 0 20rpx;
 }
 
 .tabs-list {
@@ -516,6 +542,61 @@ function getParlayTypeLabel(bet) {
   color: #ffffff;
   font-weight: 600;
   box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
+}
+
+/* ========== 分析页面区域 ========== */
+.analysis-wrapper {
+  padding-bottom: 24rpx;
+}
+
+.analysis-section {
+  margin-bottom: 32rpx;
+}
+
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #0d9488;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
+.weekly {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.weekly-row {
+  background: #ffffff;
+  border-radius: 12rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(13, 148, 136, 0.1);
+}
+
+.week {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #111827;
+}
+
+.meta {
+  font-size: 24rpx;
+  color: #6b7280;
+}
+
+.meta.win {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.meta.lose {
+  color: #ef4444;
+  font-weight: 500;
 }
 
 /* ========== 记录列表区域 ========== */
@@ -850,157 +931,5 @@ function getParlayTypeLabel(bet) {
 
 .status-badge.settled {
   background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-}
-
-/* ========== 弹窗样式 ========== */
-.dialog-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 500;
-  padding: 0;
-}
-
-.dialog-content {
-  background: #ffffff;
-  border-radius: 32rpx 32rpx 0 0;
-  width: 100vw;
-  max-width: 100%;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 -8rpx 32rpx rgba(0, 0, 0, 0.15);
-  animation: slideUp 0.3s ease-out;
-  box-sizing: border-box;
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-
-.dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24rpx;
-  border-bottom: 1px solid rgba(13, 148, 136, 0.1);
-  flex-shrink: 0;
-  box-sizing: border-box;
-}
-
-.dialog-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  color: #0d9488;
-  flex: 1;
-}
-
-.close-btn {
-  width: 48rpx;
-  height: 48rpx;
-  border-radius: 50%;
-  background: rgba(13, 148, 136, 0.1);
-  border: none;
-  font-size: 40rpx;
-  color: #0d9488;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  line-height: 1;
-  flex-shrink: 0;
-  margin-left: 20rpx;
-}
-
-.close-btn:active {
-  background: rgba(13, 148, 136, 0.2);
-}
-
-.dialog-body {
-  flex: 1;
-  padding: 24rpx;
-  overflow-y: auto;
-  box-sizing: border-box;
-}
-
-.dialog-footer {
-  padding: 16rpx 24rpx;
-  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(13, 148, 136, 0.1);
-  background: #ffffff;
-  flex-shrink: 0;
-  box-sizing: border-box;
-}
-
-.footer-buttons {
-  display: flex;
-  gap: 12rpx;
-  width: 100%;
-
-  button {
-    flex: 1;
-    height: 72rpx;
-    border-radius: 12rpx;
-    font-size: 26rpx;
-    font-weight: 600;
-    border: none;
-    transition: all 0.2s;
-    box-sizing: border-box;
-  }
-}
-
-.save-footer-btn {
-  background: #f5f5f5;
-  color: #666;
-
-  &:active {
-    background: #e5e5e5;
-    transform: translateY(1rpx);
-  }
-}
-
-.bet-footer-btn {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-  color: #ffffff;
-  box-shadow: 0 4rpx 16rpx rgba(13, 148, 136, 0.3);
-
-  &:active {
-    transform: translateY(1rpx);
-    box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
-  }
-}
-
-.cancel-footer-btn {
-  background: #f5f5f5;
-  color: #666;
-
-  &:active {
-    background: #e5e5e5;
-    transform: translateY(1rpx);
-  }
-}
-
-.settle-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: #ffffff;
-  box-shadow: 0 4rpx 16rpx rgba(16, 185, 129, 0.3);
-
-  &:active {
-    transform: translateY(1rpx);
-    box-shadow: 0 2rpx 8rpx rgba(16, 185, 129, 0.3);
-  }
 }
 </style>

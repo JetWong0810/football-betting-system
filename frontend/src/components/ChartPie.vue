@@ -6,7 +6,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import * as echarts from 'echarts/core'
 import { PieChart } from 'echarts/charts'
 import { LegendComponent, TooltipComponent } from 'echarts/components'
@@ -25,13 +25,22 @@ const chartRef = ref(null)
 const chartInstance = ref(null)
 
 function initChart () {
+  try {
   if (!chartRef.value) return
+    if (!props.dataset.length) return
+    
   chartInstance.value = echarts.init(chartRef.value)
   renderChart()
+  } catch (error) {
+    console.warn('Chart init error:', error)
+  }
 }
 
 function renderChart () {
+  try {
   if (!chartInstance.value) return
+    if (!props.dataset.length) return
+    
   chartInstance.value.setOption({
     tooltip: {
       trigger: 'item'
@@ -50,17 +59,38 @@ function renderChart () {
       }
     ]
   })
+  } catch (error) {
+    console.warn('Chart render error:', error)
+  }
 }
 
 watch(() => props.dataset, () => {
-  if (!chartInstance.value) return
+  nextTick(() => {
+    if (!chartInstance.value && props.dataset.length) {
+      initChart()
+    } else if (chartInstance.value) {
   renderChart()
+    }
+  })
 }, { deep: true })
 
-onMounted(() => initChart())
+onMounted(() => {
+  nextTick(() => {
+    if (props.dataset.length) {
+      initChart()
+    }
+  })
+})
 
 onBeforeUnmount(() => {
-  chartInstance.value?.dispose()
+  if (chartInstance.value) {
+    try {
+      chartInstance.value.dispose()
+      chartInstance.value = null
+    } catch (error) {
+      console.warn('Chart dispose error:', error)
+    }
+  }
 })
 </script>
 

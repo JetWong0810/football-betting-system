@@ -158,7 +158,7 @@ cd frontend
 - **容器化**: Docker
 - **定时任务**: Crontab
 
-## 📝 开发指南
+## 💻 本地运行指南
 
 ### 环境要求
 
@@ -166,7 +166,75 @@ cd frontend
 - Node.js 16+
 - MySQL 8.0+
 
-### 本地开发
+### 快速启动（3 步）
+
+#### 1. 数据库准备
+
+```bash
+# 启动 MySQL 服务
+# macOS: brew services start mysql
+# Linux: sudo systemctl start mysql
+
+# 创建数据库
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS football_betting CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+# 导入表结构
+mysql -u root -p football_betting < api-service/schema_mysql.sql
+```
+
+#### 2. 启动 API 服务
+
+```bash
+cd api-service
+
+# 安装依赖
+pip3 install -r requirements.txt
+
+# 配置数据库连接（修改为你的 MySQL 密码）
+export MYSQL_HOST=localhost
+export MYSQL_USER=root
+export MYSQL_PASSWORD=your_password
+export MYSQL_DATABASE=football_betting
+
+# 启动服务
+python3 main.py
+```
+
+访问 http://localhost:7001/docs 查看 API 文档
+
+#### 3. 启动前端
+
+```bash
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev:h5
+```
+
+访问 http://localhost:5173
+
+### 可选：本地运行抓取服务
+
+```bash
+cd scraper-service
+
+# 安装依赖
+pip3 install -r requirements.txt
+
+# 配置环境变量（连接本地数据库）
+export MYSQL_HOST=localhost
+export MYSQL_USER=root
+export MYSQL_PASSWORD=your_password
+export MYSQL_DATABASE=football_betting
+
+# 手动执行一次抓取
+python3 main.py
+```
+
+### 📝 开发指南
 
 详见各子服务的 README.md：
 

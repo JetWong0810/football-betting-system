@@ -41,6 +41,30 @@
       }
     },
     {
+      "path": "pages/profile/profile",
+      "style": {
+        "navigationBarTitleText": "我的",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/auth/login",
+      "style": {
+        "navigationBarTitleText": "登录",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/auth/register",
+      "style": {
+        "navigationBarTitleText": "注册",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/matches/list",
       "style": {
         "navigationBarTitleText": "赛事中心",
@@ -88,13 +112,13 @@
         "text": "赛事"
       },
       {
-        "pagePath": "pages/strategy/strategy",
+        "pagePath": "pages/record/record",
         "iconPath": "static/tabbar/strategy.png",
         "selectedIconPath": "static/tabbar/strategy-active.png",
-        "text": "策略"
+        "text": "记录"
       },
       {
-        "pagePath": "pages/settings/settings",
+        "pagePath": "pages/profile/profile",
         "iconPath": "static/tabbar/settings.png",
         "selectedIconPath": "static/tabbar/settings-active.png",
         "text": "我的"

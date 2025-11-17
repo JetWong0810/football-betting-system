@@ -70,22 +70,27 @@
       </view>
     </view>
     </scroll-view>
+
+    <!-- 投注记录弹窗 -->
+    <BetRecordDialog v-model:visible="showDialog" @success="handleRecordSuccess" />
   </view>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useBetStore } from '@/stores/betStore'
 import { useConfigStore } from '@/stores/configStore'
 import { useStatStore } from '@/stores/statStore'
 import StatCard from '@/components/StatCard.vue'
 import ChartProfit from '@/components/ChartProfit.vue'
+import BetRecordDialog from '@/components/BetRecordDialog.vue'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
 
 const betStore = useBetStore()
 const config = useConfigStore()
 const statStore = useStatStore()
+const showDialog = ref(false)
 
 const balance = computed(() => statStore.balance)
 const targetProgress = computed(() => Math.min(Math.max(statStore.targetProgress, 0), 2))
@@ -122,7 +127,17 @@ const summaryCards = computed(() => [
 ])
 
 function goRecord() {
-  uni.navigateTo({ url: '/pages/record/record' })
+  showDialog.value = true
+}
+
+function handleRecordSuccess(payload) {
+  // 记录添加成功后，跳转到记录tab
+  // 延迟让用户看到成功提示
+  setTimeout(() => {
+    uni.switchTab({
+      url: '/pages/record/record'
+    })
+  }, 500)
 }
 
 onShow(() => {

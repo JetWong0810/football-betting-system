@@ -1,0 +1,373 @@
+<template>
+  <view class="page-wrapper">
+    <!-- 头部用户信息区域 -->
+    <view class="header-section">
+      <view class="user-info" v-if="userStore.isLoggedIn">
+        <image class="avatar" :src="userStore.user?.avatar || defaultAvatar" mode="aspectFill" />
+        <view class="user-details">
+          <text class="nickname">{{ userStore.user?.nickname || "用户" }}</text>
+          <text class="username">@{{ userStore.user?.username }}</text>
+        </view>
+      </view>
+
+      <view class="login-prompt" v-else @tap="goToLogin">
+        <image class="avatar" :src="defaultAvatar" mode="aspectFill" />
+        <view class="login-text">
+          <text class="title">点击登录</text>
+          <text class="subtitle">登录后享受更多功能</text>
+        </view>
+        <text class="arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 菜单列表 -->
+    <scroll-view class="content-wrapper" scroll-y>
+      <!-- 功能菜单组 -->
+      <view class="menu-group">
+        <text class="group-title">功能</text>
+        <view class="menu-card">
+          <view class="menu-item" @tap="navigateTo('/pages/strategy/strategy')">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)">
+                <text class="icon-text">📊</text>
+              </view>
+              <text class="menu-label">投注策略</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+
+          <view class="divider"></view>
+
+          <view class="menu-item" @tap="navigateTo('/pages/settings/settings')">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)">
+                <text class="icon-text">⚙️</text>
+              </view>
+              <text class="menu-label">策略设置</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+
+          <view class="divider"></view>
+
+          <view class="menu-item" @tap="navigateTo('/pages/analysis/analysis')">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)">
+                <text class="icon-text">📈</text>
+              </view>
+              <text class="menu-label">数据分析</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 账户菜单组 (登录后显示) -->
+      <view class="menu-group" v-if="userStore.isLoggedIn">
+        <text class="group-title">账户</text>
+        <view class="menu-card">
+          <view class="menu-item" @tap="handleEditProfile">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)">
+                <text class="icon-text">👤</text>
+              </view>
+              <text class="menu-label">个人资料</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 其他菜单组 -->
+      <view class="menu-group">
+        <text class="group-title">其他</text>
+        <view class="menu-card">
+          <view class="menu-item" @tap="handleHelp">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%)">
+                <text class="icon-text">❓</text>
+              </view>
+              <text class="menu-label">帮助中心</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+
+          <view class="divider"></view>
+
+          <view class="menu-item" @tap="handleAbout">
+            <view class="menu-left">
+              <view class="menu-icon" style="background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%)">
+                <text class="icon-text">ℹ️</text>
+              </view>
+              <text class="menu-label">关于我们</text>
+            </view>
+            <text class="menu-arrow">›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 退出登录按钮 -->
+      <view class="logout-section" v-if="userStore.isLoggedIn">
+        <button class="logout-btn" @tap="handleLogout">退出登录</button>
+      </view>
+
+      <!-- 版本信息 -->
+      <view class="version-info">
+        <text>v1.0.0</text>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup>
+import { ref } from "vue";
+import { onShow } from "@dcloudio/uni-app";
+import { useUserStore } from "@/stores/userStore";
+
+const userStore = useUserStore();
+const defaultAvatar = "https://via.placeholder.com/100/0d9488/ffffff?text=U";
+
+function navigateTo(url) {
+  uni.navigateTo({ url });
+}
+
+function goToLogin() {
+  uni.navigateTo({ url: "/pages/auth/login" });
+}
+
+function handleEditProfile() {
+  uni.showToast({ title: "功能开发中", icon: "none" });
+}
+
+function handleHelp() {
+  uni.showModal({
+    title: "帮助中心",
+    content: "如有问题，请联系客服",
+    showCancel: false,
+  });
+}
+
+function handleAbout() {
+  uni.showModal({
+    title: "关于我们",
+    content: "足球理性投资助手 v1.0.0\n\n帮助您理性投注，科学决策",
+    showCancel: false,
+  });
+}
+
+function handleLogout() {
+  uni.showModal({
+    title: "退出登录",
+    content: "确定要退出登录吗？",
+    success: (res) => {
+      if (res.confirm) {
+        userStore.logout();
+        uni.showToast({ title: "已退出登录", icon: "success" });
+      }
+    },
+  });
+}
+
+onShow(() => {
+  // 刷新用户信息
+  if (userStore.isLoggedIn) {
+    userStore.fetchUserProfile();
+  }
+  uni.$emit("tab-active", "profile");
+});
+</script>
+
+<style lang="scss" scoped>
+@import "@/uni.scss";
+
+.page-wrapper {
+  min-height: 100vh;
+  background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 头部用户信息区域 */
+.header-section {
+  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+  padding: 50rpx 20rpx 32rpx;
+  border-radius: 0 0 28rpx 28rpx;
+  box-shadow: 0 2rpx 12rpx rgba(13, 148, 136, 0.15);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.login-prompt {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  padding: 16rpx;
+  border-radius: 14rpx;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.avatar {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  border: 3rpx solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.user-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.nickname {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.username {
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.login-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.login-text .title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.login-text .subtitle {
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.arrow {
+  font-size: 40rpx;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 200;
+}
+
+/* 内容区域 */
+.content-wrapper {
+  flex: 1;
+  padding: 20rpx;
+}
+
+/* 菜单组 */
+.menu-group {
+  margin-bottom: 24rpx;
+}
+
+.group-title {
+  font-size: 22rpx;
+  color: #9ca3af;
+  font-weight: 600;
+  margin-bottom: 12rpx;
+  margin-left: 6rpx;
+  display: block;
+}
+
+.menu-card {
+  background: #ffffff;
+  border-radius: 14rpx;
+  overflow: hidden;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.04);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  transition: background 0.2s;
+}
+
+.menu-item:active {
+  background: #f9fafb;
+}
+
+.menu-left {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex: 1;
+}
+
+.menu-icon {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+}
+
+.icon-text {
+  font-size: 28rpx;
+}
+
+.menu-label {
+  font-size: 26rpx;
+  color: #111827;
+  font-weight: 500;
+}
+
+.menu-arrow {
+  font-size: 36rpx;
+  color: #d1d5db;
+  font-weight: 200;
+}
+
+.divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin: 0 20rpx;
+}
+
+/* 退出登录区域 */
+.logout-section {
+  margin-top: 32rpx;
+  padding: 0 0 32rpx;
+}
+
+.logout-btn {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  font-size: 26rpx;
+  font-weight: 600;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  box-shadow: 0 2rpx 6rpx rgba(239, 68, 68, 0.08);
+}
+
+.logout-btn:active {
+  background: #fef2f2;
+  transform: scale(0.98);
+}
+
+/* 版本信息 */
+.version-info {
+  text-align: center;
+  padding: 30rpx 0;
+  color: #9ca3af;
+  font-size: 20rpx;
+}
+</style>

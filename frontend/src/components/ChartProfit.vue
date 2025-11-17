@@ -6,7 +6,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -25,13 +25,22 @@ const chartRef = ref(null)
 const chartInstance = ref(null)
 
 function initChart () {
+  try {
   if (!chartRef.value) return
+    if (!props.series.length) return
+    
   chartInstance.value = echarts.init(chartRef.value)
   renderChart()
+  } catch (error) {
+    console.warn('Chart init error:', error)
+  }
 }
 
 function renderChart () {
+  try {
   if (!chartInstance.value) return
+    if (!props.series.length) return
+    
   const dates = props.series.map(item => item.date)
   const balance = props.series.map(item => item.balance)
   const profit = props.series.map(item => item.profit)
@@ -96,20 +105,37 @@ function renderChart () {
       }
     ]
   })
+  } catch (error) {
+    console.warn('Chart render error:', error)
+  }
 }
 
 watch(() => props.series, () => {
-  if (!chartInstance.value) return
+  nextTick(() => {
+    if (!chartInstance.value && props.series.length) {
+      initChart()
+    } else if (chartInstance.value) {
   renderChart()
+    }
+  })
 }, { deep: true })
 
 onMounted(() => {
+  nextTick(() => {
+    if (props.series.length) {
   initChart()
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   if (chartInstance.value) {
+    try {
     chartInstance.value.dispose()
+      chartInstance.value = null
+    } catch (error) {
+      console.warn('Chart dispose error:', error)
+    }
   }
 })
 </script>
