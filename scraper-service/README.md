@@ -141,9 +141,10 @@ crontab -e
 
 ### 环境变量
 
+系统默认使用 MySQL，无需配置 DB_TYPE。
+
 | 变量名                | 说明              | 默认值           |
 | --------------------- | ----------------- | ---------------- |
-| DB_TYPE               | 数据库类型        | mysql            |
 | MYSQL_HOST            | MySQL 主机        | -                |
 | MYSQL_PORT            | MySQL 端口        | 3306             |
 | MYSQL_USER            | MySQL 用户        | football_sync    |

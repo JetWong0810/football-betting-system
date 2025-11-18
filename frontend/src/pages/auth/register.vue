@@ -161,7 +161,9 @@ async function handleRegister() {
 
     // 延迟返回
     setTimeout(() => {
-      uni.navigateBack({ delta: 2 }) // 返回到个人中心
+      uni.redirectTo({
+        url: '/pages/auth/login'
+      })
     }, 1500)
   } catch (error) {
     uni.showToast({
@@ -174,7 +176,9 @@ async function handleRegister() {
 }
 
 function goToLogin() {
-  uni.navigateBack()
+  uni.navigateTo({
+    url: '/pages/auth/login'
+  })
 }
 </script>
 

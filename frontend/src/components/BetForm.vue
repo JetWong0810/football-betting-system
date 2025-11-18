@@ -45,7 +45,23 @@
           </view>
           <view class="inline-item">
             <text class="label">投注方向</text>
-            <input v-model="leg.selection" placeholder="例：主胜 / 大3" />
+            <view v-if="requiresPrefix(leg.betType)" class="selection-with-prefix">
+              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getPrefixOptions(leg.betType)" @change="(e) => onLegPrefixChange(leg.id, e.detail.value)">
+                <view class="picker-value">{{ getSelectionPrefixLabel(leg) }}</view>
+              </picker>
+              <picker class="picker-wrapper" mode="selector" :range="getDirectionOptions(leg.betType)" @change="(e) => onLegSelectionChange(leg.id, e.detail.value)">
+                <view class="picker-value">{{ getSelectionValueLabel(leg) }}</view>
+              </picker>
+            </view>
+            <picker
+              v-else
+              class="picker-wrapper"
+              mode="selector"
+              :range="getDirectionOptions(leg.betType)"
+              @change="(e) => onLegSelectionChange(leg.id, e.detail.value)"
+            >
+              <view class="picker-value">{{ leg.selection || "选择投注方向" }}</view>
+            </picker>
           </view>
         </view>
 
@@ -82,7 +98,7 @@
       </view>
       <view class="inline-item">
         <text class="label">总赔率</text>
-        <input type="digit" v-model="form.odds" placeholder="例：1.85" :disabled="isParlay" />
+        <input type="digit" v-model="form.odds" placeholder="自动计算" disabled />
       </view>
     </view>
 
@@ -150,13 +166,25 @@ const props = defineProps({
 
 const emit = defineEmits(["submit", "cancelEdit"]);
 
-const betTypeOptions = ["胜平负", "让球", "大小球", "角球", "单双", "其他"];
+const betTypeOptions = ["胜平负", "让球", "大小球"];
+const handicapBaseValues = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5", "3.75", "4"];
+const overUnderValues = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5", "3.75", "4", "4.25", "4.5", "4.75", "5"];
+const betDirectionOptionsMap = {
+  胜平负: ["主胜", "主平", "主负"],
+  让球: handicapBaseValues,
+  大小球: overUnderValues,
+};
+const betDirectionPrefixOptionsMap = {
+  让球: ["+", "-"],
+  大小球: ["大", "小"],
+};
 const resultOptions = [
   { label: "进行中", value: "pending" },
   { label: "全赢", value: "win" },
   { label: "全输", value: "lose" },
   { label: "赢半", value: "half-win" },
   { label: "输半", value: "half-lose" },
+  { label: "和", value: "draw" },
 ];
 const resultDict = {
   pending: "进行中",
@@ -164,7 +192,10 @@ const resultDict = {
   lose: "全输",
   "half-win": "赢半",
   "half-lose": "输半",
+  draw: "和",
 };
+
+const getCurrentDate = () => dayjs().format("YYYY-MM-DD");
 
 const form = reactive({
   id: "",
@@ -191,27 +222,22 @@ const combinedOdds = computed(() => {
 
 // 根据选择的串关方式计算实际赔率
 const calculatedOdds = computed(() => {
+  const validLegs = form.legs.filter((leg) => leg.odds && Number(leg.odds) > 0);
+
   if (!isParlay.value) {
-    // 单关直接返回总赔率或第一场赔率
-    return Number(form.odds || form.legs[0]?.odds || 0);
+    const odds = Number(validLegs[0]?.odds || 0);
+    return Number(odds.toFixed(2));
   }
   
   // 解析串关方式（如 "3_1" 表示3串1）
-  const [m, n] = form.parlayType.split("_");
-  const parlaySize = parseInt(m); // 串关数
-  const parlayCount = parseInt(n); // 注数（通常为1）
-  
-  // 获取有效赔率的赛事
-  const validLegs = form.legs.filter(leg => leg.odds && Number(leg.odds) > 0);
+  const [m] = form.parlayType.split("_");
+  const parlaySize = parseInt(m);
   
   if (validLegs.length < parlaySize) {
-    return 0; // 赔率不足
+    return 0;
   }
   
-  // N串1：取前N场的赔率连乘
   const selectedLegs = validLegs.slice(0, parlaySize);
-  
-  // 计算串关总赔率（连乘）
   const totalOdds = selectedLegs.reduce((acc, leg) => acc * Number(leg.odds), 1);
   
   return Number(totalOdds.toFixed(2));
@@ -294,7 +320,7 @@ const parlayTypeLabel = computed(() => {
 });
 
 // 当前日期（用于 picker 默认值）
-const currentDate = computed(() => dayjs().format("YYYY-MM-DD"));
+const currentDate = computed(() => getCurrentDate());
 
 // 监听赛事数量变化，自动调整串关方式
 watch(() => form.legs.length, (newLength, oldLength) => {
@@ -303,10 +329,6 @@ watch(() => form.legs.length, (newLength, oldLength) => {
   // 如果赛事数量增加，自动选择最大串关（N串1）
   if (newLength > oldLength) {
     form.parlayType = `${newLength}_1`;
-    // 自动更新总赔率
-    if (!isFieldsDisabled.value) {
-      form.odds = calculatedOdds.value;
-    }
   }
   
   // 如果赛事数量减少，检查当前选择是否还有效
@@ -314,26 +336,19 @@ watch(() => form.legs.length, (newLength, oldLength) => {
   const currentM = parseInt(m);
   if (currentM > newLength) {
     form.parlayType = `${newLength}_1`;
-    // 自动更新总赔率
+  }
+});
+
+// 监听自动计算的总赔率
+watch(
+  calculatedOdds,
+  (newOdds) => {
     if (!isFieldsDisabled.value) {
-      form.odds = calculatedOdds.value;
+      form.odds = newOdds;
     }
-  }
-});
-
-// 监听串关方式变化，自动更新赔率
-watch(() => form.parlayType, () => {
-  if (isParlay.value && !isFieldsDisabled.value) {
-    form.odds = calculatedOdds.value;
-  }
-});
-
-// 监听赛事赔率变化，自动更新总赔率
-watch(() => form.legs.map(leg => leg.odds), () => {
-  if (isParlay.value && !isFieldsDisabled.value) {
-    form.odds = calculatedOdds.value;
-  }
-}, { deep: true });
+  },
+  { immediate: true }
+);
 
 watch(
   () => props.editingBet,
@@ -347,15 +362,70 @@ watch(
   { immediate: true }
 );
 
+function getDirectionOptions(betType) {
+  return betDirectionOptionsMap[betType] || [];
+}
+
+function requiresPrefix(betType) {
+  return Boolean(betDirectionPrefixOptionsMap[betType]);
+}
+
+function getPrefixOptions(betType) {
+  return betDirectionPrefixOptionsMap[betType] || [];
+}
+
+function getSelectionParts(betType, selection = "") {
+  if (!selection) {
+    return { prefix: "", value: "" };
+  }
+  if (betType === "让球") {
+    const prefix = selection.startsWith("-") ? "-" : "+";
+    return { prefix, value: selection.replace(prefix, "") };
+  }
+  if (betType === "大小球") {
+    const prefix = selection.startsWith("小") ? "小" : "大";
+    return { prefix, value: selection.replace(prefix, "") };
+  }
+  return { prefix: "", value: selection };
+}
+
+function buildSelection(betType, prefix, value) {
+  if (!requiresPrefix(betType)) {
+    return value || "";
+  }
+  if (!value) {
+    return "";
+  }
+  const safePrefix = prefix || getPrefixOptions(betType)[0] || "";
+  return `${safePrefix}${value}`;
+}
+
+function getSelectionPrefixLabel(leg) {
+  const { prefix } = getSelectionParts(leg.betType, leg.selection);
+  return prefix || getPrefixOptions(leg.betType)[0] || "请选择";
+}
+
+function getSelectionValueLabel(leg) {
+  const { value } = getSelectionParts(leg.betType, leg.selection);
+  return value || "选择盘口";
+}
+
 function createLeg(overrides = {}) {
+  const betType = overrides.betType || "胜平负";
+  const directionOptions = getDirectionOptions(betType);
+  const prefixOptions = getPrefixOptions(betType);
+  const hasPrefix = requiresPrefix(betType);
+  const parsedSelection = overrides.selection ? getSelectionParts(betType, overrides.selection) : { prefix: "", value: "" };
+  const defaultPrefix = parsedSelection.prefix || prefixOptions[0] || "";
+  const defaultValue = parsedSelection.value || directionOptions[0] || "";
   return {
     id: overrides.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     homeTeam: overrides.homeTeam || "",
     awayTeam: overrides.awayTeam || "",
     league: overrides.league || "",
-    matchDate: overrides.matchDate || overrides.matchTime?.split(" ")[0] || "",
-    betType: overrides.betType || "胜平负",
-    selection: overrides.selection || "",
+    matchDate: overrides.matchDate || overrides.matchTime?.split(" ")[0] || getCurrentDate(),
+    betType,
+    selection: hasPrefix ? buildSelection(betType, defaultPrefix, defaultValue) : overrides.selection || directionOptions[0] || "",
     odds: overrides.odds !== undefined ? Number(overrides.odds) : null,
   };
 }
@@ -404,9 +474,39 @@ function onLegBetTypeChange(legId, valueIndex) {
   const leg = form.legs.find((item) => item.id === legId);
   if (leg) {
     leg.betType = betTypeOptions[Number(valueIndex)];
+    const options = getDirectionOptions(leg.betType);
+    const prefixes = getPrefixOptions(leg.betType);
+    leg.selection = buildSelection(leg.betType, prefixes[0], options[0] || "");
   }
 }
 
+function onLegSelectionChange(legId, valueIndex) {
+  const leg = form.legs.find((item) => item.id === legId);
+  if (leg) {
+    const options = getDirectionOptions(leg.betType);
+    const value = options[Number(valueIndex)] || "";
+    if (requiresPrefix(leg.betType)) {
+      const { prefix } = getSelectionParts(leg.betType, leg.selection);
+      const prefixes = getPrefixOptions(leg.betType);
+      const safePrefix = prefix || prefixes[0] || "";
+      leg.selection = buildSelection(leg.betType, safePrefix, value);
+    } else {
+      leg.selection = value;
+    }
+  }
+}
+
+function onLegPrefixChange(legId, valueIndex) {
+  const leg = form.legs.find((item) => item.id === legId);
+  if (leg) {
+    const prefixes = getPrefixOptions(leg.betType);
+    const prefix = prefixes[Number(valueIndex)] || prefixes[0] || "";
+    const { value } = getSelectionParts(leg.betType, leg.selection);
+    const options = getDirectionOptions(leg.betType);
+    const safeValue = value || options[0] || "";
+    leg.selection = buildSelection(leg.betType, prefix, safeValue);
+  }
+}
 function onLegDateChange(legId, value) {
   const leg = form.legs.find((item) => item.id === legId);
   if (leg) {
@@ -631,6 +731,20 @@ input:disabled {
   justify-content: space-between;
   color: #374151;
   position: relative;
+}
+
+.selection-with-prefix {
+  display: flex;
+  gap: 8rpx;
+  align-items: center;
+
+  .prefix-picker {
+    flex: 0 0 28%;
+  }
+
+  .picker-wrapper:last-child {
+    flex: 1;
+  }
 }
 
 .picker-value::after {

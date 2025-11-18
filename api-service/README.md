@@ -69,10 +69,9 @@ cp .env.example .env
 vim .env
 ```
 
-关键配置：
+关键配置（系统默认使用 MySQL，无需额外配置 DB_TYPE）：
 
 ```env
-DB_TYPE=mysql
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_USER=root

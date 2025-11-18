@@ -17,12 +17,7 @@
             <text class="label-icon">👤</text>
             <text>用户名</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.username"
-            placeholder="请输入用户名"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.username" placeholder="请输入用户名" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -30,13 +25,7 @@
             <text class="label-icon">🔒</text>
             <text>密码</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.password"
-            type="password"
-            placeholder="请输入密码"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.password" type="password" placeholder="请输入密码" placeholder-class="input-placeholder" />
         </view>
 
         <button class="login-btn" @tap="handleLogin" :disabled="loading">
@@ -53,61 +42,63 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import { useUserStore } from '@/stores/userStore'
+import { reactive, ref } from "vue";
+import { useUserStore } from "@/stores/userStore";
 
-const userStore = useUserStore()
-const loading = ref(false)
+const userStore = useUserStore();
+const loading = ref(false);
 
 const form = reactive({
-  username: '',
-  password: ''
-})
+  username: "",
+  password: "",
+});
 
 async function handleLogin() {
   // 验证表单
   if (!form.username.trim()) {
-    uni.showToast({ title: '请输入用户名', icon: 'none' })
-    return
+    uni.showToast({ title: "请输入用户名", icon: "none" });
+    return;
   }
 
   if (!form.password.trim()) {
-    uni.showToast({ title: '请输入密码', icon: 'none' })
-    return
+    uni.showToast({ title: "请输入密码", icon: "none" });
+    return;
   }
 
-  loading.value = true
+  loading.value = true;
 
   try {
     await userStore.login({
       username: form.username.trim(),
-      password: form.password.trim()
-    })
+      password: form.password.trim(),
+    });
 
     uni.showToast({
-      title: '登录成功',
-      icon: 'success',
-      duration: 1500
-    })
+      title: "登录成功",
+      icon: "success",
+      duration: 1500,
+    });
 
-    // 延迟返回上一页
+    // 延迟跳转到首页
     setTimeout(() => {
-      uni.navigateBack()
-    }, 1500)
+      uni.switchTab({
+        url: "/pages/home/home",
+      });
+    }, 1500);
   } catch (error) {
     uni.showToast({
-      title: error.data?.detail || '登录失败',
-      icon: 'none'
-    })
+      title: error.data?.detail || "登录失败",
+      icon: "none",
+    });
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function goToRegister() {
   uni.navigateTo({
-    url: '/pages/auth/register'
-  })
+    url: "/pages/auth/register",
+  });
 }
 </script>
 
@@ -249,4 +240,3 @@ function goToRegister() {
   font-weight: 500;
 }
 </style>
-

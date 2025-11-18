@@ -1,8 +1,15 @@
 // 根据环境配置API基础URL
 const getBaseURL = () => {
   // #ifdef H5
-  // H5环境：优先使用环境变量，否则使用生产环境域名
-  return import.meta.env.VITE_API_BASE_URL || 'http://api.football.jetwong.top'
+  // H5 环境：优先使用环境变量，本地开发默认走 Vite 代理避免跨域
+  const envBaseUrl = import.meta.env.VITE_API_BASE_URL
+  if (envBaseUrl) {
+    return envBaseUrl
+  }
+  if (import.meta.env.DEV) {
+    return '/api'
+  }
+  return 'http://api.football.jetwong.top'
   // #endif
   
   // #ifdef MP-WEIXIN
@@ -36,11 +43,20 @@ export function request (options) {
           resolve(res.data)
         } else {
           const message = res.data?.detail || res.errMsg || `请求失败(${status})`
-          reject(new Error(message))
+          reject({
+            statusCode: status,
+            data: res.data,
+            message
+          })
         }
       },
       fail: (err) => {
-        reject(new Error(err?.errMsg || '网络异常'))
+        const message = err?.errMsg || '网络异常'
+        reject({
+          statusCode: 0,
+          data: null,
+          message
+        })
       }
     })
   })

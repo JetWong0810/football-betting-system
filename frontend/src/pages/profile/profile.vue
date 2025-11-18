@@ -2,26 +2,29 @@
   <view class="page-wrapper">
     <!-- 头部用户信息区域 -->
     <view class="header-section">
-      <view class="user-info" v-if="userStore.isLoggedIn">
-        <image class="avatar" :src="userStore.user?.avatar || defaultAvatar" mode="aspectFill" />
-        <view class="user-details">
-          <text class="nickname">{{ userStore.user?.nickname || "用户" }}</text>
-          <text class="username">@{{ userStore.user?.username }}</text>
+      <view class="header-inner">
+        <view class="user-info" v-if="userStore.isLoggedIn">
+          <image class="avatar" :src="userStore.user?.avatar || defaultAvatar" mode="aspectFill" />
+          <view class="user-details">
+            <text class="nickname">{{ userStore.user?.nickname || "用户" }}</text>
+            <text class="username">@{{ userStore.user?.username }}</text>
+          </view>
         </view>
-      </view>
 
-      <view class="login-prompt" v-else @tap="goToLogin">
-        <image class="avatar" :src="defaultAvatar" mode="aspectFill" />
-        <view class="login-text">
-          <text class="title">点击登录</text>
-          <text class="subtitle">登录后享受更多功能</text>
+        <view class="login-prompt" v-else @tap="goToLogin">
+          <image class="avatar" :src="defaultAvatar" mode="aspectFill" />
+          <view class="login-text">
+            <text class="title">点击登录</text>
+            <text class="subtitle">登录后享受更多功能</text>
+          </view>
+          <text class="arrow">›</text>
         </view>
-        <text class="arrow">›</text>
       </view>
     </view>
 
     <!-- 菜单列表 -->
     <scroll-view class="content-wrapper" scroll-y>
+      <view class="content-inner">
       <!-- 功能菜单组 -->
       <view class="menu-group">
         <text class="group-title">功能</text>
@@ -115,6 +118,7 @@
       <view class="version-info">
         <text>v1.0.0</text>
       </view>
+      </view>
     </scroll-view>
   </view>
 </template>
@@ -190,9 +194,18 @@ onShow(() => {
 /* 头部用户信息区域 */
 .header-section {
   background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-  padding: 50rpx 20rpx 32rpx;
+  padding: 56rpx 24rpx 40rpx;
   border-radius: 0 0 28rpx 28rpx;
   box-shadow: 0 2rpx 12rpx rgba(13, 148, 136, 0.15);
+  box-sizing: border-box;
+}
+
+.header-inner {
+  width: 100%;
+  max-width: 720rpx;
+  margin: 0 auto;
+  padding: 0 12rpx;
+  box-sizing: border-box;
 }
 
 .user-info {
@@ -265,7 +278,16 @@ onShow(() => {
 /* 内容区域 */
 .content-wrapper {
   flex: 1;
-  padding: 20rpx;
+  padding: 32rpx 0 40rpx;
+  box-sizing: border-box;
+}
+
+.content-inner {
+  width: 100%;
+  max-width: 720rpx;
+  margin: 0 auto;
+  padding: 0 24rpx 48rpx;
+  box-sizing: border-box;
 }
 
 /* 菜单组 */
@@ -343,24 +365,27 @@ onShow(() => {
 /* 退出登录区域 */
 .logout-section {
   margin-top: 32rpx;
-  padding: 0 0 32rpx;
+  padding: 12rpx 0 32rpx;
+  display: flex;
+  justify-content: center;
 }
 
 .logout-btn {
   width: 100%;
-  background: #ffffff;
-  border: 1px solid #ef4444;
-  color: #ef4444;
+  max-width: 520rpx;
+  height: 72rpx;
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  color: #ffffff;
   font-size: 26rpx;
   font-weight: 600;
-  padding: 20rpx;
-  border-radius: 12rpx;
-  box-shadow: 0 2rpx 6rpx rgba(239, 68, 68, 0.08);
+  border-radius: 999rpx;
+  border: none;
+  box-shadow: 0 6rpx 18rpx rgba(239, 68, 68, 0.25);
+  line-height: 72rpx;
 }
 
 .logout-btn:active {
-  background: #fef2f2;
-  transform: scale(0.98);
+  transform: translateY(1rpx);
 }
 
 /* 版本信息 */

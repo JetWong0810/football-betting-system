@@ -114,9 +114,6 @@ pip install -r requirements.txt
 
 ```bash
 cat > .env << 'EOF'
-# 数据库配置
-DB_TYPE=mysql
-
 # MySQL 数据库配置
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
@@ -237,9 +234,6 @@ pip3 install -r requirements.txt
 
 ```bash
 cat > .env << 'EOF'
-# 数据库配置
-DB_TYPE=mysql
-
 # MySQL 数据库配置（连接到 guiyun 服务器）
 MYSQL_HOST=103.140.229.232
 MYSQL_PORT=3306
