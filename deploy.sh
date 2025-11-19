@@ -113,6 +113,30 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# 检查 HTTP/HTTPS 可访问性
+check_url_accessible() {
+    local url="$1"
+    local label="$2"
+    local retries="${3:-3}"
+    local allowed_codes="${4:-200 301 302 304}"
+
+    for ((attempt=1; attempt<=retries; attempt++)); do
+        if http_code=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "$url"); then
+            if [[ " $allowed_codes " == *" $http_code "* ]]; then
+                print_success "$label 可访问 (HTTP $http_code)"
+                return 0
+            fi
+            print_warning "$label 第 $attempt 次检测返回 HTTP $http_code"
+        else
+            print_warning "$label 第 $attempt 次检测失败：无法连接或 DNS 解析失败"
+        fi
+        sleep 2
+    done
+
+    print_error "$label 无法访问，请检查 DNS、Nginx 或防火墙配置 ($url)"
+    return 1
+}
+
 # 检查命令是否存在
 check_command() {
     if ! command -v $1 &> /dev/null; then
@@ -292,7 +316,7 @@ EOF
     # 6. 配置 Nginx
     print_info "配置 Nginx 反向代理..."
     ssh $GUIYUN_HOST << 'NGINXEOF'
-        sudo bash -c 'cat > /etc/nginx/sites-available/api.football.jetwong.top << EOF
+        sudo tee /etc/nginx/sites-available/api.football.jetwong.top > /dev/null << 'NGINXCONFIG'
 server {
     listen 80;
     server_name api.football.jetwong.top;
@@ -313,7 +337,7 @@ server {
         proxy_read_timeout 60s;
     }
 }
-EOF'
+NGINXCONFIG
         
         sudo ln -sf /etc/nginx/sites-available/api.football.jetwong.top /etc/nginx/sites-enabled/
         sudo nginx -t && sudo systemctl reload nginx
@@ -327,6 +351,13 @@ NGINXEOF
         print_info "访问地址: http://$GUIYUN_IP:7001/docs"
     else
         print_warning "API 服务可能未正常启动，请检查日志: ssh $GUIYUN_HOST 'sudo journalctl -u football-betting-api -n 50'"
+    fi
+
+    # 8. 检查对外域名
+    local api_public_url="http://api.football.jetwong.top/api/health"
+    print_info "检测 API 域名可访问性 ($api_public_url)..."
+    if ! check_url_accessible "$api_public_url" "API 域名 api.football.jetwong.top"; then
+        print_warning "API 域名不可访问，请确认 DNS 指向 $GUIYUN_IP，或稍后再运行脚本检测"
     fi
 }
 
@@ -492,10 +523,21 @@ deploy_frontend() {
     # 3. 配置 Nginx
     print_info "配置 Nginx..."
     ssh $GUIYUN_HOST << 'NGINXEOF'
-        sudo bash -c 'cat > /etc/nginx/sites-available/www.jetwong.top << EOF
+        set -e
+        # 清理遗留的同名配置，避免旧文件继续生效导致 301 循环
+        sudo rm -f /etc/nginx/sites-enabled/www.jetwong.top /etc/nginx/sites-enabled/www.jetwong.top.conf
+        sudo rm -f /etc/nginx/sites-available/www.jetwong.top /etc/nginx/sites-available/www.jetwong.top.conf
+        
+        sudo bash -c 'cat > /etc/nginx/sites-available/www.jetwong.top.conf << EOF
 server {
     listen 80;
-    server_name www.jetwong.top jetwong.top;
+    server_name jetwong.top;
+    return 301 http://www.jetwong.top$request_uri;
+}
+
+server {
+    listen 80;
+    server_name www.jetwong.top;
 
     access_log /var/log/nginx/www.jetwong.top.access.log;
     error_log /var/log/nginx/www.jetwong.top.error.log;
@@ -523,12 +565,21 @@ server {
 }
 EOF'
         
-        sudo ln -sf /etc/nginx/sites-available/www.jetwong.top /etc/nginx/sites-enabled/
+        sudo ln -sf /etc/nginx/sites-available/www.jetwong.top.conf /etc/nginx/sites-enabled/www.jetwong.top.conf
         sudo nginx -t && sudo systemctl reload nginx
 NGINXEOF
     
     print_success "前端服务部署成功！"
     print_info "访问地址: http://www.jetwong.top"
+
+    # 4. 检测域名可访问性
+    print_info "检测前端域名可访问性..."
+    local frontend_urls=("http://www.jetwong.top" "http://jetwong.top")
+    for url in "${frontend_urls[@]}"; do
+        if ! check_url_accessible "$url" "$url"; then
+            print_warning "$url 检测失败，请确认 DNS 解析、Nginx 配置及缓存情况"
+        fi
+    done
 }
 
 # 主函数
@@ -541,6 +592,7 @@ main() {
     # 检查必要命令
     check_command ssh
     check_command rsync
+    check_command curl
     
     # 显示部署计划
     echo ""
