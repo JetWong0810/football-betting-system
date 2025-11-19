@@ -570,7 +570,7 @@ NGINXEOF
 
     # 4. 检测域名可访问性
     print_info "检测前端域名可访问性..."
-    local frontend_urls=("http://www.jetwong.top" "http://jetwong.top")
+    local frontend_urls=("http://www.jetwong.top")
     for url in "${frontend_urls[@]}"; do
         if ! check_url_accessible "$url" "$url"; then
             print_warning "$url 检测失败，请确认 DNS 解析、Nginx 配置及缓存情况"
