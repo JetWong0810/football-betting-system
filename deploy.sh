@@ -41,6 +41,12 @@ MYSQL_SYNC_USER="football_sync"
 MYSQL_SYNC_PASSWORD="sync_pass_2024_secure"
 MYSQL_DATABASE="football_betting"
 
+# 证书配置
+CERTS_DIR="$(pwd)/certs"
+API_CERT_DIR="$CERTS_DIR/api.football.jetwong.top"
+FRONTEND_CERT_DIR="$CERTS_DIR/www.jetwong.top"
+REMOTE_CERT_BASE="/etc/nginx/ssl"
+
 # 部署选项
 DEPLOY_API=true
 DEPLOY_SCRAPER=true
@@ -143,6 +149,29 @@ check_command() {
         print_error "$1 未安装，请先安装"
         exit 1
     fi
+}
+
+# 同步证书到服务器
+sync_certificate() {
+    local host="$1"
+    local domain="$2"
+    local local_dir="$3"
+    local remote_tmp="/tmp/${domain}-cert"
+    local remote_dir="$REMOTE_CERT_BASE/$domain"
+
+    if [ ! -d "$local_dir" ]; then
+        print_error "证书目录 $local_dir 不存在，请先解压证书文件"
+        exit 1
+    fi
+
+    print_info "同步 $domain 证书到 $host ..."
+    rsync -avz --delete "$local_dir/" "$host:$remote_tmp/" >/dev/null
+    ssh $host << EOF
+        sudo mkdir -p "$remote_dir"
+        sudo cp $remote_tmp/* "$remote_dir/"
+        sudo chmod 600 "$remote_dir/"*
+        rm -rf "$remote_tmp"
+EOF
 }
 
 # 获取 Git 仓库 URL
@@ -313,16 +342,29 @@ SERVICEEOF'
         sudo systemctl status football-betting-api --no-pager || true
 EOF
     
-    # 6. 配置 Nginx
+    # 6. 配置证书与 Nginx
     print_info "配置 Nginx 反向代理..."
+    sync_certificate $GUIYUN_HOST "api.football.jetwong.top" "$API_CERT_DIR"
     ssh $GUIYUN_HOST << 'NGINXEOF'
         sudo tee /etc/nginx/sites-available/api.football.jetwong.top > /dev/null << 'NGINXCONFIG'
 server {
     listen 80;
     server_name api.football.jetwong.top;
+    return 301 https://api.football.jetwong.top$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.football.jetwong.top;
 
     access_log /var/log/nginx/api.football.access.log;
     error_log /var/log/nginx/api.football.error.log;
+
+    ssl_certificate /etc/nginx/ssl/api.football.jetwong.top/api.football.jetwong.top_chain.pem;
+    ssl_certificate_key /etc/nginx/ssl/api.football.jetwong.top/api.football.jetwong.top_key.key;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
 
     location / {
         proxy_pass http://127.0.0.1:7001;
@@ -348,13 +390,13 @@ NGINXEOF
     sleep 3
     if ssh $GUIYUN_HOST "curl -s http://localhost:7001/api/health" | grep -q "ok"; then
         print_success "API 服务部署成功！"
-        print_info "访问地址: http://$GUIYUN_IP:7001/docs"
+        print_info "访问地址: https://api.football.jetwong.top/docs"
     else
         print_warning "API 服务可能未正常启动，请检查日志: ssh $GUIYUN_HOST 'sudo journalctl -u football-betting-api -n 50'"
     fi
 
     # 8. 检查对外域名
-    local api_public_url="http://api.football.jetwong.top/api/health"
+    local api_public_url="https://api.football.jetwong.top/api/health"
     print_info "检测 API 域名可访问性 ($api_public_url)..."
     if ! check_url_accessible "$api_public_url" "API 域名 api.football.jetwong.top"; then
         print_warning "API 域名不可访问，请确认 DNS 指向 $GUIYUN_IP，或稍后再运行脚本检测"
@@ -520,8 +562,9 @@ deploy_frontend() {
     print_info "上传前端文件到服务器..."
     rsync -avz --delete frontend/dist/build/h5/ $GUIYUN_HOST:$PROJECT_DIR/frontend/dist/
     
-    # 3. 配置 Nginx
+    # 3. 配置证书与 Nginx
     print_info "配置 Nginx..."
+    sync_certificate $GUIYUN_HOST "www.jetwong.top" "$FRONTEND_CERT_DIR"
     ssh $GUIYUN_HOST << 'NGINXEOF'
         set -e
         # 清理遗留的同名配置，避免旧文件继续生效导致 301 循环
@@ -532,15 +575,27 @@ deploy_frontend() {
 server {
     listen 80;
     server_name jetwong.top;
-    return 301 http://www.jetwong.top$request_uri;
+    return 301 https://www.jetwong.top$request_uri;
 }
 
 server {
     listen 80;
     server_name www.jetwong.top;
+    return 301 https://www.jetwong.top$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.jetwong.top;
 
     access_log /var/log/nginx/www.jetwong.top.access.log;
     error_log /var/log/nginx/www.jetwong.top.error.log;
+
+    ssl_certificate /etc/nginx/ssl/www.jetwong.top/www.jetwong.top_chain.pem;
+    ssl_certificate_key /etc/nginx/ssl/www.jetwong.top/www.jetwong.top_key.key;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
 
     root /opt/football-betting-system/frontend/dist;
     index index.html;
@@ -566,11 +621,11 @@ EOF
 NGINXEOF
     
     print_success "前端服务部署成功！"
-    print_info "访问地址: http://www.jetwong.top"
+    print_info "访问地址: https://www.jetwong.top"
 
     # 4. 检测域名可访问性
     print_info "检测前端域名可访问性..."
-    local frontend_urls=("http://www.jetwong.top")
+    local frontend_urls=("https://www.jetwong.top")
     for url in "${frontend_urls[@]}"; do
         if ! check_url_accessible "$url" "$url"; then
             print_warning "$url 检测失败，请确认 DNS 解析、Nginx 配置及缓存情况"
@@ -626,8 +681,8 @@ main() {
     print_success "=========================================="
     echo ""
     print_info "访问地址:"
-    [ "$DEPLOY_API" = true ] && echo "  - API 文档: http://$GUIYUN_IP:7001/docs"
-    [ "$DEPLOY_FRONTEND" = true ] && echo "  - 前端应用: http://www.jetwong.top"
+    [ "$DEPLOY_API" = true ] && echo "  - API 文档: https://api.football.jetwong.top/docs"
+    [ "$DEPLOY_FRONTEND" = true ] && echo "  - 前端应用: https://www.jetwong.top"
     echo ""
     print_info "查看服务状态:"
     [ "$DEPLOY_API" = true ] && echo "  - API: ssh $GUIYUN_HOST 'sudo systemctl status football-betting-api'"

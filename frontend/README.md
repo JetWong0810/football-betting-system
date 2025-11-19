@@ -68,7 +68,7 @@ frontend/
 
 ```javascript
 const getBaseURL = () => {
-  return import.meta.env.VITE_API_BASE_URL || "http://api.football.jetwong.top";
+  return import.meta.env.VITE_API_BASE_URL || "https://api.football.jetwong.top";
 };
 ```
 
@@ -77,7 +77,7 @@ const getBaseURL = () => {
 创建 `.env.production` 文件：
 
 ```env
-VITE_API_BASE_URL=http://api.football.jetwong.top
+VITE_API_BASE_URL=https://api.football.jetwong.top
 ```
 
 ## 🐛 常见问题
@@ -85,6 +85,7 @@ VITE_API_BASE_URL=http://api.football.jetwong.top
 ### 页面无法访问
 
 检查：
+
 - Nginx 状态：`sudo systemctl status nginx`
 - Nginx 配置：`sudo nginx -t`
 - 文件权限
@@ -92,6 +93,7 @@ VITE_API_BASE_URL=http://api.football.jetwong.top
 ### API 请求失败
 
 检查：
+
 - API 服务是否运行
 - API 地址配置是否正确
 - 浏览器控制台错误信息

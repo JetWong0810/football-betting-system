@@ -51,3 +51,6 @@ Thumbs.db
 *.bak
 *.swp
 
+# 证书
+certs/
+

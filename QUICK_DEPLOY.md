@@ -168,7 +168,7 @@ ssh mysql-backup "docker exec py39-dev bash -c 'cd /workspace/scraper-service &&
 
 ```bash
 # 浏览器访问
-open http://www.jetwong.top
+open https://www.jetwong.top
 
 # 或检查文件
 ssh guiyun "ls -la /opt/football-betting-system/frontend/dist/"
@@ -276,17 +276,17 @@ npm run build:h5
    ```bash
    # 快速健康检查
    curl http://103.140.229.232:7001/api/health
-   open http://www.jetwong.top
+   open https://www.jetwong.top
    ```
 
 ### ❗ 常见问题：前端域名重定向次数过多
 
-- **症状**：访问 `http://www.jetwong.top` 提示 `ERR_TOO_MANY_REDIRECTS`，`curl -I http://www.jetwong.top` 持续返回 `301 Moved Permanently`。
-- **原因**：服务器上残留旧版 `www.jetwong.top.conf`，其内容是把请求永久重定向到同一个地址，导致浏览器在 `http://www.jetwong.top` 与自己之间死循环。新脚本写入的正确配置没有生效。
+- **症状**：访问 `https://www.jetwong.top` 提示 `ERR_TOO_MANY_REDIRECTS`，`curl -I https://www.jetwong.top` 持续返回 `301 Moved Permanently`。
+- **原因**：服务器上残留旧版 `www.jetwong.top.conf`，其内容是把请求永久重定向到同一个地址，导致浏览器在 `https://www.jetwong.top` 与自己之间死循环。新脚本写入的正确配置没有生效。
 - **修复办法**：
   1. 重新执行 `./deploy.sh --frontend-only --skip-build`（已内置清理逻辑，会删除残留的 `sites-available/sites-enabled` 旧文件并重新生成配置）。
   2. 或者手工清理：`ssh guiyun 'sudo rm -f /etc/nginx/sites-{available,enabled}/www.jetwong.top*'`，再运行脚本写回配置。
-  3. 执行 `ssh guiyun 'sudo nginx -t && sudo systemctl reload nginx'`，随后 `curl -I http://www.jetwong.top` 应该返回 `200`/`304`。
+  3. 执行 `ssh guiyun 'sudo nginx -t && sudo systemctl reload nginx'`，随后 `curl -I https://www.jetwong.top` 应该返回 `200`/`304`。
 
 > 新配置还额外提供 `jetwong.top -> www.jetwong.top` 的显式跳转，等根域名解析生效后即可自动汇聚到 `www`。
 
