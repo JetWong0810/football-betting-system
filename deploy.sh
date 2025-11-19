@@ -528,7 +528,7 @@ deploy_frontend() {
         sudo rm -f /etc/nginx/sites-enabled/www.jetwong.top /etc/nginx/sites-enabled/www.jetwong.top.conf
         sudo rm -f /etc/nginx/sites-available/www.jetwong.top /etc/nginx/sites-available/www.jetwong.top.conf
         
-        sudo bash -c 'cat > /etc/nginx/sites-available/www.jetwong.top.conf << EOF
+        sudo tee /etc/nginx/sites-available/www.jetwong.top.conf > /dev/null <<'EOF'
 server {
     listen 80;
     server_name jetwong.top;
@@ -546,11 +546,7 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ @fallback;
-    }
-
-    location @fallback {
-        rewrite ^.*$ /index.html break;
+        try_files $uri $uri/ /index.html;
     }
 
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
@@ -563,7 +559,7 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css text/xml text/javascript application/javascript application/x-javascript application/xml+rss application/json;
 }
-EOF'
+EOF
         
         sudo ln -sf /etc/nginx/sites-available/www.jetwong.top.conf /etc/nginx/sites-enabled/www.jetwong.top.conf
         sudo nginx -t && sudo systemctl reload nginx
