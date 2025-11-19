@@ -31,4 +31,4 @@ POOL_CODES = {
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "600"))  # 10分钟
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "20"))
-USER_AGENT = "football-rational-betting-tracker/1.0"
+USER_AGENT = "football-betting-system/1.0"
