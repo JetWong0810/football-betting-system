@@ -67,8 +67,11 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> Optional
     return user_id
 
 
-def require_auth(authorization: str = Header(...)) -> int:
+def require_auth(authorization: Optional[str] = Header(None)) -> int:
     """要求必须认证，返回用户ID"""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="请先登录")
+    
     user_id = get_current_user_id(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="请先登录")

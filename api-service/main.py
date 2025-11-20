@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 
 from database import init_db, fetch_sync_status
 from repository import OddsRepository
@@ -11,6 +13,42 @@ from user_repository import UserRepository
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 
 app = FastAPI(title="Football Match Odds API", version="1.0.0")
+
+# 添加全局异常处理器，改进验证错误提示
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """处理请求验证错误，提供更友好的错误信息"""
+    errors = exc.errors()
+    error_messages = []
+    
+    for error in errors:
+        field = ".".join(str(loc) for loc in error.get("loc", []))
+        msg = error.get("msg", "验证失败")
+        error_type = error.get("type", "")
+        
+        # 提供更友好的错误信息
+        if error_type == "missing":
+            error_messages.append(f"缺少必需参数: {field}")
+        elif error_type == "value_error.missing":
+            error_messages.append(f"缺少必需参数: {field}")
+        elif "int" in error_type and "parsing" in error_type:
+            error_messages.append(f"参数 {field} 必须是整数")
+        elif "value_error" in error_type:
+            error_messages.append(f"参数 {field} 格式错误: {msg}")
+        else:
+            error_messages.append(f"{field}: {msg}")
+    
+    # 如果是认证相关的错误，返回 401
+    if any("authorization" in str(err.get("loc", [])).lower() for err in errors):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "请先登录", "errors": error_messages}
+        )
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "; ".join(error_messages), "errors": error_messages}
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

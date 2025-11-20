@@ -30,13 +30,16 @@ export const useMatchStore = defineStore("matchStore", {
       this.loading = true;
       this.error = "";
       try {
+        // GET 请求使用查询参数
+        const params = new URLSearchParams();
+        if (this.filterLeague) {
+          params.append("league", this.filterLeague);
+        }
+        params.append("page_size", "50");
+        const queryString = params.toString();
         const data = await request({
-          url: "/api/matches",
+          url: `/api/matches${queryString ? `?${queryString}` : ""}`,
           method: "GET",
-          data: {
-            league: this.filterLeague || undefined,
-            page_size: 50,
-          },
         });
         // 接口一次性返回所有数据
         const items = data?.items || data || [];
