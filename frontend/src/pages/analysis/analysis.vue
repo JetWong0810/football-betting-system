@@ -28,12 +28,21 @@
 
 <script setup>
 import { computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import ChartPie from '@/components/ChartPie.vue'
 import ChartProfit from '@/components/ChartProfit.vue'
 import { useStatStore } from '@/stores/statStore'
 import { formatCurrency } from '@/utils/formatters'
+import { requireAuth } from '@/utils/auth'
 
 const statStore = useStatStore()
+
+onShow(() => {
+  // 检查登录状态
+  if (!requireAuth()) {
+    return
+  }
+})
 
 const weekList = computed(() => {
   return Object.entries(statStore.periodStats)

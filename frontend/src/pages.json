@@ -65,6 +65,14 @@
       }
     },
     {
+      "path": "pages/auth/wechat-login",
+      "style": {
+        "navigationBarTitleText": "微信登录",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/matches/list",
       "style": {
         "navigationBarTitleText": "赛事中心",

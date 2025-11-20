@@ -1,6 +1,6 @@
 {
   "name": "Football Rational Betting Tracker",
-  "appid": "",
+  "appid": "wx5b2bc2de132728b8",
   "description": "足彩理性投资助手，覆盖记录、统计与策略建议",
   "versionName": "1.0.0",
   "versionCode": "100",
@@ -45,7 +45,7 @@
     }
   },
   "mp-weixin": {
-    "appid": "",
+    "appid": "wx5b2bc2de132728b8",
     "setting": {
       "urlCheck": false
     },

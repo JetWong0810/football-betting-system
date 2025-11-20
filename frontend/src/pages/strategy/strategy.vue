@@ -66,6 +66,7 @@ import { calcKellyStake } from '@/utils/kelly'
 import { calcFixedRatioStake } from '@/utils/fixedRatio'
 import { checkStopLoss } from '@/utils/stopLoss'
 import { formatCurrency } from '@/utils/formatters'
+import { requireAuth } from '@/utils/auth'
 
 const betStore = useBetStore()
 const statStore = useStatStore()
@@ -103,6 +104,10 @@ const riskText = computed(() => {
 })
 
 onShow(() => {
+  // 检查登录状态
+  if (!requireAuth()) {
+    return
+  }
   uni.$emit('tab-active', 'strategy')
 })
 </script>

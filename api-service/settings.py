@@ -32,3 +32,8 @@ POOL_CODES = {
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "600"))  # 10分钟
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "20"))
 USER_AGENT = "football-betting-system/1.0"
+
+# 微信小程序配置
+WECHAT_APPID = os.getenv("WECHAT_APPID", "")
+WECHAT_SECRET = os.getenv("WECHAT_SECRET", "")
+WECHAT_API_URL = "https://api.weixin.qq.com"

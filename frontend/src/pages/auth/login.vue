@@ -42,8 +42,9 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { reactive, ref, onMounted } from "vue";
 import { useUserStore } from "@/stores/userStore";
+import { isWeChatMiniProgram } from "@/utils/auth";
 
 const userStore = useUserStore();
 const loading = ref(false);
@@ -51,6 +52,17 @@ const loading = ref(false);
 const form = reactive({
   username: "",
   password: "",
+});
+
+// 在微信小程序环境下，自动跳转到微信授权登录页面
+onMounted(() => {
+  // #ifdef MP-WEIXIN
+  if (isWeChatMiniProgram()) {
+    uni.redirectTo({
+      url: "/pages/auth/wechat-login"
+    });
+  }
+  // #endif
 });
 
 async function handleLogin() {

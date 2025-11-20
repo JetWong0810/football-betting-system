@@ -189,6 +189,7 @@ import { useBetStore } from "@/stores/betStore";
 import { useStatStore } from "@/stores/statStore";
 import { ref, computed, onMounted } from "vue";
 import { formatCurrency } from "@/utils/formatters";
+import { requireAuth } from "@/utils/auth";
 
 const betStore = useBetStore();
 const statStore = useStatStore();
@@ -267,6 +268,11 @@ const upOption = {
 
 // 页面加载时初始化数据
 onMounted(() => {
+  // 检查登录状态
+  if (!requireAuth()) {
+    return;
+  }
+
   if (betStore.bets.length === 0) {
     betStore.bootstrap();
   }

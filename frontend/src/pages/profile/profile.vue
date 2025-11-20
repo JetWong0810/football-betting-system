@@ -127,6 +127,7 @@
 import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useUserStore } from "@/stores/userStore";
+import { requireAuth } from "@/utils/auth";
 
 const userStore = useUserStore();
 const defaultAvatar = "https://via.placeholder.com/100/0d9488/ffffff?text=U";
@@ -136,7 +137,8 @@ function navigateTo(url) {
 }
 
 function goToLogin() {
-  uni.navigateTo({ url: "/pages/auth/login" });
+  // 使用requireAuth来跳转，会自动根据环境跳转到正确的登录页面
+  requireAuth();
 }
 
 function handleEditProfile() {
@@ -173,7 +175,8 @@ function handleLogout() {
 }
 
 onShow(() => {
-  // 刷新用户信息
+  // 检查登录状态（profile页面允许未登录查看，但会显示登录提示）
+  // 如果已登录，刷新用户信息
   if (userStore.isLoggedIn) {
     userStore.fetchUserProfile();
   }

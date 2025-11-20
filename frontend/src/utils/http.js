@@ -25,6 +25,78 @@ const getBaseURL = () => {
 
 export const BASE_URL = getBaseURL();
 
+// 是否正在处理401错误，避免重复跳转
+let isHandling401 = false;
+
+/**
+ * 处理401错误，清除token并跳转到登录页
+ */
+function handle401Error() {
+  if (isHandling401) {
+    return;
+  }
+  isHandling401 = true;
+
+  // 清除本地存储的token和用户信息
+  uni.removeStorageSync('token');
+  uni.removeStorageSync('user');
+
+  // 清除userStore中的状态
+  try {
+    // 使用动态import避免循环依赖
+    import('@/stores/userStore').then(({ useUserStore }) => {
+      const userStore = useUserStore();
+      userStore.token = '';
+      userStore.user = null;
+    }).catch((e) => {
+      console.error('清除用户状态失败:', e);
+    });
+  } catch (e) {
+    console.error('清除用户状态失败:', e);
+  }
+
+  // 获取当前页面路径
+  const pages = getCurrentPages();
+  const currentPage = pages[pages.length - 1];
+  const currentPath = '/' + (currentPage?.route || '');
+
+  // 排除登录相关页面，避免重复跳转
+  const authPages = ['/pages/auth/login', '/pages/auth/register', '/pages/auth/wechat-login'];
+  if (authPages.includes(currentPath)) {
+    isHandling401 = false;
+    return;
+  }
+
+  // 根据环境跳转到不同的登录页面
+  // #ifdef MP-WEIXIN
+  uni.redirectTo({
+    url: '/pages/auth/wechat-login',
+    fail: () => {
+      isHandling401 = false;
+    },
+    complete: () => {
+      setTimeout(() => {
+        isHandling401 = false;
+      }, 1000);
+    }
+  });
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  uni.redirectTo({
+    url: '/pages/auth/login',
+    fail: () => {
+      isHandling401 = false;
+    },
+    complete: () => {
+      setTimeout(() => {
+        isHandling401 = false;
+      }, 1000);
+    }
+  });
+  // #endif
+}
+
 export function request(options) {
   return new Promise((resolve, reject) => {
     // 自动添加BASE_URL前缀
@@ -51,6 +123,15 @@ export function request(options) {
         const status = res.statusCode || 0;
         if (status >= 200 && status < 300) {
           resolve(res.data);
+        } else if (status === 401) {
+          // 401错误：token无效或过期
+          handle401Error();
+          const message = res.data?.detail || "登录已过期，请重新登录";
+          reject({
+            statusCode: status,
+            data: res.data,
+            message,
+          });
         } else {
           const message = res.data?.detail || res.errMsg || `请求失败(${status})`;
           reject({

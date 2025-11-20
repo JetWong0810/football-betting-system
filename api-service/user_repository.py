@@ -36,6 +36,81 @@ class UserRepository:
                 )
                 return cursor.fetchone()
 
+    def get_user_by_openid(self, openid: str) -> Optional[Dict[str, Any]]:
+        """根据openid获取用户"""
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT id, username, phone, email, nickname, avatar, openid, unionid,
+                              wechat_nickname, wechat_avatar, login_type,
+                              created_at, last_login_at, status
+                       FROM users WHERE openid = %s""",
+                    (openid,)
+                )
+                return cursor.fetchone()
+
+    def create_wechat_user(self, openid: str, unionid: Optional[str] = None,
+                          wechat_nickname: Optional[str] = None,
+                          wechat_avatar: Optional[str] = None) -> int:
+        """创建微信用户"""
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                # 生成一个唯一的用户名（基于openid）
+                username = f"wx_{openid[:12]}"
+                # 确保用户名唯一
+                counter = 1
+                while True:
+                    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                    if not cursor.fetchone():
+                        break
+                    username = f"wx_{openid[:12]}_{counter}"
+                    counter += 1
+                
+                cursor.execute(
+                    """INSERT INTO users (username, password_hash, openid, unionid, 
+                       wechat_nickname, wechat_avatar, nickname, avatar, login_type)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'wechat')""",
+                    (username, '', openid, unionid, wechat_nickname, wechat_avatar,
+                     wechat_nickname or username, wechat_avatar)
+                )
+                user_id = cursor.lastrowid
+
+                # 创建默认配置
+                cursor.execute(
+                    "INSERT INTO user_configs (user_id) VALUES (%s)",
+                    (user_id,)
+                )
+                return user_id
+
+    def update_wechat_user_info(self, user_id: int, wechat_nickname: Optional[str] = None,
+                                wechat_avatar: Optional[str] = None):
+        """更新微信用户信息"""
+        updates = []
+        params = []
+        
+        if wechat_nickname is not None:
+            updates.append("wechat_nickname = %s")
+            updates.append("nickname = %s")
+            params.append(wechat_nickname)
+            params.append(wechat_nickname)
+        
+        if wechat_avatar is not None:
+            updates.append("wechat_avatar = %s")
+            updates.append("avatar = %s")
+            params.append(wechat_avatar)
+            params.append(wechat_avatar)
+        
+        if not updates:
+            return False
+        
+        params.append(user_id)
+        sql = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
+        
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.rowcount > 0
+
     def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """根据ID获取用户"""
         with get_db() as conn:
@@ -90,17 +165,34 @@ class UserRepository:
                 return cursor.rowcount > 0
 
     def get_user_config(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """获取用户配置"""
+        """获取用户配置，如果不存在则创建默认配置"""
         with get_db() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     "SELECT * FROM user_configs WHERE user_id = %s",
                     (user_id,)
                 )
-                return cursor.fetchone()
+                config = cursor.fetchone()
+                
+                # 如果配置不存在，创建默认配置
+                if not config:
+                    cursor.execute(
+                        """INSERT INTO user_configs (user_id, starting_capital, fixed_ratio, 
+                           kelly_factor, stop_loss_limit, target_monthly_return, theme)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (user_id, 10000.00, 0.0300, 0.5000, 3, 0.1000, 'light')
+                    )
+                    # 重新查询
+                    cursor.execute(
+                        "SELECT * FROM user_configs WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    config = cursor.fetchone()
+                
+                return config
 
     def update_user_config(self, user_id: int, config: Dict[str, Any]) -> bool:
-        """更新用户配置"""
+        """更新用户配置，如果不存在则创建"""
         updates = []
         params = []
 
@@ -121,13 +213,48 @@ class UserRepository:
         if not updates:
             return False
 
-        params.append(user_id)
-        sql = f"UPDATE user_configs SET {', '.join(updates)} WHERE user_id = %s"
-
         with get_db() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, params)
-                return cursor.rowcount > 0
+                # 先检查配置是否存在
+                cursor.execute(
+                    "SELECT id FROM user_configs WHERE user_id = %s",
+                    (user_id,)
+                )
+                exists = cursor.fetchone()
+                
+                if exists:
+                    # 更新现有配置
+                    params.append(user_id)
+                    sql = f"UPDATE user_configs SET {', '.join(updates)} WHERE user_id = %s"
+                    cursor.execute(sql, params)
+                    return cursor.rowcount > 0
+                else:
+                    # 创建新配置（使用传入的值或默认值）
+                    insert_fields = ["user_id"]
+                    insert_values = [user_id]
+                    
+                    defaults = {
+                        "starting_capital": 10000.00,
+                        "fixed_ratio": 0.0300,
+                        "kelly_factor": 0.5000,
+                        "stop_loss_limit": 3,
+                        "target_monthly_return": 0.1000,
+                        "theme": "light",
+                    }
+                    
+                    for key, field in field_map.items():
+                        if key in config:
+                            insert_fields.append(field)
+                            insert_values.append(config[key])
+                        elif field in defaults:
+                            insert_fields.append(field)
+                            insert_values.append(defaults[field])
+                    
+                    placeholders = ", ".join(["%s"] * len(insert_values))
+                    fields_str = ", ".join(insert_fields)
+                    sql = f"INSERT INTO user_configs ({fields_str}) VALUES ({placeholders})"
+                    cursor.execute(sql, insert_values)
+                    return cursor.rowcount > 0
 
     # ==================== 投注记录相关方法 ====================
 

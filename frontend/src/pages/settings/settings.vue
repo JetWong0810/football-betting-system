@@ -51,6 +51,7 @@ import { computed, reactive, watch } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useConfigStore } from "@/stores/configStore";
 import { useBetStore } from "@/stores/betStore";
+import { requireAuth } from "@/utils/auth";
 
 const config = useConfigStore();
 const betStore = useBetStore();
@@ -92,8 +93,9 @@ function onThemeChange(event) {
   form.theme = themes[Number(event.detail.value)];
 }
 
-function handleSave() {
-  config.updateConfig({
+async function handleSave() {
+  try {
+    await config.updateConfig({
     startingCapital: form.startingCapital,
     fixedRatio: form.fixedRatio / 100,
     kellyFactor: form.kellyFactor,
@@ -102,6 +104,12 @@ function handleSave() {
     theme: form.theme,
   });
   uni.showToast({ title: "已保存", icon: "success" });
+  } catch (error) {
+    uni.showToast({ 
+      title: error.message || "保存失败", 
+      icon: "none" 
+    });
+  }
 }
 
 function formatLegForExport(leg) {
@@ -128,6 +136,11 @@ function exportCsv() {
 }
 
 onShow(() => {
+  // 检查登录状态
+  if (!requireAuth()) {
+    return;
+  }
+  
   uni.$emit("tab-active", "profile");
 });
 </script>

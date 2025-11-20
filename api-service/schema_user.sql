@@ -1,19 +1,25 @@
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
+    username VARCHAR(50) UNIQUE,
     phone VARCHAR(20) UNIQUE,
     email VARCHAR(100) UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) COMMENT '普通登录密码，微信登录可为空',
     nickname VARCHAR(100),
     avatar VARCHAR(500),
+    openid VARCHAR(100) UNIQUE COMMENT '微信openid',
+    unionid VARCHAR(100) COMMENT '微信unionid',
+    wechat_nickname VARCHAR(100) COMMENT '微信昵称',
+    wechat_avatar VARCHAR(500) COMMENT '微信头像',
+    login_type VARCHAR(20) DEFAULT 'normal' COMMENT '登录类型: normal/wechat',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     last_login_at TIMESTAMP NULL,
     status TINYINT DEFAULT 1 COMMENT '1:正常 0:禁用',
     INDEX idx_username (username),
     INDEX idx_phone (phone),
-    INDEX idx_email (email)
+    INDEX idx_email (email),
+    INDEX idx_openid (openid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
 -- 用户配置表（存储用户的策略设置）

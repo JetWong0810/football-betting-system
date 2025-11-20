@@ -11,6 +11,8 @@ from database import init_db, fetch_sync_status
 from repository import OddsRepository
 from user_repository import UserRepository
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
+from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
+import httpx
 
 app = FastAPI(title="Football Match Odds API", version="1.0.0")
 
@@ -73,6 +75,15 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class WechatLoginRequest(BaseModel):
+    code: str  # 微信登录code
+    encrypted_data: Optional[str] = None  # 加密的用户信息（旧版）
+    iv: Optional[str] = None  # 加密算法的初始向量（旧版）
+    raw_data: Optional[str] = None  # 原始数据字符串（用于签名校验）
+    signature: Optional[str] = None  # 签名（用于校验）
+    user_info: Optional[Dict[str, Any]] = None  # 用户信息（新版，从getUserProfile获取）
 
 
 class UpdateProfileRequest(BaseModel):
@@ -285,6 +296,122 @@ def login(req: LoginRequest):
     }
 
 
+@app.get("/api/auth/verify")
+def verify_token(user_id: int = Depends(require_auth)):
+    """验证token是否有效"""
+    user = user_repo.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    
+    return {
+        "valid": True,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "nickname": user.get("nickname"),
+            "avatar": user.get("avatar"),
+            "phone": user.get("phone"),
+            "email": user.get("email")
+        }
+    }
+
+
+@app.post("/api/auth/wechat-login")
+async def wechat_login(req: WechatLoginRequest):
+    """微信小程序登录"""
+    if not WECHAT_APPID or not WECHAT_SECRET:
+        raise HTTPException(status_code=500, detail="微信配置未设置，请联系管理员")
+    
+    # 1. 使用code获取openid和session_key
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{WECHAT_API_URL}/sns/jscode2session",
+                params={
+                    "appid": WECHAT_APPID,
+                    "secret": WECHAT_SECRET,
+                    "js_code": req.code,
+                    "grant_type": "authorization_code"
+                }
+            )
+            wechat_data = response.json()
+            
+            if "errcode" in wechat_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"微信登录失败: {wechat_data.get('errmsg', '未知错误')}"
+                )
+            
+            openid = wechat_data.get("openid")
+            session_key = wechat_data.get("session_key")
+            unionid = wechat_data.get("unionid")
+            
+            if not openid:
+                raise HTTPException(status_code=400, detail="获取openid失败")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=500, detail="微信API请求超时")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"微信登录失败: {str(e)}")
+    
+    # 2. 查找或创建用户
+    user = user_repo.get_user_by_openid(openid)
+    
+    if not user:
+        # 创建新用户
+        wechat_nickname = None
+        wechat_avatar = None
+        
+        # 从user_info中获取用户信息（如果提供）
+        if req.user_info:
+            wechat_nickname = req.user_info.get("nickName")
+            wechat_avatar = req.user_info.get("avatarUrl")
+        
+        user_id = user_repo.create_wechat_user(
+            openid=openid,
+            unionid=unionid,
+            wechat_nickname=wechat_nickname,
+            wechat_avatar=wechat_avatar
+        )
+        
+        # 重新获取用户信息
+        user = user_repo.get_user_by_id(user_id)
+    else:
+        # 更新用户信息（如果提供了新的用户信息）
+        if req.user_info:
+            wechat_nickname = req.user_info.get("nickName")
+            wechat_avatar = req.user_info.get("avatarUrl")
+            if wechat_nickname or wechat_avatar:
+                user_repo.update_wechat_user_info(
+                    user["id"],
+                    wechat_nickname=wechat_nickname,
+                    wechat_avatar=wechat_avatar
+                )
+                # 重新获取用户信息
+                user = user_repo.get_user_by_id(user["id"])
+        
+        user_id = user["id"]
+    
+    # 3. 更新最后登录时间
+    user_repo.update_last_login(user_id)
+    
+    # 4. 生成token
+    token = create_access_token({"user_id": user_id, "username": user["username"]})
+    
+    return {
+        "message": "登录成功",
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "nickname": user.get("nickname") or user.get("wechat_nickname"),
+            "avatar": user.get("avatar") or user.get("wechat_avatar"),
+            "phone": user.get("phone"),
+            "email": user.get("email"),
+            "login_type": user.get("login_type", "wechat")
+        }
+    }
+
+
 @app.get("/api/user/profile")
 def get_profile(user_id: int = Depends(require_auth)):
     """获取用户信息"""
@@ -323,10 +450,18 @@ def update_profile(req: UpdateProfileRequest, user_id: int = Depends(require_aut
 
 @app.get("/api/user/config")
 def get_user_config(user_id: int = Depends(require_auth)):
-    """获取用户配置"""
+    """获取用户配置（如果不存在则创建默认配置）"""
     config = user_repo.get_user_config(user_id)
     if not config:
-        raise HTTPException(status_code=404, detail="配置不存在")
+        # 如果仍然不存在（理论上不应该发生），返回默认值
+        return {
+            "starting_capital": 10000.0,
+            "fixed_ratio": 0.03,
+            "kelly_factor": 0.5,
+            "stop_loss_limit": 3,
+            "target_monthly_return": 0.1,
+            "theme": "light"
+        }
     
     return {
         "starting_capital": float(config.get("starting_capital", 10000)),
