@@ -25,99 +25,99 @@
     <!-- 菜单列表 -->
     <scroll-view class="content-wrapper" scroll-y>
       <view class="content-inner">
-      <!-- 功能菜单组 -->
-      <view class="menu-group">
-        <text class="group-title">功能</text>
-        <view class="menu-card">
-          <view class="menu-item" @tap="navigateTo('/pages/strategy/strategy')">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)">
-                <text class="icon-text">📊</text>
+        <!-- 功能菜单组 -->
+        <view class="menu-group">
+          <text class="group-title">功能</text>
+          <view class="menu-card">
+            <view class="menu-item" @tap="navigateTo('/pages/strategy/strategy')">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)">
+                  <text class="icon-text">📊</text>
+                </view>
+                <text class="menu-label">投注策略</text>
               </view>
-              <text class="menu-label">投注策略</text>
+              <text class="menu-arrow">›</text>
             </view>
-            <text class="menu-arrow">›</text>
-          </view>
 
-          <view class="divider"></view>
+            <view class="divider"></view>
 
-          <view class="menu-item" @tap="navigateTo('/pages/settings/settings')">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)">
-                <text class="icon-text">⚙️</text>
+            <view class="menu-item" @tap="navigateTo('/pages/settings/settings')">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)">
+                  <text class="icon-text">⚙️</text>
+                </view>
+                <text class="menu-label">策略设置</text>
               </view>
-              <text class="menu-label">策略设置</text>
+              <text class="menu-arrow">›</text>
             </view>
-            <text class="menu-arrow">›</text>
-          </view>
 
-          <view class="divider"></view>
+            <view class="divider"></view>
 
-          <view class="menu-item" @tap="navigateTo('/pages/analysis/analysis')">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)">
-                <text class="icon-text">📈</text>
+            <view class="menu-item" @tap="navigateTo('/pages/analysis/analysis')">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)">
+                  <text class="icon-text">📈</text>
+                </view>
+                <text class="menu-label">数据分析</text>
               </view>
-              <text class="menu-label">数据分析</text>
+              <text class="menu-arrow">›</text>
             </view>
-            <text class="menu-arrow">›</text>
-          </view>
-        </view>
-      </view>
-
-      <!-- 账户菜单组 (登录后显示) -->
-      <view class="menu-group" v-if="userStore.isLoggedIn">
-        <text class="group-title">账户</text>
-        <view class="menu-card">
-          <view class="menu-item" @tap="handleEditProfile">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)">
-                <text class="icon-text">👤</text>
-              </view>
-              <text class="menu-label">个人资料</text>
-            </view>
-            <text class="menu-arrow">›</text>
           </view>
         </view>
-      </view>
 
-      <!-- 其他菜单组 -->
-      <view class="menu-group">
-        <text class="group-title">其他</text>
-        <view class="menu-card">
-          <view class="menu-item" @tap="handleHelp">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%)">
-                <text class="icon-text">❓</text>
+        <!-- 账户菜单组 (登录后显示) -->
+        <view class="menu-group" v-if="userStore.isLoggedIn">
+          <text class="group-title">账户</text>
+          <view class="menu-card">
+            <view class="menu-item" @tap="handleEditProfile">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)">
+                  <text class="icon-text">👤</text>
+                </view>
+                <text class="menu-label">个人资料</text>
               </view>
-              <text class="menu-label">帮助中心</text>
+              <text class="menu-arrow">›</text>
             </view>
-            <text class="menu-arrow">›</text>
-          </view>
-
-          <view class="divider"></view>
-
-          <view class="menu-item" @tap="handleAbout">
-            <view class="menu-left">
-              <view class="menu-icon" style="background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%)">
-                <text class="icon-text">ℹ️</text>
-              </view>
-              <text class="menu-label">关于我们</text>
-            </view>
-            <text class="menu-arrow">›</text>
           </view>
         </view>
-      </view>
 
-      <!-- 退出登录按钮 -->
-      <view class="logout-section" v-if="userStore.isLoggedIn">
-        <button class="logout-btn" @tap="handleLogout">退出登录</button>
-      </view>
+        <!-- 其他菜单组 -->
+        <view class="menu-group">
+          <text class="group-title">其他</text>
+          <view class="menu-card">
+            <view class="menu-item" @tap="handleHelp">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%)">
+                  <text class="icon-text">❓</text>
+                </view>
+                <text class="menu-label">帮助中心</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
 
-      <!-- 版本信息 -->
-      <view class="version-info">
-        <text>v1.0.0</text>
-      </view>
+            <view class="divider"></view>
+
+            <view class="menu-item" @tap="handleAbout">
+              <view class="menu-left">
+                <view class="menu-icon" style="background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%)">
+                  <text class="icon-text">ℹ️</text>
+                </view>
+                <text class="menu-label">关于我们</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 退出登录按钮 -->
+        <view class="logout-section" v-if="userStore.isLoggedIn">
+          <button class="logout-btn" @tap="handleLogout">退出登录</button>
+        </view>
+
+        <!-- 版本信息 -->
+        <view class="version-info">
+          <text>v1.0.0</text>
+        </view>
       </view>
     </scroll-view>
   </view>
@@ -132,7 +132,8 @@ import { requireAuth } from "@/utils/auth";
 const userStore = useUserStore();
 // 使用 base64 编码的默认头像，避免小程序中加载外部图片失败
 // 这是一个简单的圆形头像占位符（用户图标）
-const defaultAvatar = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiByeD0iNTAiIGZpbGw9IiMwZDk0ODgiLz4KPHBhdGggZD0iTTUwIDMwQzQwLjMzNTggMzAgMzIgMzguMzM1OCAzMiA0OEMzMiA1Ny42NjQyIDQwLjMzNTggNjYgNTAgNjZDNjkuNjY0MiA2NiA3OCA1Ny42NjQyIDc4IDQ4Qzc4IDM4LjMzNTggNjkuNjY0MiAzMCA1MCAzMFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik0yMCA4MEMyMCA3My4zNzI2IDI1LjM3MjYgNjggMzIgNjhINjggNzQuNjI3NCA2OCA4MCA2OCA4NkM2OCA5Mi42Mjc0IDYyLjYyNzQgOTggNTYgOThINDBDMzMuMzcyNiA5OCAyOCA5Mi42Mjc0IDI4IDg2VjgwSDIwWiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+";
+const defaultAvatar =
+  "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiByeD0iNTAiIGZpbGw9IiMwZDk0ODgiLz4KPHBhdGggZD0iTTUwIDMwQzQwLjMzNTggMzAgMzIgMzguMzM1OCAzMiA0OEMzMiA1Ny42NjQyIDQwLjMzNTggNjYgNTAgNjZDNjkuNjY0MiA2NiA3OCA1Ny42NjQyIDc4IDQ4Qzc4IDM4LjMzNTggNjkuNjY0MiAzMCA1MCAzMFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik0yMCA4MEMyMCA3My4zNzI2IDI1LjM3MjYgNjggMzIgNjhINjggNzQuNjI3NCA2OCA4MCA2OCA4NkM2OCA5Mi42Mjc0IDYyLjYyNzQgOTggNTYgOThINDBDMzMuMzcyNiA5OCAyOCA5Mi42Mjc0IDI4IDg2VjgwSDIwWiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+";
 
 function navigateTo(url) {
   uni.navigateTo({ url });
@@ -158,7 +159,7 @@ function handleHelp() {
 function handleAbout() {
   uni.showModal({
     title: "关于我们",
-    content: "足球理性投资助手 v1.0.0\n\n帮助您理性投注，科学决策",
+    content: "理性玩球小助手 v1.0.0\n\n帮助您理性投注，科学决策",
     showCancel: false,
   });
 }

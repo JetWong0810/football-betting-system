@@ -6,7 +6,7 @@
         <view class="logo-circle">
           <text class="logo-icon">⚽</text>
         </view>
-        <text class="app-name">足球理性投资助手</text>
+        <text class="app-name">理性玩球小助手</text>
         <text class="welcome-text">创建新账号</text>
       </view>
 
@@ -17,12 +17,7 @@
             <text class="label-icon">👤</text>
             <text>用户名</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.username"
-            placeholder="请输入用户名"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.username" placeholder="请输入用户名" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -30,12 +25,7 @@
             <text class="label-icon">✨</text>
             <text>昵称</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.nickname"
-            placeholder="请输入昵称（可选）"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.nickname" placeholder="请输入昵称（可选）" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -43,13 +33,7 @@
             <text class="label-icon">📱</text>
             <text>手机号</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.phone"
-            type="number"
-            placeholder="请输入手机号（可选）"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.phone" type="number" placeholder="请输入手机号（可选）" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -57,13 +41,7 @@
             <text class="label-icon">🔒</text>
             <text>密码</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.password"
-            type="password"
-            placeholder="请输入密码（至少6位）"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.password" type="password" placeholder="请输入密码（至少6位）" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -71,13 +49,7 @@
             <text class="label-icon">🔒</text>
             <text>确认密码</text>
           </view>
-          <input
-            class="input-field"
-            v-model="form.confirmPassword"
-            type="password"
-            placeholder="请再次输入密码"
-            placeholder-class="input-placeholder"
-          />
+          <input class="input-field" v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" placeholder-class="input-placeholder" />
         </view>
 
         <button class="register-btn" @tap="handleRegister" :disabled="loading">
@@ -94,91 +66,91 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import { useUserStore } from '@/stores/userStore'
+import { reactive, ref } from "vue";
+import { useUserStore } from "@/stores/userStore";
 
-const userStore = useUserStore()
-const loading = ref(false)
+const userStore = useUserStore();
+const loading = ref(false);
 
 const form = reactive({
-  username: '',
-  nickname: '',
-  phone: '',
-  password: '',
-  confirmPassword: ''
-})
+  username: "",
+  nickname: "",
+  phone: "",
+  password: "",
+  confirmPassword: "",
+});
 
 async function handleRegister() {
   // 验证表单
   if (!form.username.trim()) {
-    uni.showToast({ title: '请输入用户名', icon: 'none' })
-    return
+    uni.showToast({ title: "请输入用户名", icon: "none" });
+    return;
   }
 
   if (form.username.trim().length < 3) {
-    uni.showToast({ title: '用户名至少3个字符', icon: 'none' })
-    return
+    uni.showToast({ title: "用户名至少3个字符", icon: "none" });
+    return;
   }
 
   if (!form.password.trim()) {
-    uni.showToast({ title: '请输入密码', icon: 'none' })
-    return
+    uni.showToast({ title: "请输入密码", icon: "none" });
+    return;
   }
 
   if (form.password.trim().length < 6) {
-    uni.showToast({ title: '密码至少6个字符', icon: 'none' })
-    return
+    uni.showToast({ title: "密码至少6个字符", icon: "none" });
+    return;
   }
 
   if (form.password !== form.confirmPassword) {
-    uni.showToast({ title: '两次密码不一致', icon: 'none' })
-    return
+    uni.showToast({ title: "两次密码不一致", icon: "none" });
+    return;
   }
 
-  loading.value = true
+  loading.value = true;
 
   try {
     const data = {
       username: form.username.trim(),
-      password: form.password.trim()
-    }
+      password: form.password.trim(),
+    };
 
     if (form.nickname.trim()) {
-      data.nickname = form.nickname.trim()
+      data.nickname = form.nickname.trim();
     }
 
     if (form.phone.trim()) {
-      data.phone = form.phone.trim()
+      data.phone = form.phone.trim();
     }
 
-    await userStore.register(data)
+    await userStore.register(data);
 
     uni.showToast({
-      title: '注册成功',
-      icon: 'success',
-      duration: 1500
-    })
+      title: "注册成功",
+      icon: "success",
+      duration: 1500,
+    });
 
     // 延迟返回
     setTimeout(() => {
       uni.redirectTo({
-        url: '/pages/auth/login'
-      })
-    }, 1500)
+        url: "/pages/auth/login",
+      });
+    }, 1500);
   } catch (error) {
     uni.showToast({
-      title: error.data?.detail || '注册失败',
-      icon: 'none'
-    })
+      title: error.data?.detail || "注册失败",
+      icon: "none",
+    });
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function goToLogin() {
   uni.navigateTo({
-    url: '/pages/auth/login'
-  })
+    url: "/pages/auth/login",
+  });
 }
 </script>
 
@@ -320,4 +292,3 @@ function goToLogin() {
   font-weight: 500;
 }
 </style>
-

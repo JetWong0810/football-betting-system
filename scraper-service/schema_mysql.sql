@@ -1,4 +1,4 @@
--- MySQL Schema for Football Rational Betting Tracker
+-- MySQL Schema for Football Betting System
 
 CREATE TABLE IF NOT EXISTS matches (
     match_id VARCHAR(100) PRIMARY KEY,

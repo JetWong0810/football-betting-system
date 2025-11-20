@@ -96,6 +96,61 @@ export const useUserStore = defineStore("user", {
       }
     },
 
+    // 微信小程序静默登录（仅用于已注册用户的自动登录）
+    async wechatSilentLogin() {
+      // #ifndef MP-WEIXIN
+      throw new Error("仅支持在微信小程序环境中使用微信登录");
+      // #endif
+
+      // #ifdef MP-WEIXIN
+      // 获取微信登录 code
+      const loginRes = await new Promise((resolve, reject) => {
+        uni.login({
+          provider: "weixin",
+          timeout: 10000,
+          success: (res) => {
+            if (res.code) {
+              resolve(res);
+            } else {
+              reject(new Error(res.errMsg || "获取登录凭证失败"));
+            }
+          },
+          fail: (err) => {
+            reject(new Error(err?.errMsg || "获取登录凭证失败"));
+          },
+        });
+      });
+
+      try {
+        const res = await request({
+          url: "/api/auth/wechat-silent-login",
+          method: "POST",
+          data: {
+            code: loginRes.code,
+          },
+        });
+
+        this.token = res.token;
+        this.user = res.user;
+
+        // 保存到本地存储
+        uni.setStorageSync("token", res.token);
+        uni.setStorageSync("user", res.user);
+
+        // 登录后加载用户配置和投注记录
+        await afterLoginSideEffects();
+
+        return res;
+      } catch (error) {
+        // 404 表示用户未注册
+        if (error.statusCode === 404) {
+          throw { code: "USER_NOT_REGISTERED", message: "用户未注册", originalError: error };
+        }
+        throw error;
+      }
+      // #endif
+    },
+
     // 微信小程序一键登录（调用 uni.login 获取 code）
     async loginWithWeChatMiniProgram(options = {}) {
       // #ifndef MP-WEIXIN

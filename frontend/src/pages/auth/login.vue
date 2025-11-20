@@ -6,7 +6,7 @@
         <view class="logo-circle">
           <text class="logo-icon">⚽</text>
         </view>
-        <text class="app-name">足球理性投资助手</text>
+        <text class="app-name">理性玩球小助手</text>
         <text class="welcome-text">欢迎回来</text>
       </view>
 
@@ -59,7 +59,7 @@ onMounted(() => {
   // #ifdef MP-WEIXIN
   if (isWeChatMiniProgram()) {
     uni.redirectTo({
-      url: "/pages/auth/wechat-login"
+      url: "/pages/auth/wechat-login",
     });
   }
   // #endif

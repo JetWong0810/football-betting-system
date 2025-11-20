@@ -3,7 +3,7 @@
     {
       "path": "pages/home/home",
       "style": {
-        "navigationBarTitleText": "理性投资助手",
+        "navigationBarTitleText": "理性投资小助手",
         "navigationBarBackgroundColor": "#0d9488",
         "navigationBarTextStyle": "white"
       }
@@ -101,7 +101,7 @@
   ],
   "globalStyle": {
     "navigationBarTextStyle": "white",
-    "navigationBarTitleText": "足球理性投资助手",
+    "navigationBarTitleText": "理性玩球小助手",
     "navigationBarBackgroundColor": "#0d9488",
     "backgroundColor": "#ecfaf8"
   },

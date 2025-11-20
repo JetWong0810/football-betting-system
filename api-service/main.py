@@ -144,6 +144,10 @@ class WechatLoginRequest(BaseModel):
         allow_population_by_field_name = True
 
 
+class WechatSilentLoginRequest(BaseModel):
+    code: str  # 微信登录code
+
+
 class UpdateProfileRequest(BaseModel):
     nickname: Optional[str] = None
     phone: Optional[str] = None
@@ -448,6 +452,53 @@ def verify_token(user_id: int = Depends(require_auth)):
             "email": user.get("email")
         }
     }
+
+
+@app.post("/api/auth/wechat-silent-login")
+async def wechat_silent_login(req: WechatSilentLoginRequest):
+    """微信小程序静默登录（仅用于已注册用户的自动登录）"""
+    try:
+        if not WECHAT_APPID or not WECHAT_SECRET:
+            raise HTTPException(status_code=500, detail="微信配置未设置，请联系管理员")
+
+        if not req.code:
+            raise HTTPException(status_code=400, detail="缺少登录凭证code")
+        
+        # 1. code 换取 openid
+        session_data = await fetch_wechat_session(req.code)
+        openid = session_data["openid"]
+
+        # 2. 查找用户
+        user = user_repo.get_user_by_openid(openid)
+        
+        if not user:
+            # 用户不存在，返回特定错误码，前端需要跳转到注册页面
+            raise HTTPException(status_code=404, detail="用户未注册，需要完成注册流程")
+        
+        # 3. 用户存在，更新最后登录时间
+        user_repo.update_last_login(user["id"])
+        
+        # 4. 生成token
+        token = create_access_token({"user_id": user["id"], "username": user["username"]})
+        
+        return {
+            "message": "登录成功",
+            "token": token,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "nickname": user.get("nickname") or user.get("wechat_nickname"),
+                "avatar": user.get("avatar") or user.get("wechat_avatar"),
+                "phone": user.get("phone"),
+                "email": user.get("email"),
+                "login_type": user.get("login_type", "wechat")
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unhandled wechat silent login error")
+        raise HTTPException(status_code=500, detail=f"静默登录失败：{str(exc)}")
 
 
 @app.post("/api/auth/wechat-login")

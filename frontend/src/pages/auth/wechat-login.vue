@@ -1,27 +1,36 @@
 <template>
   <view class="page-wrapper">
     <view class="content">
-      <!-- Logo区域 -->
-      <view class="logo-section">
-        <view class="logo-circle">
-          <text class="logo-icon">⚽</text>
+      <!-- 静默登录中的加载状态 -->
+      <view v-if="silentLoginInProgress" class="silent-login-section">
+        <view class="loading-spinner"></view>
+        <text class="loading-text">正在自动登录...</text>
+      </view>
+
+      <!-- 需要手动登录的界面 -->
+      <template v-else>
+        <!-- Logo区域 -->
+        <view class="logo-section">
+          <view class="logo-circle">
+            <text class="logo-icon">⚽</text>
+          </view>
+          <text class="app-name">理性玩球小助手</text>
+          <text class="welcome-text">欢迎使用</text>
         </view>
-        <text class="app-name">足球理性投资助手</text>
-        <text class="welcome-text">欢迎使用</text>
-      </view>
 
-      <!-- 授权按钮 -->
-      <view class="button-section">
-        <button class="auth-btn" :disabled="loading" @tap="handleStartLogin" hover-class="auth-btn-active">
-          <text v-if="loading">跳转中...</text>
-          <text v-else>微信快速登录</text>
-        </button>
-      </view>
+        <!-- 授权按钮 -->
+        <view class="button-section">
+          <button class="auth-btn" :disabled="loading" @tap="handleStartLogin" hover-class="auth-btn-active">
+            <text v-if="loading">跳转中...</text>
+            <text v-else>微信快速登录</text>
+          </button>
+        </view>
 
-      <!-- 说明文字 -->
-      <view class="desc-section">
-        <text class="desc-text"> 点击按钮后，将跳转到“头像昵称填写”页，按照微信最新规范完成资料后即可登录。 </text>
-      </view>
+        <!-- 说明文字 -->
+        <view class="desc-section">
+          <text class="desc-text"> 点击按钮后，将跳转到"头像昵称填写"页，按照微信最新规范完成资料后即可登录。 </text>
+        </view>
+      </template>
     </view>
   </view>
 </template>
@@ -29,15 +38,64 @@
 <script setup>
 import { ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
+import { useUserStore } from "@/stores/userStore";
 
+const userStore = useUserStore();
 const loading = ref(false);
+const silentLoginInProgress = ref(false);
 const redirectUrl = ref("/pages/home/home");
+const tabPages = ["/pages/home/home", "/pages/matches/list", "/pages/record/record", "/pages/profile/profile"];
 
 onLoad((options) => {
   if (options?.redirect) {
     redirectUrl.value = decodeURIComponent(options.redirect);
   }
+
+  // 页面加载时尝试静默登录
+  tryAutoLogin();
 });
+
+async function tryAutoLogin() {
+  // #ifndef MP-WEIXIN
+  return;
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  // 如果已经登录，直接跳转
+  if (userStore.isLoggedIn) {
+    navigateAfterLogin();
+    return;
+  }
+
+  silentLoginInProgress.value = true;
+
+  try {
+    // 尝试静默登录
+    await userStore.wechatSilentLogin();
+
+    // 登录成功，跳转到目标页面
+    uni.showToast({
+      title: "登录成功",
+      icon: "success",
+      duration: 1000,
+    });
+
+    setTimeout(() => {
+      navigateAfterLogin();
+    }, 800);
+  } catch (error) {
+    // 用户未注册（404），显示手动登录按钮
+    if (error.code === "USER_NOT_REGISTERED") {
+      console.log("用户未注册，需要完成注册流程");
+    } else {
+      // 其他错误，也显示手动登录按钮
+      console.error("静默登录失败:", error);
+    }
+  } finally {
+    silentLoginInProgress.value = false;
+  }
+  // #endif
+}
 
 function handleStartLogin() {
   if (loading.value) {
@@ -60,6 +118,20 @@ function handleStartLogin() {
     },
   });
 }
+
+function navigateAfterLogin() {
+  const target = redirectUrl.value || "/pages/home/home";
+  if (tabPages.includes(target)) {
+    uni.switchTab({
+      url: target,
+      fail: () => {
+        uni.reLaunch({ url: target });
+      },
+    });
+  } else {
+    uni.reLaunch({ url: target });
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -78,6 +150,37 @@ function handleStartLogin() {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* 静默登录加载区域 */
+.silent-login-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32rpx;
+}
+
+.loading-spinner {
+  width: 80rpx;
+  height: 80rpx;
+  border: 6rpx solid rgba(13, 148, 136, 0.2);
+  border-top-color: #0d9488;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 28rpx;
+  color: #0d9488;
 }
 
 /* Logo区域 */
