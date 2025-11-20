@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import dayjs from "dayjs";
 import { useConfigStore } from "./configStore";
 import { request } from "@/utils/http";
+import { getURLSearchParams } from "@/utils/url";
 
 const defaultBet = () => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -259,7 +260,7 @@ export const useBetStore = defineStore("bet", () => {
     try {
       const currentPage = reset ? 1 : page.value;
       // GET 请求使用查询参数，而不是 data
-      const queryParams = new URLSearchParams({
+      const queryParams = getURLSearchParams({
         page: String(currentPage),
         page_size: String(pageSize.value),
       }).toString();

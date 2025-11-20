@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { request } from "@/utils/http";
+import { getURLSearchParams } from "@/utils/url";
 
 export const useMatchStore = defineStore("matchStore", {
   state: () => ({
@@ -31,7 +32,7 @@ export const useMatchStore = defineStore("matchStore", {
       this.error = "";
       try {
         // GET 请求使用查询参数
-        const params = new URLSearchParams();
+        const params = getURLSearchParams();
         if (this.filterLeague) {
           params.append("league", this.filterLeague);
         }

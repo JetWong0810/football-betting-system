@@ -4,7 +4,7 @@
     <view class="header-section">
       <view class="header-inner">
         <view class="user-info" v-if="userStore.isLoggedIn">
-          <image class="avatar" :src="userStore.user?.avatar || defaultAvatar" mode="aspectFill" />
+          <image class="avatar" :src="userStore.user?.avatar || defaultAvatar" mode="aspectFill" @error="handleImageError" />
           <view class="user-details">
             <text class="nickname">{{ userStore.user?.nickname || "用户" }}</text>
             <text class="username">@{{ userStore.user?.username }}</text>
@@ -12,7 +12,7 @@
         </view>
 
         <view class="login-prompt" v-else @tap="goToLogin">
-          <image class="avatar" :src="defaultAvatar" mode="aspectFill" />
+          <image class="avatar" :src="defaultAvatar" mode="aspectFill" @error="handleImageError" />
           <view class="login-text">
             <text class="title">点击登录</text>
             <text class="subtitle">登录后享受更多功能</text>
@@ -130,7 +130,9 @@ import { useUserStore } from "@/stores/userStore";
 import { requireAuth } from "@/utils/auth";
 
 const userStore = useUserStore();
-const defaultAvatar = "https://via.placeholder.com/100/0d9488/ffffff?text=U";
+// 使用 base64 编码的默认头像，避免小程序中加载外部图片失败
+// 这是一个简单的圆形头像占位符（用户图标）
+const defaultAvatar = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiByeD0iNTAiIGZpbGw9IiMwZDk0ODgiLz4KPHBhdGggZD0iTTUwIDMwQzQwLjMzNTggMzAgMzIgMzguMzM1OCAzMiA0OEMzMiA1Ny42NjQyIDQwLjMzNTggNjYgNTAgNjZDNjkuNjY0MiA2NiA3OCA1Ny42NjQyIDc4IDQ4Qzc4IDM4LjMzNTggNjkuNjY0MiAzMCA1MCAzMFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik0yMCA4MEMyMCA3My4zNzI2IDI1LjM3MjYgNjggMzIgNjhINjggNzQuNjI3NCA2OCA4MCA2OCA4NkM2OCA5Mi42Mjc0IDYyLjYyNzQgOTggNTYgOThINDBDMzMuMzcyNiA5OCAyOCA5Mi42Mjc0IDI4IDg2VjgwSDIwWiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+";
 
 function navigateTo(url) {
   uni.navigateTo({ url });
@@ -172,6 +174,12 @@ function handleLogout() {
       }
     },
   });
+}
+
+function handleImageError(e) {
+  // 图片加载失败时的处理，可以设置一个默认的 base64 图片或隐藏图片
+  console.warn("头像图片加载失败", e);
+  // 如果需要，可以设置一个 base64 编码的默认头像
 }
 
 onShow(() => {

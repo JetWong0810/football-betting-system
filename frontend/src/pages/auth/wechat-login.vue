@@ -10,19 +10,9 @@
         <text class="welcome-text">欢迎使用</text>
       </view>
 
-      <!-- 提示信息 -->
-      <view class="tip-section">
-        <text class="tip-text">为了更好的使用体验，需要获取您的微信头像和昵称</text>
-      </view>
-
       <!-- 授权按钮 -->
       <view class="button-section">
-        <button 
-          class="auth-btn" 
-          open-type="getUserProfile"
-          @getuserprofile="handleGetUserProfile"
-          :disabled="loading"
-        >
+        <button class="auth-btn" @click="handleWechatLogin" :disabled="loading">
           <text v-if="loading">登录中...</text>
           <text v-else>微信快速登录</text>
         </button>
@@ -43,45 +33,71 @@ import { useUserStore } from "@/stores/userStore";
 const userStore = useUserStore();
 const loading = ref(false);
 
-async function handleGetUserProfile(e) {
-  // 检查用户是否授权
-  if (e.detail.errMsg !== 'getUserProfile:ok') {
-    uni.showToast({
-      title: "需要授权才能登录",
-      icon: "none",
-    });
+async function handleWechatLogin() {
+  // 防止重复点击
+  if (loading.value) {
     return;
   }
 
   loading.value = true;
 
   try {
-    // 1. 获取微信登录code（每次调用都会获取新的code，有效期5分钟）
+    // 1. 获取用户信息（需要用户主动触发，会弹出授权弹窗）
+    let userInfo = null;
+    try {
+      const profileRes = await new Promise((resolve, reject) => {
+        uni.getUserProfile({
+          desc: "用于完善会员资料", // 必填，向用户说明获取信息的用途
+          success: (res) => {
+            resolve(res);
+          },
+          fail: (err) => {
+            reject(err);
+          },
+        });
+      });
+
+      if (profileRes && profileRes.userInfo) {
+        userInfo = profileRes.userInfo; // 包含 nickName, avatarUrl 等信息
+      }
+    } catch (profileError) {
+      // 用户拒绝授权或获取失败
+      console.log("获取用户信息失败:", profileError);
+      uni.showToast({
+        title: "需要授权才能登录",
+        icon: "none",
+        duration: 2000,
+      });
+      loading.value = false;
+      return;
+    }
+
+    // 2. 获取微信登录code（每次调用都会获取新的code，有效期5分钟）
     const loginRes = await new Promise((resolve, reject) => {
       uni.login({
-        provider: 'weixin',
+        provider: "weixin",
         success: (res) => {
           if (res.code) {
             resolve(res);
           } else {
-            reject(new Error('获取登录code失败'));
+            reject(new Error("获取登录code失败"));
           }
         },
         fail: (err) => {
-          reject(new Error(err.errMsg || '获取登录code失败'));
-        }
+          reject(new Error(err.errMsg || "获取登录code失败"));
+        },
       });
     });
 
     if (!loginRes.code) {
-      throw new Error('获取登录code失败');
+      throw new Error("获取登录code失败");
     }
 
-    // 2. 调用后端微信登录接口
+    // 3. 调用后端微信登录接口
     // 传递code和用户信息（昵称、头像等）
     await userStore.wechatLogin({
       code: loginRes.code,
-      user_info: e.detail.userInfo  // 包含 nickName, avatarUrl 等信息
+      user_info: userInfo, // 包含 nickName, avatarUrl 等信息
     });
 
     uni.showToast({
@@ -97,7 +113,7 @@ async function handleGetUserProfile(e) {
       });
     }, 1500);
   } catch (error) {
-    console.error('微信登录失败:', error);
+    console.error("微信登录失败:", error);
     uni.showToast({
       title: error.data?.detail || error.message || "登录失败，请重试",
       icon: "none",
@@ -163,23 +179,6 @@ async function handleGetUserProfile(e) {
   color: #6b7280;
 }
 
-/* 提示区域 */
-.tip-section {
-  width: 100%;
-  background: #ffffff;
-  border-radius: 16rpx;
-  padding: 32rpx 24rpx;
-  margin-bottom: 40rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-}
-
-.tip-text {
-  font-size: 26rpx;
-  color: #374151;
-  line-height: 1.6;
-  text-align: center;
-}
-
 /* 按钮区域 */
 .button-section {
   width: 100%;
@@ -223,4 +222,3 @@ async function handleGetUserProfile(e) {
   line-height: 1.5;
 }
 </style>
-
