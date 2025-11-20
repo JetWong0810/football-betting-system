@@ -12,7 +12,11 @@
 
       <!-- 授权按钮 -->
       <view class="button-section">
-        <button class="auth-btn" @click="handleWechatLogin" :disabled="loading">
+        <button
+          class="auth-btn"
+          :disabled="loading"
+          @tap="handleWechatLogin"
+        >
           <text v-if="loading">登录中...</text>
           <text v-else>微信快速登录</text>
         </button>
@@ -39,65 +43,56 @@ async function handleWechatLogin() {
     return;
   }
 
+  // #ifndef MP-WEIXIN
+  uni.showToast({
+    title: "请在微信小程序内使用微信登录",
+    icon: "none",
+  });
+  return;
+  // #endif
+
   loading.value = true;
 
   try {
-    // 1. 获取用户信息（需要用户主动触发，会弹出授权弹窗）
-    let userInfo = null;
-    try {
-      const profileRes = await new Promise((resolve, reject) => {
-        uni.getUserProfile({
-          desc: "用于完善会员资料", // 必填，向用户说明获取信息的用途
-          success: (res) => {
-            resolve(res);
-          },
-          fail: (err) => {
-            reject(err);
-          },
-        });
+    // 1. 直接在手势回调内调用 getUserProfile，确保符合微信要求
+    const profile = await new Promise((resolve, reject) => {
+      uni.getUserProfile({
+        desc: "用于完善会员资料",
+        lang: "zh_CN",
+        success: resolve,
+        fail: reject,
       });
+    });
 
-      if (profileRes && profileRes.userInfo) {
-        userInfo = profileRes.userInfo; // 包含 nickName, avatarUrl 等信息
-      }
-    } catch (profileError) {
-      // 用户拒绝授权或获取失败
-      console.log("获取用户信息失败:", profileError);
-      uni.showToast({
-        title: "需要授权才能登录",
-        icon: "none",
-        duration: 2000,
-      });
-      loading.value = false;
-      return;
-    }
-
-    // 2. 获取微信登录code（每次调用都会获取新的code，有效期5分钟）
+    // 2. 获取微信登录 code（每次调用都会获取新的 code，有效期 5 分钟）
     const loginRes = await new Promise((resolve, reject) => {
       uni.login({
         provider: "weixin",
+        timeout: 10000,
         success: (res) => {
           if (res.code) {
             resolve(res);
           } else {
-            reject(new Error("获取登录code失败"));
+            reject(new Error(res.errMsg || "获取登录凭证失败"));
           }
         },
         fail: (err) => {
-          reject(new Error(err.errMsg || "获取登录code失败"));
+          reject(new Error(err.errMsg || "获取登录凭证失败"));
         },
       });
     });
 
-    if (!loginRes.code) {
-      throw new Error("获取登录code失败");
-    }
+    // 3. 从 getUserProfile 拿到用户加密数据/原始数据
+    const { rawData, signature, encryptedData, iv, userInfo } = profile;
 
-    // 3. 调用后端微信登录接口
-    // 传递code和用户信息（昵称、头像等）
+    // 4. 调用后端微信登录接口
     await userStore.wechatLogin({
       code: loginRes.code,
-      user_info: userInfo, // 包含 nickName, avatarUrl 等信息
+      raw_data: rawData,
+      signature,
+      encrypted_data: encryptedData,
+      iv,
+      user_info: userInfo, // 包含 nickName, avatarUrl
     });
 
     uni.showToast({
@@ -115,11 +110,16 @@ async function handleWechatLogin() {
   } catch (error) {
     console.error("微信登录失败:", error);
     uni.showToast({
-      title: error.data?.detail || error.message || "登录失败，请重试",
+      title: error?.data?.detail || error?.message || "登录失败，请重试",
       icon: "none",
       duration: 2000,
     });
+    // 避免手势调用限制后连续点击无响应
+    setTimeout(() => {
+      loading.value = false;
+    }, 0);
   } finally {
+    // 在 catch 中已处理 loading 释放，这里兜底
     loading.value = false;
   }
 }

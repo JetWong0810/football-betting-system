@@ -1,11 +1,18 @@
+import base64
+import json
 from datetime import datetime
+import logging
+from hashlib import sha1
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from database import init_db, fetch_sync_status
 from repository import OddsRepository
@@ -61,6 +68,8 @@ app.add_middleware(
 
 repo = OddsRepository()
 user_repo = UserRepository()
+logger = logging.getLogger("wechat_login")
+logging.basicConfig(level=logging.INFO)
 
 
 # Pydantic models
@@ -79,11 +88,14 @@ class LoginRequest(BaseModel):
 
 class WechatLoginRequest(BaseModel):
     code: str  # 微信登录code
-    encrypted_data: Optional[str] = None  # 加密的用户信息（旧版）
-    iv: Optional[str] = None  # 加密算法的初始向量（旧版）
-    raw_data: Optional[str] = None  # 原始数据字符串（用于签名校验）
+    encrypted_data: Optional[str] = Field(default=None, alias="encryptedData")  # 加密的用户信息
+    iv: Optional[str] = None  # 加密算法的初始向量
+    raw_data: Optional[str] = Field(default=None, alias="rawData")  # 原始数据字符串（用于签名校验）
     signature: Optional[str] = None  # 签名（用于校验）
-    user_info: Optional[Dict[str, Any]] = None  # 用户信息（新版，从getUserProfile获取）
+    user_info: Optional[Dict[str, Any]] = Field(default=None, alias="userInfo")  # 用户信息（新版，从getUserProfile获取）
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class UpdateProfileRequest(BaseModel):
@@ -176,6 +188,82 @@ async def shutdown_event():
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "sync": fetch_sync_status()}
+
+
+def verify_wechat_signature(raw_data: str, session_key: str, signature: str) -> bool:
+    """校验微信用户信息签名"""
+    try:
+        expected = sha1(f"{raw_data}{session_key}".encode("utf-8")).hexdigest()
+        return expected == signature
+    except Exception:
+        return False
+
+
+def decrypt_wechat_data(session_key: str, iv: str, encrypted_data: str) -> Optional[Dict[str, Any]]:
+    """解密微信返回的加密用户数据"""
+    try:
+        session_key_bytes = base64.b64decode(session_key)
+        iv_bytes = base64.b64decode(iv)
+        encrypted_bytes = base64.b64decode(encrypted_data)
+
+        cipher = Cipher(
+            algorithms.AES(session_key_bytes),
+            modes.CBC(iv_bytes),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        decrypted = decryptor.update(encrypted_bytes) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        data = unpadder.update(decrypted) + unpadder.finalize()
+        return json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+
+
+async def fetch_wechat_session(code: str) -> Dict[str, Any]:
+    """调用 code2Session 获取 openid 和 session_key"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{WECHAT_API_URL}/sns/jscode2session",
+                params={
+                    "appid": WECHAT_APPID,
+                    "secret": WECHAT_SECRET,
+                    "js_code": code,
+                    "grant_type": "authorization_code"
+                }
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=502, detail="微信登录超时，请稍后重试")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="微信登录服务不可用，请检查网络后重试") from exc
+
+    try:
+        data = response.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="微信登录返回异常，请稍后重试")
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"微信登录失败：{data.get('errmsg') or response.text}"
+        )
+
+    if data.get("errcode"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"微信登录失败：{data.get('errmsg', '未知错误')} ({data.get('errcode')})"
+        )
+
+    openid = data.get("openid")
+    session_key = data.get("session_key")
+    unionid = data.get("unionid")
+
+    if not openid or not session_key:
+        raise HTTPException(status_code=502, detail="微信登录返回数据缺失，请重试")
+
+    return {"openid": openid, "session_key": session_key, "unionid": unionid}
 
 
 @app.post("/api/sync")
@@ -319,97 +407,88 @@ def verify_token(user_id: int = Depends(require_auth)):
 @app.post("/api/auth/wechat-login")
 async def wechat_login(req: WechatLoginRequest):
     """微信小程序登录"""
-    if not WECHAT_APPID or not WECHAT_SECRET:
-        raise HTTPException(status_code=500, detail="微信配置未设置，请联系管理员")
-    
-    # 1. 使用code获取openid和session_key
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{WECHAT_API_URL}/sns/jscode2session",
-                params={
-                    "appid": WECHAT_APPID,
-                    "secret": WECHAT_SECRET,
-                    "js_code": req.code,
-                    "grant_type": "authorization_code"
-                }
-            )
-            wechat_data = response.json()
-            
-            if "errcode" in wechat_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"微信登录失败: {wechat_data.get('errmsg', '未知错误')}"
-                )
-            
-            openid = wechat_data.get("openid")
-            session_key = wechat_data.get("session_key")
-            unionid = wechat_data.get("unionid")
-            
-            if not openid:
-                raise HTTPException(status_code=400, detail="获取openid失败")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=500, detail="微信API请求超时")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"微信登录失败: {str(e)}")
-    
-    # 2. 查找或创建用户
-    user = user_repo.get_user_by_openid(openid)
-    
-    if not user:
-        # 创建新用户
-        wechat_nickname = None
-        wechat_avatar = None
+        if not WECHAT_APPID or not WECHAT_SECRET:
+            raise HTTPException(status_code=500, detail="微信配置未设置，请联系管理员")
+
+        if not req.code:
+            raise HTTPException(status_code=400, detail="缺少登录凭证code")
         
-        # 从user_info中获取用户信息（如果提供）
-        if req.user_info:
-            wechat_nickname = req.user_info.get("nickName")
-            wechat_avatar = req.user_info.get("avatarUrl")
-        
-        user_id = user_repo.create_wechat_user(
-            openid=openid,
-            unionid=unionid,
-            wechat_nickname=wechat_nickname,
-            wechat_avatar=wechat_avatar
-        )
-        
-        # 重新获取用户信息
-        user = user_repo.get_user_by_id(user_id)
-    else:
-        # 更新用户信息（如果提供了新的用户信息）
-        if req.user_info:
-            wechat_nickname = req.user_info.get("nickName")
-            wechat_avatar = req.user_info.get("avatarUrl")
-            if wechat_nickname or wechat_avatar:
-                user_repo.update_wechat_user_info(
-                    user["id"],
+        # 1. code 换取 openid / session_key
+        session_data = await fetch_wechat_session(req.code)
+        openid = session_data["openid"]
+        session_key = session_data["session_key"]
+        unionid = session_data.get("unionid")
+
+        # 2. 校验签名（如果提供）
+        if req.raw_data and req.signature:
+            if not verify_wechat_signature(req.raw_data, session_key, req.signature):
+                raise HTTPException(status_code=400, detail="用户信息校验失败，请重试")
+
+        # 3. 解析用户资料（优先使用 getUserProfile 返回的数据，退化到解密数据）
+        profile_data: Dict[str, Any] = req.user_info or {}
+        decrypted_profile = None
+        if req.encrypted_data and req.iv:
+            decrypted_profile = decrypt_wechat_data(session_key, req.iv, req.encrypted_data)
+            if not profile_data and decrypted_profile:
+                profile_data = decrypted_profile
+            if not unionid and decrypted_profile and decrypted_profile.get("unionId"):
+                unionid = decrypted_profile.get("unionId")
+
+        wechat_nickname = profile_data.get("nickName") if profile_data else None
+        wechat_avatar = profile_data.get("avatarUrl") if profile_data else None
+
+        # 4. 查找或创建/更新用户
+        try:
+            user = user_repo.get_user_by_openid(openid)
+
+            if not user:
+                user_id = user_repo.create_wechat_user(
+                    openid=openid,
+                    unionid=unionid,
                     wechat_nickname=wechat_nickname,
                     wechat_avatar=wechat_avatar
                 )
-                # 重新获取用户信息
-                user = user_repo.get_user_by_id(user["id"])
+                user = user_repo.get_user_by_id(user_id)
+            else:
+                if wechat_nickname or wechat_avatar:
+                    user_repo.update_wechat_user_info(
+                        user["id"],
+                        wechat_nickname=wechat_nickname,
+                        wechat_avatar=wechat_avatar
+                    )
+                    user = user_repo.get_user_by_id(user["id"])
+                user_id = user["id"]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("DB error during wechat login")
+            raise HTTPException(status_code=500, detail=f"微信用户登录失败：{str(exc)}") from exc
+
+        # 5. 更新最后登录时间
+        user_repo.update_last_login(user_id)
         
-        user_id = user["id"]
-    
-    # 3. 更新最后登录时间
-    user_repo.update_last_login(user_id)
-    
-    # 4. 生成token
-    token = create_access_token({"user_id": user_id, "username": user["username"]})
-    
-    return {
-        "message": "登录成功",
-        "token": token,
-        "user": {
-            "id": user["id"],
-            "username": user["username"],
-            "nickname": user.get("nickname") or user.get("wechat_nickname"),
-            "avatar": user.get("avatar") or user.get("wechat_avatar"),
-            "phone": user.get("phone"),
-            "email": user.get("email"),
-            "login_type": user.get("login_type", "wechat")
+        # 6. 生成token
+        token = create_access_token({"user_id": user_id, "username": user["username"]})
+        
+        return {
+            "message": "登录成功",
+            "token": token,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "nickname": user.get("nickname") or user.get("wechat_nickname"),
+                "avatar": user.get("avatar") or user.get("wechat_avatar"),
+                "phone": user.get("phone"),
+                "email": user.get("email"),
+                "login_type": user.get("login_type", "wechat")
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unhandled wechat login error")
+        raise HTTPException(status_code=500, detail=f"微信登录失败：{str(exc)}")
 
 
 @app.get("/api/user/profile")
