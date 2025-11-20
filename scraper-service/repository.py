@@ -94,6 +94,16 @@ class OddsRepository:
         if not rows:
             return
         
+        def normalize_score(row: Dict[str, Any], key: str) -> Optional[int]:
+            """空比分用 -1 保存，避免 NULL 使唯一索引失效"""
+            value = row.get(key)
+            if value is None:
+                return -1
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return -1
+
         ph = PLACEHOLDER
         sql = f"""
             INSERT INTO odds_correct_score (
@@ -110,8 +120,8 @@ class OddsRepository:
                 _execute(conn, sql, (
                     match_id,
                     row.get("result_type"),
-                    row.get("home_score"),
-                    row.get("away_score"),
+                    normalize_score(row, "home_score"),
+                    normalize_score(row, "away_score"),
                     row.get("score_label"),
                     row.get("odds"),
                     row.get("is_other", 0),

@@ -167,8 +167,21 @@ const plays = computed(() => playsData.value?.plays || {});
 const hadSingle = computed(() => isSingleOdds(plays.value?.had, matchInfo.value));
 const hhadSingle = computed(() => isSingleOdds(plays.value?.hhad, matchInfo.value));
 
-const scoreGroups = computed(() => {
+const scoreList = computed(() => {
+  // 后端存在多条“其他”比分(空比分)记录，这里做一次去重避免前端重复展示同一选项
   const list = plays.value.crs || [];
+  const seen = new Set();
+  return list.filter((item) => {
+    const label = item.score_label || `${item.home_score ?? "-"}:${item.away_score ?? "-"}`;
+    const key = `${item.result_type}-${label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+});
+
+const scoreGroups = computed(() => {
+  const list = scoreList.value;
   const order = (items) =>
     items.sort((a, b) => {
       if (a.is_other && !b.is_other) return 1;

@@ -1,9 +1,41 @@
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from database import get_db, update_sync_status
 
 PLACEHOLDER = "%s"
+logger = logging.getLogger(__name__)
+
+# 竞彩停售规则：周一到周四 22:00，周五到周日 23:00（北京时间）
+def get_cutoff_info(now: Optional[datetime] = None) -> Dict[str, Any]:
+    # 统一使用北京时间，避免服务器时区导致的截止时间偏移
+    tz = timezone(timedelta(hours=8))
+    now = now.astimezone(tz) if now else datetime.now(tz)
+    weekday = now.weekday()  # Monday=0
+    cutoff_hour = 22 if weekday <= 3 else 23
+    cutoff_dt = now.replace(hour=cutoff_hour, minute=0, second=0, microsecond=0)
+    logger.info("[cutoff_debug] now=%s weekday=%s cutoff_hour=%s", now.isoformat(), weekday, cutoff_hour)
+    return {
+        "today": now.strftime("%Y-%m-%d"),
+        "now_ts": int(now.timestamp()),
+        "cutoff_passed": now >= cutoff_dt,
+    }
+
+
+def derive_sale_date(row: Dict[str, Any]) -> Optional[str]:
+    """
+    售卖日期统一从期号解析：251120 -> 2025-11-20
+    少数缺失兜底用 match_date
+    """
+    match_number = str(row.get("match_number") or "").strip()
+    if len(match_number) >= 6 and match_number[:6].isdigit():
+        year = 2000 + int(match_number[:2])
+        month = match_number[2:4]
+        day = match_number[4:6]
+        return f"{year:04d}-{month}-{day}"
+    date_str = row.get("match_date")
+    return date_str if date_str else None
 
 
 def _execute(conn, sql: str, params=None):
@@ -94,6 +126,16 @@ class OddsRepository:
         if not rows:
             return
         
+        def normalize_score(row: Dict[str, Any], key: str) -> Optional[int]:
+            """空比分用 -1 保存，避免 NULL 使唯一索引失效"""
+            value = row.get(key)
+            if value is None:
+                return -1
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return -1
+
         ph = PLACEHOLDER
         sql = f"""
             INSERT INTO odds_correct_score (
@@ -110,8 +152,8 @@ class OddsRepository:
                 _execute(conn, sql, (
                     match_id,
                     row.get("result_type"),
-                    row.get("home_score"),
-                    row.get("away_score"),
+                    normalize_score(row, "home_score"),
+                    normalize_score(row, "away_score"),
                     row.get("score_label"),
                     row.get("odds"),
                     row.get("is_other", 0),
@@ -193,23 +235,17 @@ class OddsRepository:
         where = []
         params: List[Any] = []
         ph = PLACEHOLDER
-        
-        if date:
-            where.append(f"match_date = {ph}")
-            params.append(date)
+        cutoff = get_cutoff_info()
+        today = cutoff["today"]
+        cutoff_passed = cutoff["cutoff_passed"]
+
+        logger.info("[list_matches_debug] today=%s cutoff_passed=%s", today, cutoff_passed)
+        # 只按联盟过滤；日期与停售逻辑在内存中过滤
         if league:
             where.append(f"league_name = {ph}")
             params.append(league)
         
         latest_issue = self.get_latest_issue()
-        if not date:
-            today = datetime.now().strftime("%Y-%m-%d")
-            where.append(f"(match_date IS NULL OR match_date >= {ph})")
-            params.append(today)
-            now_ts = int(datetime.now().timestamp())
-            where.append(f"(match_timestamp IS NULL OR match_timestamp >= {ph})")
-            params.append(now_ts)
-        
         # 默认只展示在售或未开赛的赛事
         where.append("(match_status IS NULL OR match_status NOT IN ('finished', 'cancelled'))")
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
@@ -217,18 +253,43 @@ class OddsRepository:
         base_sql = (
             "SELECT * FROM matches "
             f"{where_clause} "
-            "ORDER BY match_date ASC, COALESCE(match_time, ''), match_code ASC "
+            # 期号携带年月日，直接按期号排序更可靠
+            "ORDER BY match_number ASC "
             f"LIMIT {ph} OFFSET {ph}"
         )
         
         with get_db() as conn:
             cur = _execute(conn, base_sql, (*params, page_size, offset))
             rows = cur.fetchall()
-            
-            count_sql = f"SELECT COUNT(*) as cnt FROM matches {where_clause}"
-            cur = _execute(conn, count_sql, params)
-            count_row = cur.fetchone()
-            total = count_row["cnt"] if count_row else 0
+        
+        # 额外再按售卖日（期号解析的日期）过滤
+        filtered_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            sale_date = derive_sale_date(row)
+            row["_sale_date"] = sale_date
+            log_ctx = {
+                "match_id": row.get("match_id"),
+                "match_number": row.get("match_number"),
+                "match_date": row.get("match_date"),
+                "sale_date": sale_date,
+            }
+            # 如有 date 参数，必须与售卖日一致
+            if date and sale_date and sale_date != date:
+                logger.info("[list_matches_filter] drop by date filter sale_date=%s ctx=%s", sale_date, log_ctx)
+                continue
+            if sale_date:
+                if sale_date < today:
+                    logger.info("[list_matches_filter] drop earlier sale_date=%s ctx=%s", sale_date, log_ctx)
+                    # 比今日更早的比赛直接过滤
+                    continue
+                if cutoff_passed and sale_date == today:
+                    logger.info("[list_matches_filter] drop today after cutoff sale_date=%s ctx=%s", sale_date, log_ctx)
+                    # 今日已过停售时间，过滤今日
+                    continue
+            filtered_rows.append(row)
+            logger.info("[list_matches_filter] keep sale_date=%s ctx=%s", sale_date, log_ctx)
+        rows = filtered_rows
+        total = len(rows)
         
         match_ids = [row["match_id"] for row in rows]
         odds_map = self.fetch_wdl_for_matches(match_ids)

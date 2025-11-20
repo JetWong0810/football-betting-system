@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS odds_correct_score (
     id INT AUTO_INCREMENT PRIMARY KEY,
     match_id VARCHAR(100) NOT NULL,
     result_type VARCHAR(50) NOT NULL,
-    home_score INT,
-    away_score INT,
+    home_score INT NOT NULL DEFAULT -1,
+    away_score INT NOT NULL DEFAULT -1,
     score_label VARCHAR(50),
     odds DECIMAL(10,2),
     is_other TINYINT DEFAULT 0,
@@ -92,4 +92,3 @@ CREATE TABLE IF NOT EXISTS sync_status (
     total_matches INT DEFAULT 0,
     total_odds INT DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

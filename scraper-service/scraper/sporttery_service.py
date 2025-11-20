@@ -229,8 +229,9 @@ class SportterySyncService:
                 items.append(
                     {
                         "result_type": result_type,
-                        "home_score": None,
-                        "away_score": None,
+                        # 用 -1 表示“其他”比分，避免插入 NULL 时唯一索引失效
+                        "home_score": -1,
+                        "away_score": -1,
                         "score_label": label,
                         "odds": parse_decimal(odds_value),
                         "is_other": 1,
