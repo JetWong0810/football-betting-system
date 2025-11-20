@@ -67,9 +67,56 @@ def _init_user_db() -> None:
                             # 忽略已存在的表等错误，继续执行
                             if "already exists" not in str(e).lower() and "duplicate" not in str(e).lower():
                                 print(f"警告: 执行 SQL 命令失败: {command[:50]}... 错误: {e}")
+            # 追加微信登录相关字段，避免旧库缺失 openid/unionid 等导致 1054
+            _ensure_wechat_columns(cursor)
         conn.commit()
     finally:
         conn.close()
+
+
+def _add_column_if_missing(cursor, table: str, column: str, definition: str) -> None:
+    """如果字段缺失则添加"""
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME=%s AND COLUMN_NAME=%s
+        """,
+        (table, column),
+    )
+    exists = cursor.fetchone()
+    count = exists.get("cnt") if isinstance(exists, dict) else (exists[0] if exists else 0)
+    if count:
+        return
+    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+def _add_index_if_missing(cursor, table: str, index: str, definition: str) -> None:
+    """如果索引缺失则添加"""
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME=%s AND INDEX_NAME=%s
+        """,
+        (table, index),
+    )
+    exists = cursor.fetchone()
+    count = exists.get("cnt") if isinstance(exists, dict) else (exists[0] if exists else 0)
+    if count:
+        return
+    cursor.execute(f"ALTER TABLE {table} ADD INDEX {index} {definition}")
+
+
+def _ensure_wechat_columns(cursor) -> None:
+    """确保微信登录相关字段存在"""
+    try:
+        _add_column_if_missing(cursor, "users", "openid", "VARCHAR(100) UNIQUE COMMENT '微信openid'")
+        _add_column_if_missing(cursor, "users", "unionid", "VARCHAR(100) COMMENT '微信unionid'")
+        _add_column_if_missing(cursor, "users", "wechat_nickname", "VARCHAR(100) COMMENT '微信昵称'")
+        _add_column_if_missing(cursor, "users", "wechat_avatar", "VARCHAR(500) COMMENT '微信头像'")
+        _add_column_if_missing(cursor, "users", "login_type", "VARCHAR(20) DEFAULT 'normal' COMMENT '登录类型: normal/wechat'")
+        _add_index_if_missing(cursor, "users", "idx_openid", "(openid)")
+    except Exception as e:
+        print(f"警告: 自动添加微信字段失败: {e}")
 
 
 def _connect():
