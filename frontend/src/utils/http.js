@@ -33,10 +33,20 @@ export function request(options) {
       url = BASE_URL + url;
     }
 
+    // 自动添加认证token（如果存在且未手动指定）
+    const headers = options.header || options.headers || {};
+    if (!headers['Authorization'] && !headers['authorization']) {
+      const token = uni.getStorageSync('token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+
     uni.request({
       timeout: options.timeout || 15000,
       ...options,
       url,
+      header: headers,
       success: (res) => {
         const status = res.statusCode || 0;
         if (status >= 200 && status < 300) {

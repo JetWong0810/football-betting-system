@@ -31,20 +31,20 @@
             <view class="stat-icon-wrapper">#</view>
             <text>记录数</text>
           </view>
-          <view class="stat-value">{{ betStore.bets.length }}</view>
+          <view class="stat-value">{{ betStore.total || betStore.bets.length }}</view>
         </view>
       </view>
     </view>
 
-    <scroll-view class="content-wrapper" scroll-y>
+    <view class="content-wrapper">
       <!-- 主标签切换：记录 / 分析 -->
       <view class="main-tabs-wrapper">
         <view class="main-tabs-list">
-          <view class="main-tab-item" :class="{ active: mainTab === 'records' }" @tap="mainTab = 'records'"> 
+          <view class="main-tab-item" :class="{ active: mainTab === 'records' }" @tap="mainTab = 'records'">
             <text class="tab-icon">📝</text>
             <text>记录</text>
           </view>
-          <view class="main-tab-item" :class="{ active: mainTab === 'analysis' }" @tap="mainTab = 'analysis'"> 
+          <view class="main-tab-item" :class="{ active: mainTab === 'analysis' }" @tap="mainTab = 'analysis'">
             <text class="tab-icon">📊</text>
             <text>分析</text>
           </view>
@@ -53,96 +53,98 @@
 
       <!-- 记录标签页 -->
       <view v-if="mainTab === 'records'">
-      <!-- 标签切换 -->
-      <view class="tabs-wrapper">
-        <view class="tabs-list">
-          <view class="tab-item" :class="{ active: activeTab === 'all' }" @tap="activeTab = 'all'"> 全部记录 </view>
-          <view class="tab-item" :class="{ active: activeTab === 'parlay' }" @tap="activeTab = 'parlay'"> 串关记录 </view>
-        </view>
-      </view>
-
-      <!-- 记录列表 -->
-      <view class="records-section">
-        <view v-if="displayedBets.length === 0" class="empty-state">
-          <view class="empty-icon-wrapper">
-            <text class="empty-icon">-</text>
-          </view>
-          <text class="empty-text">{{ activeTab === "parlay" ? "暂无串关记录" : "暂无投注记录" }}</text>
-        </view>
-
-        <view v-else class="bet-list">
-          <view v-for="bet in displayedBets" :key="bet.id" class="bet-card">
-            <!-- 卡片头部 -->
-            <view class="card-header">
-              <view class="header-left">
-                <view class="badge-row">
-                  <view class="badge" :class="bet.legs?.length > 1 ? 'parlay' : 'single'">
-                    {{ bet.legs?.length > 1 ? getParlayTypeLabel(bet) : "单关" }}
-                  </view>
-                  <text class="league-text">
-                    {{ bet.legs?.length > 1 ? `共${bet.legs.length}场` : bet.legs?.[0]?.league || "未知联赛" }}
-                  </text>
-                </view>
-                <view class="match-title">{{ primaryMatch(bet) }}</view>
-              </view>
-              <view class="header-right">
-                <view class="status-actions">
-                  <view class="badges-row">
-                    <view class="status-badge" :class="bet.status">
-                      {{ statusText(bet) }}
-                    </view>
-                    <view class="result-badge" :class="bet.result" v-if="bet.status === 'settled'">
-                      {{ resultText(bet) }}
-                    </view>
-                  </view>
-                  <view class="action-btns">
-                    <button v-if="bet.status !== 'saved' && bet.status !== 'settled'" class="icon-btn edit" @tap.stop="() => startEdit(bet)">
-                      <text class="btn-icon">✎</text>
-                    </button>
-                    <button v-if="bet.status !== 'settled'" class="icon-btn delete" @tap.stop="() => removeBet(bet.id)">
-                      <text class="btn-icon">×</text>
-                    </button>
-                  </view>
-                </view>
-              </view>
-            </view>
-
-            <!-- 串关详情 -->
-            <view v-if="bet.legs?.length > 1" class="parlay-details">
-              <view v-for="leg in bet.legs" :key="leg.id" class="parlay-match">
-                <view class="parlay-teams">{{ formatTeams(leg) }}</view>
-                <view class="parlay-info"> {{ leg.league || "未知" }} · {{ leg.betType }} · @{{ leg.odds }} </view>
-              </view>
-            </view>
-
-            <!-- 卡片内容 -->
-            <view class="card-content">
-              <view class="info-row">
-                <view class="calendar-icon">
-                  <text>📅</text>
-                </view>
-                <text class="info-text">{{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
-              </view>
-
-              <view class="divider"></view>
-
-              <view class="bottom-row">
-                <view class="odds-section">
-                  <text class="odds-label"> {{ bet.legs?.length === 1 ? `${bet.legs[0].betType} · ` : "" }}赔率 @{{ bet.odds }} </text>
-                </view>
-                <view class="amount-section">
-                  <text class="amount-label">投注金额</text>
-                  <text class="amount-value">¥{{ bet.stake }}</text>
-                </view>
-              </view>
-            </view>
+        <!-- 标签切换 -->
+        <view class="tabs-wrapper">
+          <view class="tabs-list">
+            <view class="tab-item" :class="{ active: activeTab === 'all' }" @tap="activeTab = 'all'"> 全部记录 </view>
+            <view class="tab-item" :class="{ active: activeTab === 'parlay' }" @tap="activeTab = 'parlay'"> 串关记录 </view>
           </view>
         </view>
-      </view>
+
+        <!-- 使用 mescroll 实现分页 -->
+        <mescroll-body ref="mescrollRef" :down="downOption" :up="upOption" :bottombar="false" @init="mescrollInit" @down="downCallback" @up="upCallback">
+          <view class="records-section">
+            <view v-if="displayedBets.length === 0 && !betStore.loading" class="empty-state">
+              <view class="empty-icon-wrapper">
+                <text class="empty-icon">-</text>
+              </view>
+              <text class="empty-text">{{ activeTab === "parlay" ? "暂无串关记录" : "暂无投注记录" }}</text>
+            </view>
+
+            <view v-else class="bet-list">
+              <view v-for="bet in displayedBets" :key="bet.id" class="bet-card">
+                <!-- 卡片头部 -->
+                <view class="card-header">
+                  <view class="header-left">
+                    <view class="badge-row">
+                      <view class="badge" :class="bet.legs?.length > 1 ? 'parlay' : 'single'">
+                        {{ bet.legs?.length > 1 ? getParlayTypeLabel(bet) : "单关" }}
+                      </view>
+                      <text class="league-text">
+                        {{ bet.legs?.length > 1 ? `共${bet.legs.length}场` : bet.legs?.[0]?.league || "未知联赛" }}
+                      </text>
+                    </view>
+                    <view class="match-title">{{ primaryMatch(bet) }}</view>
+                  </view>
+                  <view class="header-right">
+                    <view class="status-actions">
+                      <view class="badges-row">
+                        <view class="status-badge" :class="bet.status">
+                          {{ statusText(bet) }}
+                        </view>
+                        <view class="result-badge" :class="bet.result" v-if="bet.status === 'settled'">
+                          {{ resultText(bet) }}
+                        </view>
+                      </view>
+                      <view class="action-btns">
+                        <button v-if="bet.status !== 'saved' && bet.status !== 'settled'" class="icon-btn edit" @tap.stop="() => startEdit(bet)">
+                          <text class="btn-icon">✎</text>
+                        </button>
+                        <button v-if="bet.status !== 'settled'" class="icon-btn delete" @tap.stop="() => removeBet(bet.id)">
+                          <text class="btn-icon">×</text>
+                        </button>
+                      </view>
+                    </view>
+                  </view>
+                </view>
+
+                <!-- 串关详情 -->
+                <view v-if="bet.legs?.length > 1" class="parlay-details">
+                  <view v-for="leg in bet.legs" :key="leg.id" class="parlay-match">
+                    <view class="parlay-teams">{{ formatTeams(leg) }}</view>
+                    <view class="parlay-info"> {{ leg.league || "未知" }} · {{ leg.betType }} · @{{ leg.odds }} </view>
+                  </view>
+                </view>
+
+                <!-- 卡片内容 -->
+                <view class="card-content">
+                  <view class="info-row">
+                    <view class="calendar-icon">
+                      <text>📅</text>
+                    </view>
+                    <text class="info-text">{{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
+                  </view>
+
+                  <view class="divider"></view>
+
+                  <view class="bottom-row">
+                    <view class="odds-section">
+                      <text class="odds-label"> {{ bet.legs?.length === 1 ? `${bet.legs[0].betType} · ` : "" }}赔率 @{{ bet.odds }} </text>
+                    </view>
+                    <view class="amount-section">
+                      <text class="amount-label">投注金额</text>
+                      <text class="amount-value">¥{{ bet.stake }}</text>
+                    </view>
+                  </view>
+                </view>
+              </view>
+            </view>
+          </view>
+        </mescroll-body>
       </view>
 
       <!-- 分析标签页 -->
-      <view v-else-if="mainTab === 'analysis'" class="analysis-wrapper">
+      <view v-if="mainTab === 'analysis'" class="analysis-wrapper">
         <view class="analysis-section">
           <text class="section-title">盈亏趋势</text>
           <ChartProfit :series="statStore.trendSeries" />
@@ -151,28 +153,26 @@
         <view class="analysis-section">
           <text class="section-title">玩法盈亏占比</text>
           <ChartPie :dataset="statStore.pieDataset" />
-          </view>
+        </view>
 
         <view class="analysis-section">
           <text class="section-title">周度盈亏</text>
           <view v-if="!weekList.length" class="empty-state">
             <view class="empty-icon-wrapper">
               <text class="empty-icon">-</text>
-          </view>
+            </view>
             <text class="empty-text">暂无数据</text>
-        </view>
+          </view>
           <view v-else class="weekly">
             <view v-for="row in weekList" :key="row.week" class="weekly-row">
               <view class="week">{{ row.week }}</view>
               <view class="meta">投入 {{ formatCurrency(row.stake) }}</view>
-              <view class="meta" :class="{ win: row.profit >= 0, lose: row.profit < 0 }">
-                盈亏 {{ formatCurrency(row.profit) }}
-      </view>
-    </view>
+              <view class="meta" :class="{ win: row.profit >= 0, lose: row.profit < 0 }"> 盈亏 {{ formatCurrency(row.profit) }} </view>
+            </view>
           </view>
         </view>
       </view>
-    </scroll-view>
+    </view>
 
     <!-- 投注记录弹窗 -->
     <BetRecordDialog v-model:visible="showDialog" :editing-bet="editingBet" @success="handleRecordSuccess" />
@@ -184,9 +184,10 @@ import dayjs from "dayjs";
 import BetRecordDialog from "@/components/BetRecordDialog.vue";
 import ChartPie from "@/components/ChartPie.vue";
 import ChartProfit from "@/components/ChartProfit.vue";
+import MescrollBody from "mescroll-uni/mescroll-body.vue";
 import { useBetStore } from "@/stores/betStore";
 import { useStatStore } from "@/stores/statStore";
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { formatCurrency } from "@/utils/formatters";
 
 const betStore = useBetStore();
@@ -195,6 +196,81 @@ const mainTab = ref("records");
 const editingBet = ref(null);
 const activeTab = ref("all");
 const showDialog = ref(false);
+
+// mescroll 相关
+const mescrollRef = ref(null);
+let mescroll = null;
+
+// 初始化 mescroll
+function mescrollInit(mescrollInstance) {
+  mescroll = mescrollInstance;
+  // 延迟触发上拉加载，确保 mescroll 完全初始化
+  setTimeout(() => {
+    if (mescroll && mescroll.triggerUpScroll) {
+      mescroll.triggerUpScroll();
+    }
+  }, 100);
+}
+
+// 下拉刷新回调
+function downCallback() {
+  betStore
+    .refreshBets()
+    .then(() => {
+      if (mescroll) {
+        mescroll.endSuccess();
+      }
+    })
+    .catch(() => {
+      if (mescroll) {
+        mescroll.endErr();
+      }
+    });
+}
+
+// 上拉加载回调
+function upCallback(page) {
+  betStore
+    .loadMore()
+    .then(() => {
+      if (mescroll) {
+        const dataLength = displayedBets.value.length;
+        const hasMore = betStore.hasMore;
+        mescroll.endSuccess(dataLength, hasMore);
+      }
+    })
+    .catch(() => {
+      if (mescroll) {
+        mescroll.endErr();
+      }
+    });
+}
+
+// 下拉刷新配置
+const downOption = {
+  auto: false, // 不自动加载
+};
+
+// 上拉加载配置
+const upOption = {
+  auto: false, // 手动触发上拉加载（在 mescrollInit 中触发）
+  page: {
+    num: 0, // 当前页码,默认0,回调之前会加1,即callback(page)会从1开始
+    size: betStore.pageSize, // 每页数据的数量
+  },
+  noMoreSize: 0, // 不显示"无更多数据"提示
+  empty: {
+    use: true, // 使用 mescroll 的空布局
+    tip: "暂无投注记录", // 空布局提示文本
+  },
+};
+
+// 页面加载时初始化数据
+onMounted(() => {
+  if (betStore.bets.length === 0) {
+    betStore.bootstrap();
+  }
+});
 
 // 计算总投注金额
 const totalAmount = computed(() => {
@@ -230,13 +306,18 @@ function removeBet(id) {
   uni.showModal({
     title: "删除记录",
     content: "确认删除这条投注记录吗？",
-    success: (res) => {
+    success: async (res) => {
       if (res.confirm) {
-        if (editingBet.value?.id === id) {
-          editingBet.value = null;
+        try {
+          if (editingBet.value?.id === id) {
+            editingBet.value = null;
+          }
+          await betStore.removeBet(id);
+          uni.showToast({ title: "已删除", icon: "success" });
+        } catch (error) {
+          uni.showToast({ title: error.message || "删除失败", icon: "none" });
+          console.error("删除投注记录失败:", error);
         }
-        betStore.removeBet(id);
-        uni.showToast({ title: "已删除", icon: "success" });
       }
     },
   });
@@ -469,6 +550,11 @@ function getParlayTypeLabel(bet) {
   padding: 0 24rpx 24rpx;
   box-sizing: border-box;
   width: 100%;
+}
+
+/* mescroll 容器样式 */
+.records-section {
+  padding: 0 0 24rpx;
 }
 
 /* 主标签切换 */

@@ -2,8 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import dayjs from 'dayjs'
 import { useConfigStore } from './configStore'
-
-const STORAGE_KEY = 'frbt-bets'
+import { request } from '@/utils/http'
 
 const defaultBet = () => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -25,9 +24,15 @@ const defaultBet = () => ({
 })
 
 export const useBetStore = defineStore('bet', () => {
-  const bets = ref([])
+  const bets = ref([]) // 所有已加载的记录（用于统计和展示）
   const loading = ref(false)
   const snapshots = ref([])
+  
+  // 分页相关状态
+  const page = ref(1)
+  const pageSize = ref(20)
+  const total = ref(0)
+  const hasMore = ref(true)
 
   // 计算总投注金额（只统计投注中和已结算的）
   const totalStake = computed(() => 
@@ -80,10 +85,6 @@ export const useBetStore = defineStore('bet', () => {
     return Number(configStore.startingCapital) + totalProfit.value - bettingStake
   })
 
-  function persist () {
-    uni.setStorageSync(STORAGE_KEY, bets.value)
-  }
-
   function recalculateSnapshots () {
     const grouped = bets.value.reduce((acc, bet) => {
       const dayKey = dayjs(bet.betTime).format('YYYY-MM-DD')
@@ -95,6 +96,86 @@ export const useBetStore = defineStore('bet', () => {
       return acc
     }, {})
     snapshots.value = Object.values(grouped).sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  /**
+   * 将数据库返回的数据格式转换为前端使用的格式
+   * 数据库格式：{ id, bet_data (JSON), bet_time, status, result, stake, odds, profit, ... }
+   * 前端格式：{ id, matchName, league, betType, wagerType, stake, odds, ... }
+   */
+  function normalizeBetFromDB (dbRecord) {
+    if (!dbRecord) return null
+    
+    // 从 bet_data JSON 中提取所有字段
+    const betData = dbRecord.bet_data || {}
+    
+    // 处理时间格式：数据库返回的可能是 'YYYY-MM-DD HH:mm:ss'，转换为 'YYYY-MM-DD HH:mm'
+    let betTime = dbRecord.bet_time || betData.betTime
+    if (betTime) {
+      // 如果是完整的时间戳格式，截取到分钟
+      if (betTime.length > 16) {
+        betTime = betTime.substring(0, 16)
+      }
+    } else {
+      betTime = dayjs().format('YYYY-MM-DD HH:mm')
+    }
+    
+    // 合并数据库字段和 bet_data 中的字段
+    // 注意：数据库ID优先，放在最后以确保不被覆盖
+    const normalized = {
+      ...betData, // bet_data 中的所有字段
+      // 数据库直接存储的字段优先（放在后面会覆盖前面的）
+      id: dbRecord.id, // 使用数据库ID（整数），覆盖betData中的字符串ID
+      betTime: betTime,
+      status: dbRecord.status || betData.status || 'saved',
+      result: dbRecord.result || betData.result || 'pending',
+      stake: Number(dbRecord.stake || betData.stake || 0),
+      odds: Number(dbRecord.odds || betData.odds || 1),
+      profit: dbRecord.profit !== null && dbRecord.profit !== undefined 
+        ? Number(dbRecord.profit) 
+        : (betData.profit !== null && betData.profit !== undefined ? Number(betData.profit) : 0),
+      created_at: dbRecord.created_at,
+      updated_at: dbRecord.updated_at
+    }
+    
+    // 确保必要字段存在
+    if (!normalized.legs || !Array.isArray(normalized.legs)) {
+      normalized.legs = []
+    }
+    if (!normalized.tags || !Array.isArray(normalized.tags)) {
+      normalized.tags = []
+    }
+    
+    return normalized
+  }
+
+  /**
+   * 将前端格式的数据转换为数据库格式
+   */
+  function prepareBetForDB (bet) {
+    // 提取需要存储在 bet_data JSON 中的字段
+    const betData = {
+      id: bet.id, // 保留前端生成的ID（用于临时标识）
+      matchName: bet.matchName,
+      league: bet.league,
+      betType: bet.betType,
+      wagerType: bet.wagerType,
+      platform: bet.platform,
+      fee: bet.fee || 0,
+      tags: bet.tags || [],
+      note: bet.note || '',
+      legs: bet.legs || []
+    }
+    
+    return {
+      bet_data: betData,
+      bet_time: bet.betTime || dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      status: bet.status || 'saved',
+      result: bet.result || null,
+      stake: Number(bet.stake || 0),
+      odds: Number(bet.odds || 1),
+      profit: bet.profit !== null && bet.profit !== undefined ? Number(bet.profit) : null
+    }
   }
 
   function normalizeBet (payload = {}) {
@@ -184,12 +265,63 @@ export const useBetStore = defineStore('bet', () => {
     return draft
   }
 
-  async function bootstrap () {
+  /**
+   * 从数据库加载投注记录（分页）
+   */
+  async function fetchBets (reset = false) {
+    if (loading.value) return
+    
     loading.value = true
     try {
-      const cache = uni.getStorageSync(STORAGE_KEY)
-      if (Array.isArray(cache)) {
-        bets.value = cache.map(normalizeBet)
+      const currentPage = reset ? 1 : page.value
+      const data = await request({
+        url: '/api/bets',
+        method: 'GET',
+        data: {
+          page: currentPage,
+          page_size: pageSize.value
+        }
+      })
+      
+      if (data && data.items && Array.isArray(data.items)) {
+        const newBets = data.items
+          .map(normalizeBetFromDB)
+          .filter(bet => bet !== null)
+          .map(normalizeBet) // 再次标准化以确保格式一致
+        
+        if (reset) {
+          bets.value = newBets
+          page.value = 1
+        } else {
+          // 追加新记录，避免重复
+          const existingIds = new Set(bets.value.map(b => b.id))
+          const uniqueNewBets = newBets.filter(b => !existingIds.has(b.id))
+          bets.value = [...bets.value, ...uniqueNewBets]
+        }
+        
+        // 更新分页信息
+        total.value = data.total || 0
+        hasMore.value = bets.value.length < total.value
+        
+        if (!reset && newBets.length > 0) {
+          page.value = currentPage + 1
+        }
+      } else {
+        if (reset) {
+          bets.value = []
+        }
+        total.value = 0
+        hasMore.value = false
+      }
+    } catch (error) {
+      console.error('加载投注记录失败:', error)
+      // 如果未登录或token失效，返回空数组
+      if (error.statusCode === 401) {
+        if (reset) {
+          bets.value = []
+        }
+        total.value = 0
+        hasMore.value = false
       }
     } finally {
       loading.value = false
@@ -197,7 +329,34 @@ export const useBetStore = defineStore('bet', () => {
     }
   }
 
-  function addBet (payload) {
+  /**
+   * 刷新投注记录（重置到第一页）
+   */
+  async function refreshBets () {
+    page.value = 1
+    hasMore.value = true
+    await fetchBets(true)
+  }
+
+  /**
+   * 加载更多投注记录
+   */
+  async function loadMore () {
+    if (!hasMore.value || loading.value) return
+    await fetchBets(false)
+  }
+
+  /**
+   * 从数据库加载投注记录（兼容旧接口，用于初始化）
+   */
+  async function bootstrap () {
+    await refreshBets()
+  }
+
+  /**
+   * 添加投注记录（异步，保存到数据库）
+   */
+  async function addBet (payload) {
     const bet = normalizeBet(payload)
     
     // 如果是投注中状态，检查余额是否足够
@@ -209,14 +368,45 @@ export const useBetStore = defineStore('bet', () => {
       }
     }
     
-    bets.value = [bet, ...bets.value]
-    persist()
-    recalculateSnapshots()
-    return bet
+    try {
+      // 准备数据库格式的数据
+      const dbData = prepareBetForDB(bet)
+      
+      // 调用API创建记录
+      const response = await request({
+        url: '/api/bets',
+        method: 'POST',
+        data: dbData
+      })
+      
+      // 使用数据库返回的ID更新bet对象
+      bet.id = response.id
+      
+      // 添加到本地列表（前端显示，插入到最前面）
+      bets.value = [bet, ...bets.value]
+      
+      // 更新总数（如果当前已加载的记录数小于总数，说明还有未加载的记录）
+      if (bets.value.length <= total.value) {
+        total.value += 1
+      }
+      
+      recalculateSnapshots()
+      
+      return bet
+    } catch (error) {
+      console.error('保存投注记录失败:', error)
+      throw new Error(error.message || '保存投注记录失败')
+    }
   }
 
-  function updateBet (id, payload) {
+  /**
+   * 更新投注记录（异步，保存到数据库）
+   */
+  async function updateBet (id, payload) {
     const oldBet = bets.value.find(bet => bet.id === id)
+    if (!oldBet) {
+      throw new Error('投注记录不存在')
+    }
     
     // 如果从其他状态变为投注中，检查余额
     if (payload.status === 'betting' && oldBet?.status !== 'betting') {
@@ -227,23 +417,62 @@ export const useBetStore = defineStore('bet', () => {
       }
     }
     
-    bets.value = bets.value.map(bet => {
-      if (bet.id !== id) return bet
-      return normalizeBet({ ...bet, ...payload, id })
-    })
-    persist()
-    recalculateSnapshots()
+    try {
+      // 合并更新数据
+      const updatedBet = normalizeBet({ ...oldBet, ...payload, id })
+      
+      // 准备数据库格式的数据
+      const dbData = prepareBetForDB(updatedBet)
+      
+      // 调用API更新记录
+      await request({
+        url: `/api/bets/${id}`,
+        method: 'PUT',
+        data: dbData
+      })
+      
+      // 更新本地列表
+      bets.value = bets.value.map(bet => {
+        if (bet.id !== id) return bet
+        return updatedBet
+      })
+      recalculateSnapshots()
+    } catch (error) {
+      console.error('更新投注记录失败:', error)
+      throw new Error(error.message || '更新投注记录失败')
+    }
   }
 
-  function removeBet (id) {
-    // 删除时不需要特殊处理余额，因为计算会自动更新
-    bets.value = bets.value.filter(bet => bet.id !== id)
-    persist()
-    recalculateSnapshots()
+  /**
+   * 删除投注记录（异步，从数据库删除）
+   */
+  async function removeBet (id) {
+    try {
+      // 调用API删除记录
+      await request({
+        url: `/api/bets/${id}`,
+        method: 'DELETE'
+      })
+      
+      // 从本地列表移除
+      bets.value = bets.value.filter(bet => bet.id !== id)
+      
+      // 更新总数
+      if (total.value > 0) {
+        total.value -= 1
+      }
+      
+      recalculateSnapshots()
+    } catch (error) {
+      console.error('删除投注记录失败:', error)
+      throw new Error(error.message || '删除投注记录失败')
+    }
   }
   
-  // 将投注记录从"投注中"结算
-  function settleBet(id, result) {
+  /**
+   * 将投注记录从"投注中"结算（异步，保存到数据库）
+   */
+  async function settleBet(id, result) {
     const bet = bets.value.find(b => b.id === id)
     if (!bet) {
       throw new Error('投注记录不存在')
@@ -252,15 +481,17 @@ export const useBetStore = defineStore('bet', () => {
       throw new Error('只能结算投注中的记录')
     }
     
-    updateBet(id, { 
+    await updateBet(id, { 
       status: 'settled',
       result: result || bet.result
     })
   }
 
+  /**
+   * 清空所有投注记录（注意：这个操作不会删除数据库记录，只是清空本地列表）
+   */
   function clearBets () {
     bets.value = []
-    persist()
     recalculateSnapshots()
   }
 
@@ -275,7 +506,16 @@ export const useBetStore = defineStore('bet', () => {
     winningRate,
     consecutiveLosses,
     bankroll,
+    // 分页相关
+    page,
+    pageSize,
+    total,
+    hasMore,
+    // 方法
     bootstrap,
+    fetchBets,
+    refreshBets,
+    loadMore,
     addBet,
     updateBet,
     removeBet,

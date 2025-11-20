@@ -53,6 +53,26 @@ class UpdateConfigRequest(BaseModel):
     theme: Optional[str] = None
 
 
+class CreateBetRequest(BaseModel):
+    bet_data: Dict[str, Any]
+    bet_time: str
+    status: str = "saved"
+    stake: float
+    odds: float
+    result: Optional[str] = None
+    profit: Optional[float] = None
+
+
+class UpdateBetRequest(BaseModel):
+    bet_data: Optional[Dict[str, Any]] = None
+    bet_time: Optional[str] = None
+    status: Optional[str] = None
+    result: Optional[str] = None
+    stake: Optional[float] = None
+    odds: Optional[float] = None
+    profit: Optional[float] = None
+
+
 def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
     kickoff_iso = None
     if row.get("match_timestamp"):
@@ -290,3 +310,73 @@ def update_user_config(req: UpdateConfigRequest, user_id: int = Depends(require_
         raise HTTPException(status_code=400, detail="更新失败")
     
     return {"message": "配置已更新"}
+
+
+# ==================== 投注记录相关API ====================
+
+@app.post("/api/bets")
+def create_bet(req: CreateBetRequest, user_id: int = Depends(require_auth)):
+    """创建投注记录"""
+    try:
+        bet_id = user_repo.create_bet(
+            user_id=user_id,
+            bet_data=req.bet_data,
+            bet_time=req.bet_time,
+            status=req.status,
+            stake=req.stake,
+            odds=req.odds,
+            result=req.result,
+            profit=req.profit
+        )
+        return {"message": "创建成功", "id": bet_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建失败：{str(e)}")
+
+
+@app.get("/api/bets")
+def list_bets(
+    status: Optional[str] = Query(default=None, description="按状态过滤：saved/betting/settled"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=1000),
+    user_id: int = Depends(require_auth)
+):
+    """获取投注记录列表"""
+    data = user_repo.list_bets(user_id=user_id, status=status, page=page, page_size=page_size)
+    return {
+        "items": data["items"],
+        "total": data["total"],
+        "page": data["page"],
+        "pageSize": data["page_size"]
+    }
+
+
+@app.get("/api/bets/{bet_id}")
+def get_bet(bet_id: int, user_id: int = Depends(require_auth)):
+    """获取单条投注记录"""
+    bet = user_repo.get_bet(bet_id, user_id)
+    if not bet:
+        raise HTTPException(status_code=404, detail="投注记录不存在")
+    return bet
+
+
+@app.put("/api/bets/{bet_id}")
+def update_bet(bet_id: int, req: UpdateBetRequest, user_id: int = Depends(require_auth)):
+    """更新投注记录"""
+    updates = req.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="没有要更新的字段")
+    
+    success = user_repo.update_bet(bet_id, user_id, updates)
+    if not success:
+        raise HTTPException(status_code=404, detail="投注记录不存在或更新失败")
+    
+    return {"message": "更新成功"}
+
+
+@app.delete("/api/bets/{bet_id}")
+def delete_bet(bet_id: int, user_id: int = Depends(require_auth)):
+    """删除投注记录"""
+    success = user_repo.delete_bet(bet_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="投注记录不存在")
+    return {"message": "删除成功"}

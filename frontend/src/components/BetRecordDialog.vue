@@ -69,13 +69,13 @@ function submitFormWithStatus(status) {
   betFormRef.value?.handleSubmitWithStatus?.(status);
 }
 
-function handleSubmit(payload) {
+async function handleSubmit(payload) {
   try {
     if (payload.id) {
-      betStore.updateBet(payload.id, payload);
+      await betStore.updateBet(payload.id, payload);
       uni.showToast({ title: "记录已更新", icon: "success" });
     } else {
-      betStore.addBet(payload);
+      await betStore.addBet(payload);
       const statusText = payload.status === "betting" ? "投注成功" : "保存成功";
       uni.showToast({ title: statusText, icon: "success" });
     }

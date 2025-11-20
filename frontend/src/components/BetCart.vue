@@ -210,7 +210,7 @@ function handleRemove(key) {
   betCart.removeSelection(key)
 }
 
-function handleSaveWithStatus(status) {
+async function handleSaveWithStatus(status) {
   if (!betCart.canBet) {
     uni.showToast({ title: betCart.cannotBetReason || '请完善投注信息', icon: 'none', duration: 2000 })
     return
@@ -226,7 +226,7 @@ function handleSaveWithStatus(status) {
   record.status = status
 
   try {
-    betStore.addBet(record)
+    await betStore.addBet(record)
     const successMsg = status === 'betting' ? '投注成功' : '保存成功'
     uni.showToast({ title: successMsg, icon: 'success' })
     betCart.clearCart()
