@@ -313,6 +313,8 @@ ENVEOF
         # 导入数据库表结构
         mysql -u root -p'$MYSQL_ROOT_PASSWORD' $MYSQL_DATABASE < schema_mysql.sql || true
         mysql -u root -p'$MYSQL_ROOT_PASSWORD' $MYSQL_DATABASE < schema_user.sql || true
+        # 执行微信登录相关字段迁移（如果表已存在）
+        mysql -u root -p'$MYSQL_ROOT_PASSWORD' $MYSQL_DATABASE < schema_user_wechat.sql || true
 EOF
     
     # 5. 配置 Systemd 服务
