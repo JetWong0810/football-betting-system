@@ -312,11 +312,35 @@ ENVEOF
         
         # 导入数据库表结构
         mysql -u root -p'$MYSQL_ROOT_PASSWORD' $MYSQL_DATABASE < schema_mysql.sql || true
+        mysql -u root -p'$MYSQL_ROOT_PASSWORD' $MYSQL_DATABASE < schema_user.sql || true
 EOF
     
     # 5. 配置 Systemd 服务
     print_info "配置 Systemd 服务..."
     ssh $GUIYUN_HOST << EOF
+        # 先停止旧服务（如果存在）
+        sudo systemctl stop football-betting-api 2>/dev/null || true
+        
+        # 等待服务完全停止
+        sleep 2
+        
+        # 检查并清理占用 7001 端口的进程
+        PORT_PID=\$(sudo lsof -ti:7001 2>/dev/null || true)
+        if [ -n "\$PORT_PID" ]; then
+            echo "发现端口 7001 被进程 \$PORT_PID 占用，正在清理..."
+            sudo kill -9 \$PORT_PID 2>/dev/null || true
+            sleep 1
+        fi
+        
+        # 再次确认端口已释放
+        REMAINING_PID=\$(sudo lsof -ti:7001 2>/dev/null || true)
+        if [ -n "\$REMAINING_PID" ]; then
+            echo "警告: 端口 7001 仍被占用，尝试强制清理..."
+            sudo kill -9 \$REMAINING_PID 2>/dev/null || true
+            sleep 1
+        fi
+        
+        # 创建 systemd 服务文件
         sudo bash -c 'cat > /etc/systemd/system/football-betting-api.service << SERVICEEOF
 [Unit]
 Description=Football Betting API Service
@@ -331,15 +355,37 @@ Environment="PATH=$PROJECT_DIR/api-service/venv/bin"
 ExecStart=$PROJECT_DIR/api-service/venv/bin/uvicorn main:app --host 0.0.0.0 --port 7001
 Restart=always
 RestartSec=10
+# 确保服务停止时正确清理
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
 SERVICEEOF'
         
+        # 重新加载 systemd 配置
         sudo systemctl daemon-reload
+        
+        # 启用服务
         sudo systemctl enable football-betting-api
-        sudo systemctl restart football-betting-api
+        
+        # 启动服务
+        sudo systemctl start football-betting-api
+        
+        # 等待服务启动
+        sleep 3
+        
+        # 检查服务状态
         sudo systemctl status football-betting-api --no-pager || true
+        
+        # 检查端口是否成功监听
+        if sudo lsof -ti:7001 >/dev/null 2>&1; then
+            echo "✓ 服务已成功启动，端口 7001 正在监听"
+        else
+            echo "✗ 警告: 服务可能未成功启动，端口 7001 未监听"
+            echo "查看详细日志: sudo journalctl -u football-betting-api -n 50"
+        fi
 EOF
     
     # 6. 配置证书与 Nginx
