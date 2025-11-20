@@ -1,3 +1,5 @@
+import pinia from '@/stores/pinia'
+
 // 根据环境配置API基础URL
 const getBaseURL = () => {
   // #ifdef H5
@@ -41,22 +43,18 @@ function handle401Error() {
   uni.removeStorageSync('token');
   uni.removeStorageSync('user');
 
-  // 清除userStore中的状态
-  // 使用异步方式清除，避免阻塞
-  (async () => {
-    try {
-      // 使用动态import避免循环依赖
-      const userStoreModule = await import('@/stores/userStore');
-      if (userStoreModule && userStoreModule.useUserStore) {
-        const userStore = userStoreModule.useUserStore();
-        userStore.token = '';
-        userStore.user = null;
-      }
-    } catch (e) {
-      // 静默失败，不影响主要流程（本地存储已清除）
-      console.warn('清除用户状态失败:', e);
+  // 清除userStore中的状态（如果已经初始化）
+  try {
+    const storeMap = pinia?._s
+    if (storeMap && storeMap.has('user')) {
+      const userStore = storeMap.get('user')
+      userStore.token = ''
+      userStore.user = null
     }
-  })();
+  } catch (e) {
+    // 静默失败，不影响主要流程（本地存储已清除）
+    console.warn('清除用户状态失败:', e)
+  }
 
   // 获取当前页面路径
   const pages = getCurrentPages();

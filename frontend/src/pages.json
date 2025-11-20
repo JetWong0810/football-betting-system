@@ -73,6 +73,14 @@
       }
     },
     {
+      "path": "pages/auth/wechat-profile",
+      "style": {
+        "navigationBarTitleText": "完善资料",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/matches/list",
       "style": {
         "navigationBarTitleText": "赛事中心",

@@ -1,10 +1,19 @@
-import { defineStore } from 'pinia'
-import { request } from '@/utils/http'
+import { defineStore } from "pinia";
+import { request } from "@/utils/http";
+import { useConfigStore } from "@/stores/configStore";
+import { useBetStore } from "@/stores/betStore";
 
-export const useUserStore = defineStore('user', {
+async function afterLoginSideEffects() {
+  const configStore = useConfigStore();
+  const betStore = useBetStore();
+  await configStore.loadFromServer();
+  await betStore.refreshBets();
+}
+
+export const useUserStore = defineStore("user", {
   state: () => ({
-    token: uni.getStorageSync('token') || '',
-    user: uni.getStorageSync('user') || null,
+    token: uni.getStorageSync("token") || "",
+    user: uni.getStorageSync("user") || null,
   }),
 
   getters: {
@@ -16,31 +25,24 @@ export const useUserStore = defineStore('user', {
     async register(data) {
       try {
         const res = await request({
-          url: '/api/auth/register',
-          method: 'POST',
-          data
-        })
-        
-        this.token = res.token
-        this.user = res.user
-        
+          url: "/api/auth/register",
+          method: "POST",
+          data,
+        });
+
+        this.token = res.token;
+        this.user = res.user;
+
         // 保存到本地存储
-        uni.setStorageSync('token', res.token)
-        uni.setStorageSync('user', res.user)
-        
+        uni.setStorageSync("token", res.token);
+        uni.setStorageSync("user", res.user);
+
         // 注册后加载用户配置（会创建默认配置）和投注记录
-        const { useConfigStore } = await import('@/stores/configStore')
-        const configStore = useConfigStore()
-        await configStore.loadFromServer()
-        
-        // 加载新用户的投注记录（应该为空）
-        const { useBetStore } = await import('@/stores/betStore')
-        const betStore = useBetStore()
-        await betStore.refreshBets()
-        
-        return res
+        await afterLoginSideEffects();
+
+        return res;
       } catch (error) {
-        throw error
+        throw error;
       }
     },
 
@@ -48,31 +50,24 @@ export const useUserStore = defineStore('user', {
     async login(data) {
       try {
         const res = await request({
-          url: '/api/auth/login',
-          method: 'POST',
-          data
-        })
-        
-        this.token = res.token
-        this.user = res.user
-        
+          url: "/api/auth/login",
+          method: "POST",
+          data,
+        });
+
+        this.token = res.token;
+        this.user = res.user;
+
         // 保存到本地存储
-        uni.setStorageSync('token', res.token)
-        uni.setStorageSync('user', res.user)
-        
+        uni.setStorageSync("token", res.token);
+        uni.setStorageSync("user", res.user);
+
         // 登录后加载用户配置和投注记录
-        const { useConfigStore } = await import('@/stores/configStore')
-        const configStore = useConfigStore()
-        await configStore.loadFromServer()
-        
-        // 重新加载当前用户的投注记录
-        const { useBetStore } = await import('@/stores/betStore')
-        const betStore = useBetStore()
-        await betStore.refreshBets()
-        
-        return res
+        await afterLoginSideEffects();
+
+        return res;
       } catch (error) {
-        throw error
+        throw error;
       }
     },
 
@@ -80,80 +75,151 @@ export const useUserStore = defineStore('user', {
     async wechatLogin(data) {
       try {
         const res = await request({
-          url: '/api/auth/wechat-login',
-          method: 'POST',
-          data
-        })
-        
-        this.token = res.token
-        this.user = res.user
-        
+          url: "/api/auth/wechat-login",
+          method: "POST",
+          data,
+        });
+
+        this.token = res.token;
+        this.user = res.user;
+
         // 保存到本地存储
-        uni.setStorageSync('token', res.token)
-        uni.setStorageSync('user', res.user)
-        
+        uni.setStorageSync("token", res.token);
+        uni.setStorageSync("user", res.user);
+
         // 登录后加载用户配置和投注记录
-        const { useConfigStore } = await import('@/stores/configStore')
-        const configStore = useConfigStore()
-        await configStore.loadFromServer()
-        
-        // 重新加载当前用户的投注记录
-        const { useBetStore } = await import('@/stores/betStore')
-        const betStore = useBetStore()
-        await betStore.refreshBets()
-        
-        return res
+        await afterLoginSideEffects();
+
+        return res;
       } catch (error) {
-        throw error
+        throw error;
       }
+    },
+
+    // 微信小程序一键登录（调用 uni.login 获取 code）
+    async loginWithWeChatMiniProgram(options = {}) {
+      // #ifndef MP-WEIXIN
+      throw new Error("仅支持在微信小程序环境中使用微信登录");
+      // #endif
+
+      // #ifdef MP-WEIXIN
+      const { requireProfile = true, providedNickname = "", avatarBase64 = null, avatarFileExt = "png" } = options;
+
+      // 先同步触发 API，确保仍处于用户点击上下文
+      const loginPromise = new Promise((resolve, reject) => {
+        uni.login({
+          provider: "weixin",
+          onlyAuthorize: true,
+          timeout: 10000,
+          success: (res) => {
+            if (res.code) {
+              resolve(res);
+            } else {
+              reject(new Error(res.errMsg || "获取登录凭证失败"));
+            }
+          },
+          fail: (err) => {
+            reject(new Error(err?.errMsg || "获取登录凭证失败"));
+          },
+        });
+      });
+
+      const profilePromise = requireProfile
+        ? new Promise((resolve, reject) => {
+            uni.getUserProfile({
+              desc: "用于完善会员资料",
+              lang: "zh_CN",
+              success: resolve,
+              fail: reject,
+            });
+          })
+        : Promise.resolve(null);
+
+      const [loginRes, profile] = await Promise.all([loginPromise, profilePromise]);
+
+      const payload = {
+        code: loginRes.code,
+      };
+
+      if (profile) {
+        const { rawData, signature, encryptedData, iv, userInfo } = profile;
+        if (rawData) {
+          payload.rawData = rawData;
+          payload.raw_data = rawData;
+        }
+        if (signature) {
+          payload.signature = signature;
+        }
+        if (encryptedData) {
+          payload.encryptedData = encryptedData;
+          payload.encrypted_data = encryptedData;
+        }
+        if (iv) {
+          payload.iv = iv;
+        }
+        if (userInfo) {
+          payload.userInfo = userInfo;
+          payload.user_info = userInfo;
+        }
+      }
+
+      if (providedNickname) {
+        payload.providedNickname = providedNickname;
+      }
+      if (avatarBase64) {
+        payload.avatarBase64 = avatarBase64;
+        if (avatarFileExt) {
+          payload.avatarFileExt = avatarFileExt;
+        }
+      }
+
+      return this.wechatLogin(payload);
+      // #endif
     },
 
     // 退出登录
     async logout() {
-      this.token = ''
-      this.user = null
-      
+      this.token = "";
+      this.user = null;
+
       // 清除本地存储
-      uni.removeStorageSync('token')
-      uni.removeStorageSync('user')
-      
+      uni.removeStorageSync("token");
+      uni.removeStorageSync("user");
+
       // 清空用户相关的store数据
       // 清空投注记录
-      const { useBetStore } = await import('@/stores/betStore')
-      const betStore = useBetStore()
-      betStore.clearBets()
-      
-      // 重置配置为默认值（从本地加载，如果本地没有则使用默认值）
-      const { useConfigStore } = await import('@/stores/configStore')
-      const configStore = useConfigStore()
-      configStore.loadFromLocal()
+      const betStore = useBetStore();
+      betStore.clearBets();
+
+      const configStore = useConfigStore();
+      configStore.loadFromLocal();
     },
 
     // 获取用户信息
     async fetchUserProfile() {
       if (!this.token) {
-        return
+        return;
       }
-      
+
       try {
         const res = await request({
-          url: '/api/user/profile',
-          method: 'GET',
+          url: "/api/user/profile",
+          method: "GET",
           header: {
-            'Authorization': `Bearer ${this.token}`
-          }
-        })
-        
-        this.user = res
-        uni.setStorageSync('user', res)
-        
-        return res
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+
+        this.user = res;
+        uni.setStorageSync("user", res);
+
+        return res;
       } catch (error) {
         // Token失效，清除登录状态
         if (error.statusCode === 401) {
-          this.logout()
+          this.logout();
         }
-        throw error
+        throw error;
       }
     },
 
@@ -161,38 +227,38 @@ export const useUserStore = defineStore('user', {
     async updateProfile(data) {
       try {
         await request({
-          url: '/api/user/profile',
-          method: 'PUT',
+          url: "/api/user/profile",
+          method: "PUT",
           data,
           header: {
-            'Authorization': `Bearer ${this.token}`
-          }
-        })
-        
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+
         // 重新获取用户信息
-        await this.fetchUserProfile()
+        await this.fetchUserProfile();
       } catch (error) {
-        throw error
+        throw error;
       }
     },
 
     // 获取用户配置
     async fetchUserConfig() {
       if (!this.token) {
-        return null
+        return null;
       }
-      
+
       try {
         const res = await request({
-          url: '/api/user/config',
-          method: 'GET',
+          url: "/api/user/config",
+          method: "GET",
           header: {
-            'Authorization': `Bearer ${this.token}`
-          }
-        })
-        return res
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+        return res;
       } catch (error) {
-        throw error
+        throw error;
       }
     },
 
@@ -200,45 +266,44 @@ export const useUserStore = defineStore('user', {
     async updateConfig(data) {
       try {
         await request({
-          url: '/api/user/config',
-          method: 'PUT',
+          url: "/api/user/config",
+          method: "PUT",
           data,
           header: {
-            'Authorization': `Bearer ${this.token}`
-          }
-        })
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
       } catch (error) {
-        throw error
+        throw error;
       }
     },
 
     // 验证token是否有效
     async verifyToken() {
       if (!this.token) {
-        return false
+        return false;
       }
-      
+
       try {
         const res = await request({
-          url: '/api/auth/verify',
-          method: 'GET'
-        })
-        
+          url: "/api/auth/verify",
+          method: "GET",
+        });
+
         // 如果验证成功，更新用户信息
         if (res && res.user) {
-          this.user = res.user
-          uni.setStorageSync('user', res.user)
+          this.user = res.user;
+          uni.setStorageSync("user", res.user);
         }
-        
-        return true
+
+        return true;
       } catch (error) {
         // token无效，清除登录状态
         if (error.statusCode === 401) {
-          this.logout()
+          this.logout();
         }
-        return false
+        return false;
       }
-    }
-  }
-})
-
+    },
+  },
+});

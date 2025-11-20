@@ -1,14 +1,20 @@
 import base64
+import binascii
+import imghdr
 import json
-from datetime import datetime
 import logging
+import os
+import uuid
+from datetime import datetime
 from hashlib import sha1
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError, Field
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
@@ -21,7 +27,15 @@ from auth import hash_password, verify_password, create_access_token, require_au
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
 import httpx
 
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+UPLOAD_DIR = STATIC_DIR / "uploads"
+UPLOAD_URL_PREFIX = "/static/uploads"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 app = FastAPI(title="Football Match Odds API", version="1.0.0")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 添加全局异常处理器，改进验证错误提示
 @app.exception_handler(RequestValidationError)
@@ -72,6 +86,35 @@ logger = logging.getLogger("wechat_login")
 logging.basicConfig(level=logging.INFO)
 
 
+def save_avatar_from_base64(data: str, file_ext: Optional[str] = None) -> str:
+    """将 base64 编码的头像保存到本地，返回文件名"""
+    if not data:
+        raise ValueError("头像数据为空")
+    try:
+        decoded = base64.b64decode(data)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("头像数据格式错误") from exc
+
+    detected_format = imghdr.what(None, decoded)
+    cleaned_ext = file_ext.lstrip(".") if file_ext else None
+    extension = (cleaned_ext or detected_format or "png").lower()
+    if extension == "jpeg":
+        extension = "jpg"
+    if extension not in {"png", "jpg", "jpeg"}:
+        extension = "png"
+
+    filename = f"wechat_avatar_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex}.{extension}"
+    file_path = UPLOAD_DIR / filename
+    with open(file_path, "wb") as avatar_file:
+        avatar_file.write(decoded)
+    return filename
+
+
+def build_static_url(request: Request, filename: str) -> str:
+    base_url = str(request.base_url).rstrip("/")
+    return f"{base_url}{UPLOAD_URL_PREFIX}/{filename}"
+
+
 # Pydantic models
 class RegisterRequest(BaseModel):
     username: str
@@ -93,6 +136,9 @@ class WechatLoginRequest(BaseModel):
     raw_data: Optional[str] = Field(default=None, alias="rawData")  # 原始数据字符串（用于签名校验）
     signature: Optional[str] = None  # 签名（用于校验）
     user_info: Optional[Dict[str, Any]] = Field(default=None, alias="userInfo")  # 用户信息（新版，从getUserProfile获取）
+    provided_nickname: Optional[str] = Field(default=None, alias="providedNickname")
+    avatar_base64: Optional[str] = Field(default=None, alias="avatarBase64")
+    avatar_file_ext: Optional[str] = Field(default=None, alias="avatarFileExt")
 
     class Config:
         allow_population_by_field_name = True
@@ -405,7 +451,7 @@ def verify_token(user_id: int = Depends(require_auth)):
 
 
 @app.post("/api/auth/wechat-login")
-async def wechat_login(req: WechatLoginRequest):
+async def wechat_login(req: WechatLoginRequest, request: Request):
     """微信小程序登录"""
     try:
         if not WECHAT_APPID or not WECHAT_SECRET:
@@ -437,6 +483,20 @@ async def wechat_login(req: WechatLoginRequest):
 
         wechat_nickname = profile_data.get("nickName") if profile_data else None
         wechat_avatar = profile_data.get("avatarUrl") if profile_data else None
+
+        manual_nickname = (req.provided_nickname or "").strip() if req.provided_nickname else None
+        if manual_nickname:
+            wechat_nickname = manual_nickname
+
+        manual_avatar_url = None
+        if req.avatar_base64:
+            try:
+                filename = save_avatar_from_base64(req.avatar_base64, req.avatar_file_ext)
+                manual_avatar_url = build_static_url(request, filename)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if manual_avatar_url:
+            wechat_avatar = manual_avatar_url
 
         # 4. 查找或创建/更新用户
         try:

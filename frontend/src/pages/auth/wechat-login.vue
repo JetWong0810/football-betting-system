@@ -12,19 +12,15 @@
 
       <!-- 授权按钮 -->
       <view class="button-section">
-        <button
-          class="auth-btn"
-          :disabled="loading"
-          @tap="handleWechatLogin"
-        >
-          <text v-if="loading">登录中...</text>
+        <button class="auth-btn" :disabled="loading" @tap="handleStartLogin" hover-class="auth-btn-active">
+          <text v-if="loading">跳转中...</text>
           <text v-else>微信快速登录</text>
         </button>
       </view>
 
       <!-- 说明文字 -->
       <view class="desc-section">
-        <text class="desc-text">点击按钮即表示同意获取您的微信头像和昵称</text>
+        <text class="desc-text"> 点击按钮后，将跳转到“头像昵称填写”页，按照微信最新规范完成资料后即可登录。 </text>
       </view>
     </view>
   </view>
@@ -32,13 +28,18 @@
 
 <script setup>
 import { ref } from "vue";
-import { useUserStore } from "@/stores/userStore";
+import { onLoad } from "@dcloudio/uni-app";
 
-const userStore = useUserStore();
 const loading = ref(false);
+const redirectUrl = ref("/pages/home/home");
 
-async function handleWechatLogin() {
-  // 防止重复点击
+onLoad((options) => {
+  if (options?.redirect) {
+    redirectUrl.value = decodeURIComponent(options.redirect);
+  }
+});
+
+function handleStartLogin() {
   if (loading.value) {
     return;
   }
@@ -52,76 +53,12 @@ async function handleWechatLogin() {
   // #endif
 
   loading.value = true;
-
-  try {
-    // 1. 直接在手势回调内调用 getUserProfile，确保符合微信要求
-    const profile = await new Promise((resolve, reject) => {
-      uni.getUserProfile({
-        desc: "用于完善会员资料",
-        lang: "zh_CN",
-        success: resolve,
-        fail: reject,
-      });
-    });
-
-    // 2. 获取微信登录 code（每次调用都会获取新的 code，有效期 5 分钟）
-    const loginRes = await new Promise((resolve, reject) => {
-      uni.login({
-        provider: "weixin",
-        timeout: 10000,
-        success: (res) => {
-          if (res.code) {
-            resolve(res);
-          } else {
-            reject(new Error(res.errMsg || "获取登录凭证失败"));
-          }
-        },
-        fail: (err) => {
-          reject(new Error(err.errMsg || "获取登录凭证失败"));
-        },
-      });
-    });
-
-    // 3. 从 getUserProfile 拿到用户加密数据/原始数据
-    const { rawData, signature, encryptedData, iv, userInfo } = profile;
-
-    // 4. 调用后端微信登录接口
-    await userStore.wechatLogin({
-      code: loginRes.code,
-      raw_data: rawData,
-      signature,
-      encrypted_data: encryptedData,
-      iv,
-      user_info: userInfo, // 包含 nickName, avatarUrl
-    });
-
-    uni.showToast({
-      title: "登录成功",
-      icon: "success",
-      duration: 1500,
-    });
-
-    // 延迟跳转到首页
-    setTimeout(() => {
-      uni.switchTab({
-        url: "/pages/home/home",
-      });
-    }, 1500);
-  } catch (error) {
-    console.error("微信登录失败:", error);
-    uni.showToast({
-      title: error?.data?.detail || error?.message || "登录失败，请重试",
-      icon: "none",
-      duration: 2000,
-    });
-    // 避免手势调用限制后连续点击无响应
-    setTimeout(() => {
+  uni.navigateTo({
+    url: `/pages/auth/wechat-profile?redirect=${encodeURIComponent(redirectUrl.value)}`,
+    complete: () => {
       loading.value = false;
-    }, 0);
-  } finally {
-    // 在 catch 中已处理 loading 释放，这里兜底
-    loading.value = false;
-  }
+    },
+  });
 }
 </script>
 

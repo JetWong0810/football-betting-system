@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { request } from '@/utils/http'
-import { useUserStore } from './userStore'
 
 const STORAGE_KEY = 'frbt-config'
 
@@ -15,13 +14,15 @@ export const useConfigStore = defineStore('config', () => {
   const riskTolerance = ref('balanced')
   const loading = ref(false)
 
+  function hasAuthToken() {
+    return !!uni.getStorageSync('token')
+  }
+
   /**
    * 从后端API加载用户配置
    */
   async function loadFromServer() {
-    const userStore = useUserStore()
-    if (!userStore.isLoggedIn) {
-      // 未登录时使用本地存储的配置（兼容旧数据）
+    if (!hasAuthToken()) {
       loadFromLocal()
       return
     }
@@ -71,9 +72,7 @@ export const useConfigStore = defineStore('config', () => {
    * 保存配置到后端API
    */
   async function saveToServer() {
-    const userStore = useUserStore()
-    if (!userStore.isLoggedIn) {
-      // 未登录时保存到本地存储（兼容旧数据）
+    if (!hasAuthToken()) {
       saveToLocal()
       return
     }
