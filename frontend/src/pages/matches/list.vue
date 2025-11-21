@@ -127,7 +127,7 @@
                     </view>
 
                     <view class="side-links">
-                      <text class="link-index">指数</text>
+                      <text class="link-index" @tap="goIndices(match.matchId, match)">指数</text>
                       <text class="link-more" :class="{ active: hasMatchSelection(match.matchId) }" @tap="goPlays(match.matchId, match)"> 更多玩法 </text>
                     </view>
                   </view>
@@ -287,6 +287,13 @@ function goPlays(matchId, match) {
   const title = `${match.homeTeam.name} VS ${match.awayTeam.name}`;
   uni.navigateTo({
     url: `/pages/matches/plays?matchId=${matchId}&title=${encodeURIComponent(title)}`,
+  });
+}
+
+function goIndices(matchId, match) {
+  const title = `${match.homeTeam.name} VS ${match.awayTeam.name}`;
+  uni.navigateTo({
+    url: `/pages/matches/indices?matchId=${matchId}&title=${encodeURIComponent(title)}`,
   });
 }
 

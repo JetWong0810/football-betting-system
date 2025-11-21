@@ -97,6 +97,16 @@
         "navigationBarBackgroundColor": "#0d9488",
         "navigationBarTextStyle": "white"
       }
+    },
+    {
+      "path": "pages/matches/indices",
+      "style": {
+        "navigationBarTitleText": "指数分析",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f2fbf9"
+      }
     }
   ],
   "globalStyle": {
