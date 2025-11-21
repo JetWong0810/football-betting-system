@@ -14,6 +14,7 @@ export const useUserStore = defineStore("user", {
   state: () => ({
     token: uni.getStorageSync("token") || "",
     user: uni.getStorageSync("user") || null,
+    autoLoginChecked: false, // 标记是否已完成启动时的自动登录检查
   }),
 
   getters: {

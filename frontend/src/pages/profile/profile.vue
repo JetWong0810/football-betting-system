@@ -109,10 +109,12 @@
           </view>
         </view>
 
-        <!-- 退出登录按钮 -->
+        <!-- 退出登录按钮 (仅 H5 显示) -->
+        <!-- #ifndef MP-WEIXIN -->
         <view class="logout-section" v-if="userStore.isLoggedIn">
           <button class="logout-btn" @tap="handleLogout">退出登录</button>
         </view>
+        <!-- #endif -->
 
         <!-- 版本信息 -->
         <view class="version-info">

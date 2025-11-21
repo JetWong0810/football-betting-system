@@ -1,10 +1,10 @@
 <template>
   <view class="page-wrapper">
     <view class="content">
-      <!-- 静默登录中的加载状态 -->
+      <!-- 检查登录状态中的加载状态 -->
       <view v-if="silentLoginInProgress" class="silent-login-section">
         <view class="loading-spinner"></view>
-        <text class="loading-text">正在自动登录...</text>
+        <text class="loading-text">正在检查登录状态...</text>
       </view>
 
       <!-- 需要手动登录的界面 -->
@@ -42,7 +42,7 @@ import { useUserStore } from "@/stores/userStore";
 
 const userStore = useUserStore();
 const loading = ref(false);
-const silentLoginInProgress = ref(false);
+const silentLoginInProgress = ref(true); // 初始为true，显示检查状态
 const redirectUrl = ref("/pages/home/home");
 const tabPages = ["/pages/home/home", "/pages/matches/list", "/pages/record/record", "/pages/profile/profile"];
 
@@ -51,47 +51,30 @@ onLoad((options) => {
     redirectUrl.value = decodeURIComponent(options.redirect);
   }
 
-  // 页面加载时尝试静默登录
-  tryAutoLogin();
+  // 检查登录状态（App.vue 已在启动时尝试自动登录）
+  checkLoginStatus();
 });
 
-async function tryAutoLogin() {
+async function checkLoginStatus() {
   // #ifndef MP-WEIXIN
+  silentLoginInProgress.value = false;
   return;
   // #endif
 
   // #ifdef MP-WEIXIN
   // 如果已经登录，直接跳转
   if (userStore.isLoggedIn) {
-    navigateAfterLogin();
-    return;
-  }
-
-  silentLoginInProgress.value = true;
-
-  try {
-    // 尝试静默登录
-    await userStore.wechatSilentLogin();
-
-    // 登录成功，跳转到目标页面
     uni.showToast({
-      title: "登录成功",
+      title: "已登录",
       icon: "success",
-      duration: 1000,
+      duration: 800,
     });
-
+    
     setTimeout(() => {
       navigateAfterLogin();
-    }, 800);
-  } catch (error) {
-    // 用户未注册（404），显示手动登录按钮
-    if (error.code === "USER_NOT_REGISTERED") {
-      console.log("用户未注册，需要完成注册流程");
-    } else {
-      // 其他错误，也显示手动登录按钮
-      console.error("静默登录失败:", error);
-    }
-  } finally {
+    }, 500);
+  } else {
+    // 未登录，显示手动登录界面
     silentLoginInProgress.value = false;
   }
   // #endif
