@@ -45,7 +45,20 @@
           </view>
           <view class="inline-item">
             <text class="label">投注方向</text>
-            <view v-if="requiresPrefix(leg.betType)" class="selection-with-prefix">
+            <!-- 让球：主/客 + 正负 +/- + 让球数值 -->
+            <view v-if="leg.betType === '让球'" class="selection-with-prefix">
+              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getTeamOptions(leg.betType)" @change="(e) => onLegHandicapTeamChange(leg.id, e.detail.value)">
+                <view class="picker-value">{{ getHandicapTeamLabel(leg) }}</view>
+              </picker>
+              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getSignOptions(leg.betType)" @change="(e) => onLegHandicapSignChange(leg.id, e.detail.value)">
+                <view class="picker-value">{{ getHandicapSignLabel(leg) }}</view>
+              </picker>
+              <picker class="picker-wrapper" mode="selector" :range="getDirectionOptions(leg.betType)" @change="(e) => onLegSelectionChange(leg.id, e.detail.value)">
+                <view class="picker-value">{{ getSelectionValueLabel(leg) }}</view>
+              </picker>
+            </view>
+            <!-- 其它带前缀的类型：前缀 + 数值（如 大/小 + 盘口） -->
+            <view v-else-if="requiresPrefix(leg.betType)" class="selection-with-prefix">
               <picker class="picker-wrapper prefix-picker" mode="selector" :range="getPrefixOptions(leg.betType)" @change="(e) => onLegPrefixChange(leg.id, e.detail.value)">
                 <view class="picker-value">{{ getSelectionPrefixLabel(leg) }}</view>
               </picker>
@@ -167,8 +180,12 @@ const props = defineProps({
 const emit = defineEmits(["submit", "cancelEdit"]);
 
 const betTypeOptions = ["胜平负", "让球", "大小球"];
-const handicapBaseValues = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5", "3.75", "4"];
-const overUnderValues = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5", "3.75", "4", "4.25", "4.5", "4.75", "5"];
+const handicapBaseValues = ["0", "0.25", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5", "3.75", "4"];
+const overUnderValues = [
+  "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75",
+  "3", "3.25", "3.5", "3.75", "4", "4.25", "4.5", "4.75", "5",
+  "5.25", "5.5", "5.75", "6", "6.25", "6.5", "6.75", "7"
+];
 const betDirectionOptionsMap = {
   胜平负: ["主胜", "主平", "主负"],
   让球: handicapBaseValues,
@@ -178,6 +195,8 @@ const betDirectionPrefixOptionsMap = {
   让球: ["+", "-"],
   大小球: ["大", "小"],
 };
+// 新增：让球的主/客选项
+const handicapTeamOptions = ["主", "客"];
 const resultOptions = [
   { label: "进行中", value: "pending" },
   { label: "全赢", value: "win" },
@@ -374,13 +393,40 @@ function getPrefixOptions(betType) {
   return betDirectionPrefixOptionsMap[betType] || [];
 }
 
+// 让球专用：主/客 + 正负 + 数值 的解析与构建
+function getTeamOptions(betType) {
+  return betType === "让球" ? handicapTeamOptions : [];
+}
+function getSignOptions(betType) {
+  return betType === "让球" ? getPrefixOptions(betType) : [];
+}
+function getHandicapParts(selection = "") {
+  if (!selection) {
+    return { team: "主", sign: "+", value: "" };
+  }
+  const team = selection.startsWith("客") ? "客" : selection.startsWith("主") ? "主" : "主";
+  let rest = selection;
+  if (rest.startsWith("主") || rest.startsWith("客")) {
+    rest = rest.slice(1);
+  }
+  const sign = rest.startsWith("-") ? "-" : "+";
+  const value = rest.replace(/^[-+]/, "");
+  return { team, sign, value };
+}
+function buildHandicapSelection(team, sign, value) {
+  if (!value) return "";
+  const t = team || "主";
+  const s = sign || "+";
+  return `${t}${s}${value}`;
+}
+
 function getSelectionParts(betType, selection = "") {
   if (!selection) {
     return { prefix: "", value: "" };
   }
   if (betType === "让球") {
-    const prefix = selection.startsWith("-") ? "-" : "+";
-    return { prefix, value: selection.replace(prefix, "") };
+    const { sign, value } = getHandicapParts(selection);
+    return { prefix: sign, value };
   }
   if (betType === "大小球") {
     const prefix = selection.startsWith("小") ? "小" : "大";
@@ -390,6 +436,10 @@ function getSelectionParts(betType, selection = "") {
 }
 
 function buildSelection(betType, prefix, value) {
+  if (betType === "让球") {
+    // 默认主队 + 指定正负 + 数值
+    return buildHandicapSelection("主", prefix, value);
+  }
   if (!requiresPrefix(betType)) {
     return value || "";
   }
@@ -400,12 +450,25 @@ function buildSelection(betType, prefix, value) {
   return `${safePrefix}${value}`;
 }
 
+function getHandicapTeamLabel(leg) {
+  const { team } = getHandicapParts(leg.selection);
+  return team || "主";
+}
+function getHandicapSignLabel(leg) {
+  const { sign } = getHandicapParts(leg.selection);
+  return sign || "+";
+}
+
 function getSelectionPrefixLabel(leg) {
   const { prefix } = getSelectionParts(leg.betType, leg.selection);
   return prefix || getPrefixOptions(leg.betType)[0] || "请选择";
 }
 
 function getSelectionValueLabel(leg) {
+  if (leg.betType === "让球") {
+    const { value } = getHandicapParts(leg.selection);
+    return value || "选择盘口";
+  }
   const { value } = getSelectionParts(leg.betType, leg.selection);
   return value || "选择盘口";
 }
@@ -451,6 +514,55 @@ function hydrate(bet) {
   form.legs = sourceLegs.map((leg) => createLeg(leg));
 }
 
+/**
+ * 使用 OCR 解析得到的投注数据填充表单
+ * data 结构来自 /api/ocr/parse-bet-image：
+ * {
+ *   legs: [{ homeTeam, awayTeam, league, matchDate, betType, selection, odds }],
+ *   stake: number,
+ *   parlayType?: string
+ * }
+ */
+function fillFromOcr(data) {
+  if (!data || !Array.isArray(data.legs) || !data.legs.length) return;
+
+  // 重置基础字段，但保留当前记录 id（如果在编辑则不覆盖 id）
+  if (!form.id) {
+    form.betTime = dayjs().format("YYYY-MM-DD HH:mm");
+  }
+  form.result = "pending";
+
+  // 构造 legs
+  const sourceLegs = data.legs.map((leg) => ({
+    homeTeam: leg.homeTeam || "",
+    awayTeam: leg.awayTeam || "",
+    league: leg.league || "",
+    matchDate: leg.matchDate || getCurrentDate(),
+    betType: leg.betType || "胜平负",
+    selection: leg.selection || "",
+    odds: leg.odds || null,
+  }));
+
+  form.legs = sourceLegs.map((leg) => createLeg(leg));
+
+  // 串关信息
+  if (form.legs.length > 1) {
+    form.parlayType = data.parlayType || `${form.legs.length}_1`;
+  } else {
+    form.parlayType = "2_1";
+  }
+
+  // 下注金额
+  form.stake = data.stake ? Number(data.stake) : null;
+
+  // 根据 legs 自动计算总赔率
+  const totalOdds = form.legs.reduce((acc, leg) => acc * (Number(leg.odds) || 1), 1);
+  form.odds = Number(totalOdds.toFixed(2));
+
+  // 来自 OCR 的填充视为一次新录入，清理验证提示
+  hasAttemptedSubmit.value = false;
+}
+
 function addLeg() {
   form.legs = [...form.legs, createLeg()];
   // 添加赛事后，如果是串关，自动更新赔率
@@ -475,8 +587,14 @@ function onLegBetTypeChange(legId, valueIndex) {
   if (leg) {
     leg.betType = betTypeOptions[Number(valueIndex)];
     const options = getDirectionOptions(leg.betType);
-    const prefixes = getPrefixOptions(leg.betType);
-    leg.selection = buildSelection(leg.betType, prefixes[0], options[0] || "");
+    if (leg.betType === "让球") {
+      const team = getTeamOptions(leg.betType)[0] || "主";
+      const sign = getSignOptions(leg.betType)[0] || "+";
+      leg.selection = buildHandicapSelection(team, sign, options[0] || "");
+    } else {
+      const prefixes = getPrefixOptions(leg.betType);
+      leg.selection = buildSelection(leg.betType, prefixes[0], options[0] || "");
+    }
   }
 }
 
@@ -485,7 +603,12 @@ function onLegSelectionChange(legId, valueIndex) {
   if (leg) {
     const options = getDirectionOptions(leg.betType);
     const value = options[Number(valueIndex)] || "";
-    if (requiresPrefix(leg.betType)) {
+    if (leg.betType === "让球") {
+      const { team, sign } = getHandicapParts(leg.selection);
+      const t = team || (getTeamOptions(leg.betType)[0] || "主");
+      const s = sign || (getSignOptions(leg.betType)[0] || "+");
+      leg.selection = buildHandicapSelection(t, s, value);
+    } else if (requiresPrefix(leg.betType)) {
       const { prefix } = getSelectionParts(leg.betType, leg.selection);
       const prefixes = getPrefixOptions(leg.betType);
       const safePrefix = prefix || prefixes[0] || "";
@@ -499,12 +622,42 @@ function onLegSelectionChange(legId, valueIndex) {
 function onLegPrefixChange(legId, valueIndex) {
   const leg = form.legs.find((item) => item.id === legId);
   if (leg) {
+    if (leg.betType === "让球") {
+      // 让球的正负在专用事件中处理
+      onLegHandicapSignChange(legId, valueIndex);
+      return;
+    }
     const prefixes = getPrefixOptions(leg.betType);
     const prefix = prefixes[Number(valueIndex)] || prefixes[0] || "";
     const { value } = getSelectionParts(leg.betType, leg.selection);
     const options = getDirectionOptions(leg.betType);
     const safeValue = value || options[0] || "";
     leg.selection = buildSelection(leg.betType, prefix, safeValue);
+  }
+}
+
+// 让球：修改主/客
+function onLegHandicapTeamChange(legId, valueIndex) {
+  const leg = form.legs.find((item) => item.id === legId);
+  if (leg) {
+    const teams = getTeamOptions(leg.betType);
+    const team = teams[Number(valueIndex)] || teams[0] || "主";
+    const { sign, value } = getHandicapParts(leg.selection);
+    const s = sign || (getSignOptions(leg.betType)[0] || "+");
+    const v = value || (getDirectionOptions(leg.betType)[0] || "");
+    leg.selection = buildHandicapSelection(team, s, v);
+  }
+}
+// 让球：修改正负
+function onLegHandicapSignChange(legId, valueIndex) {
+  const leg = form.legs.find((item) => item.id === legId);
+  if (leg) {
+    const signs = getSignOptions(leg.betType);
+    const sign = signs[Number(valueIndex)] || signs[0] || "+";
+    const { team, value } = getHandicapParts(leg.selection);
+    const t = team || (getTeamOptions(leg.betType)[0] || "主");
+    const v = value || (getDirectionOptions(leg.betType)[0] || "");
+    leg.selection = buildHandicapSelection(t, sign, v);
   }
 }
 function onLegDateChange(legId, value) {
@@ -528,6 +681,8 @@ function selectParlayType(value) {
 }
 
 function normalizePayload(status) {
+  // 如果结果不是“进行中”，强制将状态置为“已结算”
+  const finalStatus = form.result && form.result !== "pending" ? "settled" : status;
   return {
     id: form.id || undefined,
     wagerType: form.legs.length > 1 ? "parlay" : "single",
@@ -535,7 +690,7 @@ function normalizePayload(status) {
     odds: form.odds ? Number(form.odds) : 0,
     result: form.result,
     betTime: form.betTime,
-    status: status || undefined,
+    status: finalStatus || undefined,
     parlayType: form.legs.length > 1 ? form.parlayType : undefined,
     legs: form.legs.map((leg) => ({
       ...leg,
@@ -612,6 +767,7 @@ defineExpose({
   handleSubmit,
   handleSubmitWithStatus,
   resetForm: reset,
+  fillFromOcr,
 });
 </script>
 

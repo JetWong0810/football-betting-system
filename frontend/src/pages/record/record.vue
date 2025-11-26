@@ -10,10 +10,6 @@
           <text class="title">投注记录</text>
         </view>
         <view class="header-btns">
-          <button class="ocr-btn" @tap="goToOcrUpload">
-            <text class="ocr-icon">📷</text>
-            <text class="btn-text">识别</text>
-          </button>
           <button class="add-btn" @tap="showFormDialog">
             <text class="add-icon">+</text>
             <text class="btn-text">新增</text>
@@ -265,8 +261,8 @@ const upOption = {
   },
   noMoreSize: 0, // 不显示"无更多数据"提示
   empty: {
-    use: true, // 使用 mescroll 的空布局
-    tip: "暂无投注记录", // 空布局提示文本
+    use: false, // 关闭 mescroll 自带空布局，避免与自定义空态重复
+    tip: "暂无投注记录",
   },
 };
 
@@ -305,12 +301,6 @@ const weekList = computed(() => {
 function showFormDialog() {
   editingBet.value = null;
   showDialog.value = true;
-}
-
-function goToOcrUpload() {
-  uni.navigateTo({
-    url: '/pages/record/ocr-upload'
-  });
 }
 
 function handleRecordSuccess() {
@@ -485,18 +475,17 @@ function getParlayTypeLabel(bet) {
   margin-left: 16rpx;
 }
 
-.ocr-btn,
 .add-btn {
   background: #ffffff;
   color: #0d9488;
-  border-radius: 12rpx;
-  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  padding: 6rpx 20rpx;
   font-size: 24rpx;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 4rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  gap: 6rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.15);
   border: none;
   flex-shrink: 0;
   transition: all 0.2s ease;
@@ -504,15 +493,13 @@ function getParlayTypeLabel(bet) {
   line-height: 1;
 }
 
-.ocr-btn:active,
 .add-btn:active {
-  transform: scale(0.98);
-  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.1);
+  transform: scale(0.97);
+  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.12);
 }
 
-.ocr-icon,
 .add-icon {
-  font-size: 26rpx;
+  font-size: 28rpx;
   font-weight: 700;
 }
 

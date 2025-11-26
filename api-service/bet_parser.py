@@ -90,12 +90,19 @@ def extract_teams(text: str) -> Tuple[Optional[str], Optional[str]]:
 def extract_league(text: str) -> Optional[str]:
     """从文本中提取联赛名称
     
-    Args:
-        text: OCR识别的文本
-        
-    Returns:
-        联赛名称或None
+    优化要点：
+    - 兼容「足球 | 欧洲冠军联赛」这类格式，优先提取分隔符后的完整联赛名
+    - 再回退到关键字匹配
     """
+    # 特殊格式：足球 | 欧洲冠军联赛 / 足球·欧洲冠军联赛
+    special_pattern = r"(?:足球|篮球)[\s\|｜·:：-]+([^\s\|｜·:：-]*联赛)"
+    match = re.search(special_pattern, text)
+    if match:
+        league = match.group(1).strip()
+        logger.info(f"识别到联赛(特殊格式): {league}")
+        return league
+
+    # 关键字匹配
     for keyword in LEAGUE_KEYWORDS:
         if keyword in text:
             # 尝试提取完整的联赛名称（可能包含赛季信息）
@@ -108,7 +115,7 @@ def extract_league(text: str) -> Optional[str]:
             else:
                 logger.info(f"识别到联赛: {keyword}")
                 return keyword
-    
+
     return None
 
 
@@ -178,19 +185,30 @@ def extract_bet_type(text: str) -> Optional[str]:
     return None
 
 
-def extract_selection_and_odds(text: str, bet_type: Optional[str]) -> Tuple[Optional[str], Optional[float]]:
+def extract_selection_and_odds(
+    text: str,
+    bet_type: Optional[str],
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[float]]:
     """从文本中提取投注方向和赔率
+
+    增强点：
+    - 对让球盘，优先识别「球队名 + 正负数值」形式，例如「皇家马德里 -1」
+      并映射为前端使用的格式：主/客±盘口值（如「客-1」）
     
     Args:
         text: OCR识别的文本
         bet_type: 投注类型
+        home_team: 主队名称（可选）
+        away_team: 客队名称（可选）
         
     Returns:
         (投注方向, 赔率)
     """
-    selection = None
-    odds = None
-    
+    selection: Optional[str] = None
+    odds: Optional[float] = None
+
     if bet_type == "胜平负":
         # 识别胜平负方向
         for direction, keywords in DIRECTION_KEYWORDS.items():
@@ -200,25 +218,44 @@ def extract_selection_and_odds(text: str, bet_type: Optional[str]) -> Tuple[Opti
                     break
             if selection:
                 break
-    
+
     elif bet_type == "让球":
-        # 识别让球盘口：+0.5, -1, +1.5等
-        # 使用更精确的匹配，避免匹配到日期
-        pattern = r'(?:让球|Handicap)[^\d]*([+\-])(\d+(?:\.\d+)?)'
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            sign, value = match.groups()
-            selection = f"{sign}{value}"
-            logger.info(f"识别到让球盘口: {selection}")
-        else:
-            # 备用：直接搜索+/-和数字的组合
-            pattern = r'([+\-])\s*(\d+(?:\.\d+)?)(?![-\d])'
-            match = re.search(pattern, text)
+        # ------- 1. 优先匹配「球队名 + 正负盘」格式 -------
+        team_patterns = []
+        if home_team:
+            team_patterns.append((home_team, "主"))
+        if away_team:
+            team_patterns.append((away_team, "客"))
+
+        for team_name, side_label in team_patterns:
+            # 例如："皇家马德里 -1"、"皇家马德里-1.5"
+            pattern_team = rf"{re.escape(team_name)}\s*([+\-])\s*(\d+(?:\.\d+)?)"
+            match = re.search(pattern_team, text)
+            if match:
+                sign, value = match.groups()
+                selection = f"{side_label}{sign}{value}"
+                logger.info(f"识别到让球盘口(带球队): {selection}")
+                break
+
+        # ------- 2. 回退到原有的纯盘口识别 -------
+        if not selection:
+            # 识别让球盘口：+0.5, -1, +1.5等
+            # 使用更精确的匹配，避免匹配到日期
+            pattern = r'(?:让球|Handicap)[^\d]*([+\-])(\d+(?:\.\d+)?)'
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 sign, value = match.groups()
                 selection = f"{sign}{value}"
                 logger.info(f"识别到让球盘口: {selection}")
-    
+            else:
+                # 备用：直接搜索+/-和数字的组合
+                pattern = r'([+\-])\s*(\d+(?:\.\d+)?)(?![-\d])'
+                match = re.search(pattern, text)
+                if match:
+                    sign, value = match.groups()
+                    selection = f"{sign}{value}"
+                    logger.info(f"识别到让球盘口: {selection}")
+
     elif bet_type == "大小球":
         # 识别大小球盘口：大2.5, 小3等
         pattern = r'([大小])\s*(\d+(?:\.\d+)?)'
@@ -227,7 +264,7 @@ def extract_selection_and_odds(text: str, bet_type: Optional[str]) -> Tuple[Opti
             direction, value = match.groups()
             selection = f"{direction}{value}"
             logger.info(f"识别到大小球盘口: {selection}")
-    
+
     # 提取赔率（小数格式：1.85, 2.10等）
     odds_pattern = r'(?:赔率|@|odds)?[:：\s]*(\d+\.\d{1,3})'
     odds_matches = re.findall(odds_pattern, text, re.IGNORECASE)
@@ -239,7 +276,7 @@ def extract_selection_and_odds(text: str, bet_type: Optional[str]) -> Tuple[Opti
                 odds = odds_value
                 logger.info(f"识别到赔率: {odds}")
                 break
-    
+
     return selection, odds
 
 
@@ -297,7 +334,7 @@ def parse_bet_info(text: str, ocr_details: Optional[List[Dict]] = None) -> Dict[
     league = extract_league(text)
     match_date = extract_date(text)
     bet_type = extract_bet_type(text) or "胜平负"  # 默认胜平负
-    selection, odds = extract_selection_and_odds(text, bet_type)
+    selection, odds = extract_selection_and_odds(text, bet_type, home_team=home_team, away_team=away_team)
     stake = extract_stake(text)
     
     # 构建返回结果

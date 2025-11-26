@@ -3,7 +3,13 @@
     <view class="dialog-content" @tap.stop>
       <view class="dialog-header">
         <text class="dialog-title">{{ editingBet ? "编辑投注记录" : "新增投注记录" }}</text>
-        <button class="close-btn" @tap="handleClose">×</button>
+        <view class="dialog-header-actions">
+          <button class="ocr-btn" @tap="handleOcrClick" :disabled="ocrLoading">
+            <text class="ocr-icon">📷</text>
+            <text class="ocr-text">{{ ocrLoading ? "识别中" : "识别" }}</text>
+          </button>
+          <button class="close-btn" @tap="handleClose">×</button>
+        </view>
       </view>
 
       <scroll-view class="dialog-body" scroll-y>
@@ -28,6 +34,7 @@
 import { nextTick, ref, computed, watch } from "vue";
 import BetForm from "@/components/BetForm.vue";
 import { useBetStore } from "@/stores/betStore";
+import { request } from "@/utils/http";
 
 const betStore = useBetStore();
 
@@ -45,6 +52,7 @@ const props = defineProps({
 const emit = defineEmits(["update:visible", "success"]);
 
 const betFormRef = ref(null);
+const ocrLoading = ref(false);
 
 const isEditingBetting = computed(() => {
   return props.editingBet && props.editingBet.status === "betting";
@@ -101,6 +109,103 @@ function handleCancelEdit() {
   emit("update:visible", false);
 }
 
+// OCR 相关：在弹窗标题右侧上传图片并自动填充表单
+function handleOcrClick() {
+  if (ocrLoading.value) return;
+
+  uni.chooseImage({
+    count: 1,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: (res) => {
+      const tempFilePath = res.tempFilePaths[0];
+
+      // #ifdef H5
+      // H5 环境：通过 fetch + FileReader 读取 base64
+      fetch(tempFilePath)
+        .then((response) => response.blob())
+        .then((blob) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const base64 = e.target.result.split(",")[1];
+            startOcr(base64);
+          };
+          reader.onerror = (err) => {
+            console.error("读取图片失败:", err);
+            uni.showToast({ title: "读取图片失败", icon: "none" });
+          };
+          reader.readAsDataURL(blob);
+        })
+        .catch((err) => {
+          console.error("读取图片失败:", err);
+          uni.showToast({ title: "读取图片失败", icon: "none" });
+        });
+      // #endif
+
+      // #ifndef H5
+      // 小程序等环境：FileSystemManager 读取 base64
+      uni.getFileSystemManager().readFile({
+        filePath: tempFilePath,
+        encoding: "base64",
+        success: (readRes) => {
+          startOcr(readRes.data);
+        },
+        fail: (err) => {
+          console.error("读取图片失败:", err);
+          uni.showToast({ title: "读取图片失败", icon: "none" });
+        },
+      });
+      // #endif
+    },
+    fail: (err) => {
+      console.error("选择图片失败:", err);
+    },
+  });
+}
+
+async function startOcr(imageBase64) {
+  if (!imageBase64) return;
+  ocrLoading.value = true;
+
+  try {
+    const result = await request({
+      url: "/api/ocr/parse-bet-image",
+      method: "POST",
+      timeout: 60000,
+      data: { image_base64: imageBase64 },
+    });
+
+    if (!result.success) {
+      uni.showToast({
+        title: result.error || "识别失败",
+        icon: "none",
+        duration: 3000,
+      });
+      return;
+    }
+
+    const betData = result.data;
+    if (!betData || !betData.legs || !betData.legs.length) {
+      uni.showToast({ title: "未识别到有效投注信息", icon: "none" });
+      return;
+    }
+
+    // 使用 BetForm 暴露的方法填充表单
+    betFormRef.value?.fillFromOcr?.(betData);
+
+    uni.showToast({ title: "识别成功，已填充表单", icon: "success" });
+  } catch (error) {
+    console.error("OCR识别失败:", error);
+    uni.showToast({
+      title: error.message || "识别失败",
+      icon: "none",
+      duration: 3000,
+    });
+  } finally {
+    ocrLoading.value = false;
+  }
+}
+
 defineExpose({
   open: () => emit("update:visible", true),
   close: handleClose,
@@ -132,7 +237,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.16);
   box-sizing: border-box;
 }
 
@@ -140,27 +245,64 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 24rpx;
-  border-bottom: 1px solid rgba(13, 148, 136, 0.1);
+  padding: 22rpx 24rpx;
+  border-bottom: 1px solid rgba(13, 148, 136, 0.06);
   flex-shrink: 0;
   box-sizing: border-box;
+  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
 }
 
 .dialog-title {
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 600;
-  color: #0d9488;
+  color: #ffffff;
   flex: 1;
 }
 
+.dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.ocr-btn {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 0 18rpx;
+  height: 44rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  font-size: 24rpx;
+  color: #ffffff;
+}
+
+.ocr-btn:active {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(1rpx);
+}
+
+.ocr-btn:disabled {
+  opacity: 0.7;
+}
+
+.ocr-icon {
+  font-size: 26rpx;
+}
+
+.ocr-text {
+  font-size: 24rpx;
+}
+
 .close-btn {
-  width: 48rpx;
-  height: 48rpx;
+  width: 44rpx;
+  height: 44rpx;
   border-radius: 50%;
-  background: rgba(13, 148, 136, 0.1);
-  border: none;
-  font-size: 40rpx;
-  color: #0d9488;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  font-size: 32rpx;
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
