@@ -17,6 +17,14 @@
       }
     },
     {
+      "path": "pages/record/ocr-upload",
+      "style": {
+        "navigationBarTitleText": "图片识别",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/analysis/analysis",
       "style": {
         "navigationBarTitleText": "盈亏分析",

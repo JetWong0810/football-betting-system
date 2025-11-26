@@ -10,6 +10,10 @@
           <text class="title">投注记录</text>
         </view>
         <view class="header-btns">
+          <button class="ocr-btn" @tap="goToOcrUpload">
+            <text class="ocr-icon">📷</text>
+            <text class="btn-text">识别</text>
+          </button>
           <button class="add-btn" @tap="showFormDialog">
             <text class="add-icon">+</text>
             <text class="btn-text">新增</text>
@@ -303,6 +307,12 @@ function showFormDialog() {
   showDialog.value = true;
 }
 
+function goToOcrUpload() {
+  uni.navigateTo({
+    url: '/pages/record/ocr-upload'
+  });
+}
+
 function handleRecordSuccess() {
   // 记录添加/更新成功后，清除编辑状态
   editingBet.value = null;
@@ -475,6 +485,7 @@ function getParlayTypeLabel(bet) {
   margin-left: 16rpx;
 }
 
+.ocr-btn,
 .add-btn {
   background: #ffffff;
   color: #0d9488;
@@ -493,11 +504,13 @@ function getParlayTypeLabel(bet) {
   line-height: 1;
 }
 
+.ocr-btn:active,
 .add-btn:active {
   transform: scale(0.98);
   box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.1);
 }
 
+.ocr-icon,
 .add-icon {
   font-size: 26rpx;
   font-weight: 700;

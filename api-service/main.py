@@ -27,6 +27,19 @@ from auth import hash_password, verify_password, create_access_token, require_au
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
 import httpx
 
+# 先初始化 logger
+logger = logging.getLogger("football_betting_api")
+logging.basicConfig(level=logging.INFO)
+
+# OCR相关模块（延迟导入，避免启动时加载）
+try:
+    from ocr_service import recognize_image
+    from bet_parser import parse_bet_image_result
+    OCR_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"OCR模块导入失败，OCR功能将不可用: {e}")
+    OCR_AVAILABLE = False
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 UPLOAD_DIR = STATIC_DIR / "uploads"
@@ -82,8 +95,6 @@ app.add_middleware(
 
 repo = OddsRepository()
 user_repo = UserRepository()
-logger = logging.getLogger("wechat_login")
-logging.basicConfig(level=logging.INFO)
 
 
 def save_avatar_from_base64(data: str, file_ext: Optional[str] = None) -> str:
@@ -182,6 +193,10 @@ class UpdateBetRequest(BaseModel):
     stake: Optional[float] = None
     odds: Optional[float] = None
     profit: Optional[float] = None
+
+
+class OcrParseImageRequest(BaseModel):
+    image_base64: str = Field(..., description="base64编码的图片")
 
 
 def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -743,3 +758,46 @@ def delete_bet(bet_id: int, user_id: int = Depends(require_auth)):
     if not success:
         raise HTTPException(status_code=404, detail="投注记录不存在")
     return {"message": "删除成功"}
+
+
+# ==================== OCR图片识别相关API ====================
+
+@app.post("/api/ocr/parse-bet-image")
+def parse_bet_image(req: OcrParseImageRequest, user_id: int = Depends(require_auth)):
+    """OCR识别投注图片，提取投注信息
+    
+    接收base64编码的图片，返回解析后的投注信息
+    """
+    if not OCR_AVAILABLE:
+        raise HTTPException(
+            status_code=503, 
+            detail="OCR功能暂不可用，请检查服务器配置"
+        )
+    
+    try:
+        # 调用OCR识别
+        ocr_result = recognize_image(
+            image_source=req.image_base64,
+            source_type="base64"
+        )
+        
+        # 解析投注信息
+        result = parse_bet_image_result(ocr_result)
+        
+        return result
+        
+    except ValueError as e:
+        # 图片格式错误等用户输入问题
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"OCR识别失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"识别失败：{str(e)}")
+
+
+@app.get("/api/ocr/status")
+def ocr_status():
+    """检查OCR服务状态"""
+    return {
+        "available": OCR_AVAILABLE,
+        "message": "OCR服务正常" if OCR_AVAILABLE else "OCR服务不可用"
+    }

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR 投注图片识别测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        /* 登录部分 */
+        .login-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        /* 上传区域 */
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e8eaff;
+        }
+        
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        .upload-text {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .upload-hint {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        /* 预览区域 */
+        .preview-area {
+            display: none;
+            text-align: center;
+        }
+        
+        .preview-area.show {
+            display: block;
+        }
+        
+        .preview-image {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        /* 按钮 */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        /* 结果区域 */
+        .result-area {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .result-area.show {
+            display: block;
+        }
+        
+        .result-success {
+            border-left: 4px solid #28a745;
+        }
+        
+        .result-error {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .result-item {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+        }
+        
+        .result-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 5px;
+        }
+        
+        .result-value {
+            color: #333;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .bet-leg {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .bet-leg-header {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .bet-row {
+            display: flex;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        
+        .bet-row-label {
+            width: 100px;
+            color: #666;
+        }
+        
+        .bet-row-value {
+            flex: 1;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .confidence {
+            text-align: right;
+            color: #28a745;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .error-message {
+            color: #dc3545;
+            font-weight: 500;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .tips {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        
+        .tips-title {
+            font-weight: 600;
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        
+        .tips-list {
+            list-style: none;
+            font-size: 13px;
+            color: #856404;
+        }
+        
+        .tips-list li {
+            margin-bottom: 5px;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .tips-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 OCR 投注图片识别测试</h1>
+            <p>上传投注截图，自动识别赛事信息</p>
+        </div>
+        
+        <div class="content">
+            <!-- 登录部分 -->
+            <div class="section login-section">
+                <div class="section-title">1. 登录账号</div>
+                <div class="form-group">
+                    <label>用户名：</label>
+                    <input type="text" id="username" placeholder="请输入用户名" value="admin">
+                </div>
+                <div class="form-group">
+                    <label>密码：</label>
+                    <input type="password" id="password" placeholder="请输入密码" value="admin123">
+                </div>
+                <button class="btn btn-primary" onclick="login()">登录</button>
+                <span id="loginStatus"></span>
+            </div>
+            
+            <!-- 上传部分 -->
+            <div class="section">
+                <div class="section-title">2. 上传投注图片</div>
+                
+                <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                
+                <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                    <div class="upload-icon">📷</div>
+                    <div class="upload-text">点击或拖拽上传图片</div>
+                    <div class="upload-hint">支持 JPG、PNG 格式</div>
+                </div>
+                
+                <div class="preview-area" id="previewArea">
+                    <img id="previewImage" class="preview-image" alt="预览">
+                    <div>
+                        <button class="btn btn-primary" id="recognizeBtn" onclick="recognizeImage()">
+                            开始识别
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetUpload()">重新上传</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 结果部分 -->
+            <div class="result-area" id="resultArea"></div>
+            
+            <!-- 使用说明 -->
+            <div class="tips">
+                <div class="tips-title">💡 使用说明</div>
+                <ul class="tips-list">
+                    <li>请上传清晰的投注截图</li>
+                    <li>确保图片包含：球队、联赛、赔率等信息</li>
+                    <li>支持识别：胜平负、让球、大小球等玩法</li>
+                    <li>识别后的数据可用于保存投注记录</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let token = localStorage.getItem('token');
+        let selectedImageBase64 = '';
+        
+        // 页面加载时检查登录状态
+        window.onload = function() {
+            if (token) {
+                updateLoginStatus('已登录 ✓', true);
+            }
+        };
+        
+        // 登录
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!username || !password) {
+                alert('请输入用户名和密码');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:7001/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.token) {
+                    token = data.token;
+                    localStorage.setItem('token', token);
+                    updateLoginStatus('登录成功 ✓', true);
+                } else {
+                    updateLoginStatus(data.detail || '登录失败', false);
+                }
+            } catch (error) {
+                updateLoginStatus('登录失败: ' + error.message, false);
+            }
+        }
+        
+        function updateLoginStatus(message, success) {
+            const statusEl = document.getElementById('loginStatus');
+            statusEl.innerHTML = `<span class="status-badge ${success ? 'status-success' : 'status-error'}">${message}</span>`;
+        }
+        
+        // 文件上传
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewArea = document.getElementById('previewArea');
+        const previewImage = document.getElementById('previewImage');
+        const resultArea = document.getElementById('resultArea');
+        
+        fileInput.addEventListener('change', handleFileSelect);
+        
+        // 拖拽上传
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+        
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+        
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('请选择图片文件');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                selectedImageBase64 = e.target.result.split(',')[1];
+                previewImage.src = e.target.result;
+                uploadArea.style.display = 'none';
+                previewArea.classList.add('show');
+                resultArea.classList.remove('show');
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        function resetUpload() {
+            fileInput.value = '';
+            selectedImageBase64 = '';
+            uploadArea.style.display = 'block';
+            previewArea.classList.remove('show');
+            resultArea.classList.remove('show');
+        }
+        
+        // 识别图片
+        async function recognizeImage() {
+            if (!token) {
+                alert('请先登录');
+                return;
+            }
+            
+            if (!selectedImageBase64) {
+                alert('请先选择图片');
+                return;
+            }
+            
+            const recognizeBtn = document.getElementById('recognizeBtn');
+            recognizeBtn.disabled = true;
+            recognizeBtn.innerHTML = '<span class="loading"></span> 识别中...';
+            
+            try {
+                const response = await fetch('http://localhost:7001/api/ocr/parse-bet-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        image_base64: selectedImageBase64
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResult(data);
+                } else {
+                    displayError(data.detail || '识别失败');
+                }
+            } catch (error) {
+                displayError('识别失败: ' + error.message);
+            } finally {
+                recognizeBtn.disabled = false;
+                recognizeBtn.innerHTML = '开始识别';
+            }
+        }
+        
+        // 显示结果
+        function displayResult(data) {
+            resultArea.classList.add('show');
+            
+            if (data.success) {
+                resultArea.classList.add('result-success');
+                resultArea.classList.remove('result-error');
+                
+                let html = '<div class="section-title">✓ 识别成功</div>';
+                
+                // 原始文本
+                html += `
+                    <div class="result-item">
+                        <div class="result-label">识别文本：</div>
+                        <div class="result-value">${data.raw_text || '无'}</div>
+                        <div class="confidence">OCR 置信度: ${(data.ocr_confidence * 100).toFixed(1)}%</div>
+                    </div>
+                `;
+                
+                // 解析的投注信息
+                if (data.data && data.data.legs && data.data.legs.length > 0) {
+                    html += `<div class="result-item">`;
+                    html += `<div class="result-label">解析的投注信息：</div>`;
+                    
+                    data.data.legs.forEach((leg, index) => {
+                        html += `
+                            <div class="bet-leg">
+                                <div class="bet-leg-header">第 ${index + 1} 场</div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">联赛：</span>
+                                    <span class="bet-row-value">${leg.league || '未识别'}</span>
+                                </div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">对阵：</span>
+                                    <span class="bet-row-value">${leg.homeTeam} vs ${leg.awayTeam}</span>
+                                </div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">日期：</span>
+                                    <span class="bet-row-value">${leg.matchDate}</span>
+                                </div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">投注类型：</span>
+                                    <span class="bet-row-value">${leg.betType}</span>
+                                </div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">选项：</span>
+                                    <span class="bet-row-value">${leg.selection || '未识别'}</span>
+                                </div>
+                                <div class="bet-row">
+                                    <span class="bet-row-label">赔率：</span>
+                                    <span class="bet-row-value">${leg.odds || '未识别'}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                        <div class="bet-row" style="margin-top: 15px; padding: 10px; background: white; border-radius: 6px;">
+                            <span class="bet-row-label">投注金额：</span>
+                            <span class="bet-row-value" style="color: #dc2626; font-size: 18px;">${data.data.stake || 0} 元</span>
+                        </div>
+                    `;
+                    
+                    if (data.data.parlayType) {
+                        html += `
+                            <div class="bet-row" style="padding: 10px; background: white; border-radius: 6px;">
+                                <span class="bet-row-label">串关方式：</span>
+                                <span class="bet-row-value">${data.data.parlayType}</span>
+                            </div>
+                        `;
+                    }
+                    
+                    html += `<div class="confidence">解析置信度: ${(data.data.confidence * 100).toFixed(1)}%</div>`;
+                    html += `</div>`;
+                }
+                
+                resultArea.innerHTML = html;
+            } else {
+                displayError(data.error || '识别失败');
+            }
+        }
+        
+        // 显示错误
+        function displayError(message) {
+            resultArea.classList.add('show', 'result-error');
+            resultArea.classList.remove('result-success');
+            resultArea.innerHTML = `
+                <div class="section-title">⚠️ 识别失败</div>
+                <div class="result-item">
+                    <div class="error-message">${message}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
