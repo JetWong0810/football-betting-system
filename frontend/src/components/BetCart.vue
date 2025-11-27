@@ -364,7 +364,7 @@ async function handleSaveWithStatus(status) {
     background: #0d9488;
     color: #fff;
     padding: 2rpx 10rpx;
-    border-radius: 12rpx;
+    border-radius: 8rpx;
     font-size: 20rpx;
     font-weight: 500;
   }
@@ -400,7 +400,7 @@ async function handleSaveWithStatus(status) {
 .selection-item {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   padding: 12rpx 16rpx;
   margin-bottom: 10rpx;
   box-sizing: border-box;
@@ -480,7 +480,7 @@ async function handleSaveWithStatus(status) {
       font-size: 22rpx;
       font-weight: 500;
       padding: 4rpx 12rpx;
-      border-radius: 6rpx;
+      border-radius: 8rpx;
       white-space: nowrap;
     }
 
@@ -577,7 +577,7 @@ async function handleSaveWithStatus(status) {
     padding: 10rpx 12rpx;
     background: #f9fafb;
     border: 1px solid #e5e7eb;
-    border-radius: 10rpx;
+    border-radius: 8rpx;
     gap: 12rpx;
 
     .amount-group {
@@ -667,7 +667,7 @@ async function handleSaveWithStatus(status) {
     padding: 10rpx 12rpx;
     background: rgba(13, 148, 136, 0.06);
     border: 1px solid rgba(13, 148, 136, 0.15);
-    border-radius: 10rpx;
+    border-radius: 8rpx;
 
     .label {
       font-size: 22rpx;
@@ -721,7 +721,7 @@ async function handleSaveWithStatus(status) {
     button {
       flex: 1;
       height: 72rpx;
-      border-radius: 10rpx;
+      border-radius: 8rpx;
       font-size: 26rpx;
       font-weight: 500;
       border: none;

@@ -478,7 +478,7 @@ function getParlayTypeLabel(bet) {
 .add-btn {
   background: #ffffff;
   color: #0d9488;
-  border-radius: 999rpx;
+  border-radius: 8rpx;
   padding: 6rpx 20rpx;
   font-size: 24rpx;
   font-weight: 600;
@@ -517,7 +517,7 @@ function getParlayTypeLabel(bet) {
 .stat-card {
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 18rpx;
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -538,7 +538,7 @@ function getParlayTypeLabel(bet) {
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   font-size: 18rpx;
   font-weight: 600;
   color: #ffffff;
@@ -572,7 +572,7 @@ function getParlayTypeLabel(bet) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 6rpx;
   border: 1px solid rgba(13, 148, 136, 0.1);
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
@@ -585,7 +585,7 @@ function getParlayTypeLabel(bet) {
   font-size: 26rpx;
   font-weight: 500;
   color: #6b7280;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   transition: all 0.3s;
   display: flex;
   align-items: center;
@@ -613,7 +613,7 @@ function getParlayTypeLabel(bet) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: #ffffff;
-  border-radius: 14rpx;
+  border-radius: 8rpx;
   padding: 4rpx;
   border: 1px solid rgba(13, 148, 136, 0.1);
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
@@ -625,7 +625,7 @@ function getParlayTypeLabel(bet) {
   font-size: 26rpx;
   font-weight: 500;
   color: #6b7280;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   transition: all 0.3s;
 }
 
@@ -661,7 +661,7 @@ function getParlayTypeLabel(bet) {
 
 .weekly-row {
   background: #ffffff;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -703,7 +703,7 @@ function getParlayTypeLabel(bet) {
   justify-content: center;
   padding: 100rpx 0;
   background: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   border: 1px solid rgba(13, 148, 136, 0.1);
 }
 
@@ -738,7 +738,7 @@ function getParlayTypeLabel(bet) {
 
 .bet-card {
   background: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 20rpx;
   border: 1px solid rgba(13, 148, 136, 0.1);
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
@@ -771,7 +771,7 @@ function getParlayTypeLabel(bet) {
 .badge {
   display: inline-flex;
   padding: 6rpx 16rpx;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   font-size: 22rpx;
   font-weight: 600;
   color: #ffffff;
@@ -828,7 +828,7 @@ function getParlayTypeLabel(bet) {
 .icon-btn {
   width: 48rpx;
   height: 48rpx;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -864,7 +864,7 @@ function getParlayTypeLabel(bet) {
 /* 串关详情 */
 .parlay-details {
   background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   padding: 16rpx;
   margin-bottom: 16rpx;
   display: flex;

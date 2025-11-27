@@ -235,7 +235,7 @@ onShow(() => {
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   padding: 16rpx;
-  border-radius: 14rpx;
+  border-radius: 8rpx;
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
@@ -320,7 +320,7 @@ onShow(() => {
 
 .menu-card {
   background: #ffffff;
-  border-radius: 14rpx;
+  border-radius: 8rpx;
   overflow: hidden;
   box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.04);
 }
@@ -347,7 +347,7 @@ onShow(() => {
 .menu-icon {
   width: 64rpx;
   height: 64rpx;
-  border-radius: 14rpx;
+  border-radius: 8rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -392,7 +392,7 @@ onShow(() => {
   color: #ffffff;
   font-size: 26rpx;
   font-weight: 600;
-  border-radius: 999rpx;
+  border-radius: 8rpx;
   border: none;
   box-shadow: 0 6rpx 18rpx rgba(239, 68, 68, 0.25);
   line-height: 72rpx;

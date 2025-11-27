@@ -22,25 +22,37 @@ def get_ocr_instance():
     if _ocr_instance is None:
         try:
             from paddleocr import PaddleOCR
-            # 使用轻量级模型，CPU推理
-            # use_angle_cls=False 禁用角度分类（避免 cls 参数错误）
-            # lang='ch' 中文识别
+            # PaddleOCR 3.x 极速配置（使用轻量级mobile模型）
+            # 关键优化：
+            # 1. 使用mobile模型而非server模型（速度提升 5-10x！）
+            # 2. 禁用所有不必要的检测步骤
+            # 3. 降低分辨率限制
             _ocr_instance = PaddleOCR(
-                use_angle_cls=False,
+                # 使用轻量级模型（最关键的优化！）
+                text_detection_model_name='PP-OCRv4_mobile_det',
+                text_recognition_model_name='PP-OCRv4_mobile_rec',
+                # 禁用不必要的功能
+                use_textline_orientation=False,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                # 性能优化参数
+                text_recognition_batch_size=8,
+                text_det_limit_side_len=800,  # 进一步降低
                 lang='ch'
             )
-            logger.info("PaddleOCR初始化成功")
+            logger.info("PaddleOCR初始化成功（已启用性能优化）")
         except Exception as e:
             logger.error(f"PaddleOCR初始化失败: {e}")
             raise RuntimeError(f"OCR引擎初始化失败: {e}")
     return _ocr_instance
 
 
-def preprocess_image(image: Image.Image) -> np.ndarray:
+def preprocess_image(image: Image.Image, fast_mode: bool = True) -> np.ndarray:
     """图片预处理，提高OCR识别准确率
     
     Args:
         image: PIL Image对象
+        fast_mode: 快速模式，跳过耗时的降噪和增强步骤
         
     Returns:
         处理后的numpy数组（OpenCV格式）
@@ -59,22 +71,18 @@ def preprocess_image(image: Image.Image) -> np.ndarray:
     # 转换为OpenCV BGR格式
     img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
     
-    # 图像增强：提高对比度
-    # 转换为灰度图进行处理
+    # 快速模式：跳过耗时的图像增强
+    if fast_mode:
+        return img_bgr
+    
+    # 完整模式：应用图像增强（更准确但更慢）
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     
-    # 应用自适应直方图均衡化（CLAHE）提高对比度
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
+    # 简化的对比度增强（比CLAHE更快）
+    enhanced = cv2.equalizeHist(gray)
     
-    # 二值化（可选，根据图片质量决定是否使用）
-    # _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # 降噪
-    denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
-    
-    # 转回BGR格式供PaddleOCR使用
-    result = cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)
+    # 转回BGR格式
+    result = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
     
     return result
 
@@ -120,7 +128,8 @@ def parse_file_image(file_bytes: bytes) -> Image.Image:
 
 def extract_text_from_image(
     image: Image.Image,
-    preprocess: bool = True
+    preprocess: bool = False,  # 默认关闭预处理以提升速度
+    fast_mode: bool = True
 ) -> Tuple[str, List[Dict[str, Any]], float]:
     """从图片中提取文字
     
@@ -141,7 +150,7 @@ def extract_text_from_image(
         
         # 图片预处理
         if preprocess:
-            img_array = preprocess_image(image)
+            img_array = preprocess_image(image, fast_mode=fast_mode)
         else:
             img_array = np.array(image)
             if len(img_array.shape) == 3 and img_array.shape[2] == 4:
@@ -259,16 +268,17 @@ def recognize_image(
         else:
             raise ValueError(f"不支持的来源类型: {source_type}")
         
-        # 检查图片尺寸，如果太大则缩放
-        max_size = 2000
+        # 检查图片尺寸，如果太大则缩放（更积极的缩放策略以提升速度）
+        max_size = 1600  # 降低最大尺寸限制，加快处理速度
         if max(image.size) > max_size:
             ratio = max_size / max(image.size)
             new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            # 使用更快的缩放算法
+            image = image.resize(new_size, Image.Resampling.BILINEAR)
             logger.info(f"图片已缩放到 {new_size}")
         
-        # 提取文字
-        full_text, details, confidence = extract_text_from_image(image, preprocess=True)
+        # 提取文字（关闭预处理以提升速度，PaddleOCR本身已经足够强大）
+        full_text, details, confidence = extract_text_from_image(image, preprocess=False, fast_mode=True)
         
         return {
             "success": True,

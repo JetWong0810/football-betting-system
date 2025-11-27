@@ -227,6 +227,8 @@ def extract_selection_and_odds(
         if away_team:
             team_patterns.append((away_team, "客"))
 
+        logger.info(f"尝试匹配让球盘口，主队={home_team}, 客队={away_team}")
+        
         for team_name, side_label in team_patterns:
             # 例如："皇家马德里 -1"、"皇家马德里-1.5"
             pattern_team = rf"{re.escape(team_name)}\s*([+\-])\s*(\d+(?:\.\d+)?)"
@@ -234,8 +236,10 @@ def extract_selection_and_odds(
             if match:
                 sign, value = match.groups()
                 selection = f"{side_label}{sign}{value}"
-                logger.info(f"识别到让球盘口(带球队): {selection}")
+                logger.info(f"匹配成功: 球队={team_name}, 标签={side_label}, 盘口={sign}{value}, 结果={selection}")
                 break
+            else:
+                logger.debug(f"未匹配到 {team_name} 的盘口")
 
         # ------- 2. 回退到原有的纯盘口识别 -------
         if not selection:
@@ -284,10 +288,14 @@ def extract_stake(text: str) -> Optional[float]:
     """从文本中提取投注金额
     
     支持格式：
+    - 投注额: 100
+    - 投注额 254.49
     - 金额：100
     - 投注100元
     - 下注：100
     - 100元
+    - 下注金额: 100
+    - 表格布局："投注额 \n 254.49"
     
     Args:
         text: OCR识别的文本
@@ -295,11 +303,27 @@ def extract_stake(text: str) -> Optional[float]:
     Returns:
         投注金额或None
     """
-    # 匹配金额关键词后面的数字
+    # 特殊处理：先尝试匹配表格布局（标签和值分开在不同行）
+    # 例如："投注额 可赢额\n254.49 244.31"
+    # 匹配模式：投注额后面可能有其他文字，然后换行或空格后有数字
+    table_pattern = r'投注额[^\d]{0,20}?(\d+(?:\.\d{1,2})?)'
+    match = re.search(table_pattern, text)
+    if match:
+        stake = float(match.group(1))
+        if 0.01 <= stake <= 1000000:
+            logger.info(f"识别到投注金额(表格布局): {stake}")
+            return stake
+    
+    # 常规匹配模式
     patterns = [
-        r'(?:金额|投注|下注|本金)[:：\s]*(\d+(?:\.\d{1,2})?)',
+        # 常见标签 + 分隔符 + 数字
+        r'(?:投注额|下注金额|下注额|投注金额)[::：\s]*(\d+(?:\.\d{1,2})?)',
+        r'(?:金额|投注|下注|本金)[::：\s]*(\d+(?:\.\d{1,2})?)',
+        # 数字 + 单位
         r'(\d+(?:\.\d{1,2})?)\s*元',
         r'(\d+(?:\.\d{1,2})?)\s*¥',
+        # 特殊格式：标签和数字之间只有空格（无冒号）
+        r'(?:投注额|下注额)\s+(\d+(?:\.\d{1,2})?)',
     ]
     
     for pattern in patterns:
@@ -307,7 +331,7 @@ def extract_stake(text: str) -> Optional[float]:
         if match:
             stake = float(match.group(1))
             # 过滤掉明显不合理的金额（如年份等）
-            if 1 <= stake <= 1000000:
+            if 0.01 <= stake <= 1000000:  # 扩大范围，允许小额投注
                 logger.info(f"识别到投注金额: {stake}")
                 return stake
     

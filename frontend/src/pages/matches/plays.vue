@@ -322,7 +322,7 @@ function isOddsSelected(playType, selection) {
   background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
   color: #ffffff;
   padding: 8rpx 20rpx;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   font-size: 24rpx;
   font-weight: 600;
 }
@@ -351,7 +351,7 @@ function isOddsSelected(playType, selection) {
 .matrix .cell,
 .grid .cell {
   background: #f9fafb;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   padding: 0 12rpx;
   border: 1px solid #e5e7eb;
   display: flex;

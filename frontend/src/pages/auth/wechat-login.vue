@@ -215,7 +215,7 @@ function navigateAfterLogin() {
   color: #ffffff;
   font-size: 32rpx;
   font-weight: 600;
-  border-radius: 44rpx;
+  border-radius: 8rpx;
   border: none;
   display: flex;
   align-items: center;

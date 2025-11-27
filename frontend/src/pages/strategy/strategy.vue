@@ -170,7 +170,7 @@ onShow(() => {
 
 .input-item input {
   background: #f9fafb;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   padding: 12rpx;
   border: 1px solid rgba(13, 148, 136, 0.15);
   transition: all 0.3s;
@@ -219,7 +219,7 @@ onShow(() => {
 
 .recommend .risk {
   padding: 12rpx;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   background: linear-gradient(135deg, rgba(13, 148, 136, 0.1) 0%, rgba(20, 184, 166, 0.1) 100%);
   color: #0d9488;
   font-weight: 500;

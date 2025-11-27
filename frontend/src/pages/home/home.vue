@@ -191,7 +191,7 @@ onShow(() => {
 .chip {
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 12rpx 18rpx;
   display: flex;
   flex-direction: column;
@@ -244,7 +244,7 @@ onShow(() => {
   width: 100%;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
-  border-radius: 14rpx;
+  border-radius: 8rpx;
   padding: 12rpx 0;
   display: flex;
   align-items: center;

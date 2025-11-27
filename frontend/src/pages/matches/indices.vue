@@ -1378,7 +1378,7 @@ function setAwayMatchCount(count) {
   color: #ffffff;
   font-size: 22rpx;
   padding: 4rpx 12rpx;
-  border-radius: 4rpx;
+  border-radius: 8rpx;
 }
 
 .match-teams {
@@ -1416,7 +1416,7 @@ function setAwayMatchCount(count) {
 
   .status-badge {
     padding: 4rpx 12rpx;
-    border-radius: 6rpx;
+    border-radius: 8rpx;
     font-size: 20rpx;
 
     &.pending {
@@ -1438,7 +1438,7 @@ function setAwayMatchCount(count) {
   display: flex;
   background: #ffffff;
   margin: 0 24rpx;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   box-shadow: none;
   border: 1px solid #e5e7eb;
 }
@@ -1447,7 +1447,7 @@ function setAwayMatchCount(count) {
   flex: 1;
   padding: 10rpx;
   text-align: center;
-  border-radius: 4rpx;
+  border-radius: 8rpx;
   transition: all 0.3s;
 
   .tab-text {
@@ -1480,7 +1480,7 @@ function setAwayMatchCount(count) {
   display: inline-block;
   padding: 6rpx 16rpx;
   margin-right: 12rpx;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   transition: all 0.3s;
@@ -1540,7 +1540,7 @@ function setAwayMatchCount(count) {
 // 紧凑表格布局
 .compact-table {
   background: #ffffff;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   overflow: hidden;
   border: 1px solid #e5e7eb;
 }
@@ -1720,7 +1720,7 @@ function setAwayMatchCount(count) {
 // ===== 大小球紧凑表格样式 =====
 .compact-table-ou {
   background: #ffffff;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   overflow: hidden;
   border: 1px solid #e5e7eb;
 }
@@ -2012,7 +2012,7 @@ function setAwayMatchCount(count) {
 
   .result-badge {
     padding: 4rpx 10rpx;
-    border-radius: 4rpx;
+    border-radius: 8rpx;
     font-size: 20rpx;
     flex-shrink: 0;
     width: 40rpx;
@@ -2058,7 +2058,7 @@ function setAwayMatchCount(count) {
 .filter-item {
   padding: 4rpx 12rpx;
   background: transparent;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   font-size: 22rpx;
   color: #9ca3af;
   border: none;
@@ -2094,7 +2094,7 @@ function setAwayMatchCount(count) {
   padding: 6rpx 16rpx;
   background: #f3f4f6;
   border: none;
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   font-size: 22rpx;
   color: #6b7280;
   transition: all 0.3s ease;

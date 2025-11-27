@@ -201,7 +201,7 @@ onShow(() => {
 input,
 .picker-value {
   background: #f9fafb;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   padding: 12rpx 14rpx;
   border: 1px solid rgba(13, 148, 136, 0.15);
   transition: all 0.3s;

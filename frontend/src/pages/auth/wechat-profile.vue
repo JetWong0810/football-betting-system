@@ -269,7 +269,7 @@ function navigateAfterLogin() {
 .choose-avatar-btn {
   height: 72rpx;
   padding: 0 32rpx;
-  border-radius: 36rpx;
+  border-radius: 8rpx;
   border: 2rpx dashed #0ea5e9;
   color: #0f172a;
   font-size: 26rpx;
@@ -306,7 +306,7 @@ function navigateAfterLogin() {
 .confirm-btn {
   width: 100%;
   height: 96rpx;
-  border-radius: 48rpx;
+  border-radius: 8rpx;
   background: #0d9488;
   color: #ffffff;
   font-size: 32rpx;

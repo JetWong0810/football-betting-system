@@ -15,23 +15,23 @@
         <view class="field inline">
           <view class="inline-item">
             <text class="label">主队</text>
-            <input v-model="leg.homeTeam" placeholder="主队名称" />
+            <input v-model="leg.homeTeam" placeholder="主队名称" :disabled="ocrLoading" />
           </view>
           <view class="inline-item">
             <text class="label">客队</text>
-            <input v-model="leg.awayTeam" placeholder="客队名称" />
+            <input v-model="leg.awayTeam" placeholder="客队名称" :disabled="ocrLoading" />
           </view>
         </view>
 
         <view class="field inline">
           <view class="inline-item">
             <text class="label">联赛</text>
-            <input v-model="leg.league" placeholder="英超 / 欧冠..." />
+            <input v-model="leg.league" placeholder="英超 / 欧冠..." :disabled="ocrLoading" />
           </view>
           <view class="inline-item">
             <text class="label">比赛时间</text>
-            <picker class="picker-wrapper" mode="date" :value="leg.matchDate || currentDate" @change="(e) => onLegDateChange(leg.id, e.detail.value)" :start="currentDate">
-              <view class="picker-value">{{ leg.matchDate || "选择日期" }}</view>
+            <picker class="picker-wrapper" mode="date" :value="leg.matchDate || currentDate" @change="(e) => onLegDateChange(leg.id, e.detail.value)" :start="currentDate" :disabled="ocrLoading">
+              <view class="picker-value" :class="{ disabled: ocrLoading }">{{ leg.matchDate || "选择日期" }}</view>
             </picker>
           </view>
         </view>
@@ -39,8 +39,8 @@
         <view class="field inline">
           <view class="inline-item">
             <text class="label">投注类型</text>
-            <picker class="picker-wrapper" mode="selector" :range="betTypeOptions" @change="(e) => onLegBetTypeChange(leg.id, e.detail.value)">
-              <view class="picker-value">{{ leg.betType }}</view>
+            <picker class="picker-wrapper" mode="selector" :range="betTypeOptions" @change="(e) => onLegBetTypeChange(leg.id, e.detail.value)" :disabled="ocrLoading">
+              <view class="picker-value" :class="{ disabled: ocrLoading }">{{ leg.betType }}</view>
             </picker>
           </view>
           <view class="inline-item">
@@ -80,13 +80,13 @@
 
         <view class="field">
           <text class="label">赔率</text>
-          <input type="digit" v-model="leg.odds" placeholder="例：1.85" />
+          <input type="digit" v-model="leg.odds" placeholder="例：1.85" :disabled="ocrLoading" />
         </view>
 
       </view>
     </view>
 
-    <button v-if="!isFieldsDisabled" class="secondary-btn" @tap="addLeg">+ 添加赛事</button>
+    <button v-if="!isFieldsDisabled" class="secondary-btn" @tap="addLeg" :disabled="ocrLoading">＋ 添加赛事</button>
 
     <!-- 串关方式选择（横向滚动） -->
     <view v-if="isParlay && !isFieldsDisabled" class="parlay-selector">
@@ -107,7 +107,7 @@
     <view v-if="!isFieldsDisabled" class="field inline">
       <view class="inline-item">
         <text class="label">下注金额 (¥)</text>
-        <input type="digit" v-model="form.stake" placeholder="例：100" />
+        <input type="digit" v-model="form.stake" placeholder="例：100" :disabled="ocrLoading" />
       </view>
       <view class="inline-item">
         <text class="label">总赔率</text>
@@ -137,8 +137,8 @@
 
     <view class="field">
       <text class="label">投注结果</text>
-      <picker class="picker-wrapper" mode="selector" :range="resultOptions" range-key="label" @change="onResultChange">
-        <view class="picker-value">{{ resultLabel }}</view>
+      <picker class="picker-wrapper" mode="selector" :range="resultOptions" range-key="label" @change="onResultChange" :disabled="ocrLoading">
+        <view class="picker-value" :class="{ disabled: ocrLoading }">{{ resultLabel }}</view>
       </picker>
     </view>
 
@@ -172,6 +172,10 @@ const props = defineProps({
     default: false,
   },
   isEditingBetting: {
+    type: Boolean,
+    default: false,
+  },
+  ocrLoading: {
     type: Boolean,
     default: false,
   },
@@ -272,7 +276,8 @@ const maxWinning = computed(() => {
 });
 
 // 编辑投注中的记录时，只能修改投注结果
-const isFieldsDisabled = computed(() => props.isEditingBetting);
+// OCR 识别中时，也禁用所有输入
+const isFieldsDisabled = computed(() => props.isEditingBetting || props.ocrLoading);
 
 // 表单验证
 const formErrors = computed(() => {
@@ -478,9 +483,23 @@ function createLeg(overrides = {}) {
   const directionOptions = getDirectionOptions(betType);
   const prefixOptions = getPrefixOptions(betType);
   const hasPrefix = requiresPrefix(betType);
-  const parsedSelection = overrides.selection ? getSelectionParts(betType, overrides.selection) : { prefix: "", value: "" };
-  const defaultPrefix = parsedSelection.prefix || prefixOptions[0] || "";
-  const defaultValue = parsedSelection.value || directionOptions[0] || "";
+  
+  // 对于让球盘，如果已经有 selection，直接使用，不要重新构建（以保留主/客信息）
+  let finalSelection;
+  if (overrides.selection && betType === "让球") {
+    // 直接使用传入的 selection（已包含主/客信息）
+    finalSelection = overrides.selection;
+  } else if (overrides.selection) {
+    // 非让球盘，按原有逻辑处理
+    finalSelection = overrides.selection;
+  } else {
+    // 没有 selection，生成默认值
+    const parsedSelection = { prefix: "", value: "" };
+    const defaultPrefix = prefixOptions[0] || "";
+    const defaultValue = directionOptions[0] || "";
+    finalSelection = hasPrefix ? buildSelection(betType, defaultPrefix, defaultValue) : directionOptions[0] || "";
+  }
+  
   return {
     id: overrides.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     homeTeam: overrides.homeTeam || "",
@@ -488,7 +507,7 @@ function createLeg(overrides = {}) {
     league: overrides.league || "",
     matchDate: overrides.matchDate || overrides.matchTime?.split(" ")[0] || getCurrentDate(),
     betType,
-    selection: hasPrefix ? buildSelection(betType, defaultPrefix, defaultValue) : overrides.selection || directionOptions[0] || "",
+    selection: finalSelection,
     odds: overrides.odds !== undefined ? Number(overrides.odds) : null,
   };
 }
@@ -785,7 +804,7 @@ defineExpose({
 .editing-banner {
   @extend .flex-between;
   padding: 12rpx 16rpx;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   background: rgba(13, 148, 136, 0.08);
   font-size: 22rpx;
   color: #0d9488;
@@ -801,7 +820,7 @@ defineExpose({
 
 .leg-card {
   padding: 12rpx;
-  border-radius: 10rpx;
+  border-radius: 8rpx;
   border: 1px solid #e5e7eb;
   background: #f9fafb;
   display: flex;
@@ -887,6 +906,12 @@ input:disabled {
   justify-content: space-between;
   color: #374151;
   position: relative;
+
+  &.disabled {
+    background: #f5f5f5;
+    color: #999;
+    cursor: not-allowed;
+  }
 }
 
 .selection-with-prefix {

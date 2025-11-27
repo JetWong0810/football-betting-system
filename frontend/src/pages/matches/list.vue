@@ -576,7 +576,7 @@ function hasMatchSelection(matchId) {
 .match-wrap {
   background: #fff;
   padding: 0 24rpx;
-  border-radius: 20rpx;
+  border-radius: 8rpx;
   box-shadow: 0 4rpx 12rpx rgba(13, 148, 136, 0.08);
   overflow: hidden;
 }
@@ -611,7 +611,7 @@ function hasMatchSelection(matchId) {
 }
 
 .league {
-  border-radius: 6rpx;
+  border-radius: 8rpx;
   padding: 4rpx 10rpx;
   color: #fff;
   font-size: 20rpx;
@@ -634,7 +634,7 @@ function hasMatchSelection(matchId) {
   color: #666;
   background: #f8f8f8;
   padding: 3rpx 8rpx;
-  border-radius: 3rpx;
+  border-radius: 8rpx;
   line-height: 1.2;
 }
 

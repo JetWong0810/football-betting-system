@@ -13,17 +13,26 @@
       </view>
 
       <scroll-view class="dialog-body" scroll-y>
-        <BetForm ref="betFormRef" :editing-bet="editingBet" :is-editing-betting="isEditingBetting" :hide-submit-button="true" @submit="handleSubmit" @cancelEdit="handleCancelEdit" />
+        <BetForm ref="betFormRef" :editing-bet="editingBet" :is-editing-betting="isEditingBetting" :hide-submit-button="true" :ocr-loading="ocrLoading" @submit="handleSubmit" @cancelEdit="handleCancelEdit" />
       </scroll-view>
+
+      <!-- OCR 识别加载遮罩 -->
+      <view v-if="ocrLoading" class="ocr-loading-overlay">
+        <view class="loading-content">
+          <view class="loading-spinner"></view>
+          <text class="loading-text">识别中，请稍候...</text>
+          <text class="loading-hint">预计需要 5-10 秒</text>
+        </view>
+      </view>
 
       <view class="dialog-footer">
         <view v-if="isEditingBetting" class="footer-buttons">
-          <button class="cancel-footer-btn" @tap="handleClose">取消</button>
-          <button class="settle-btn" @tap="handleSettle">结算</button>
+          <button class="cancel-footer-btn" @tap="handleClose" :disabled="ocrLoading">取消</button>
+          <button class="settle-btn" @tap="handleSettle" :disabled="ocrLoading">结算</button>
         </view>
         <view v-else class="footer-buttons">
-          <button class="save-footer-btn" @tap="submitFormWithStatus('saved')">保存</button>
-          <button class="bet-footer-btn" @tap="submitFormWithStatus('betting')">投注</button>
+          <button class="save-footer-btn" @tap="submitFormWithStatus('saved')" :disabled="ocrLoading">保存</button>
+          <button class="bet-footer-btn" @tap="submitFormWithStatus('betting')" :disabled="ocrLoading">投注</button>
         </view>
       </view>
     </view>
@@ -271,7 +280,7 @@ defineExpose({
   gap: 6rpx;
   padding: 0 18rpx;
   height: 44rpx;
-  border-radius: 999rpx;
+  border-radius: 8rpx;
   background: rgba(255, 255, 255, 0.16);
   border: 1px solid rgba(255, 255, 255, 0.45);
   font-size: 24rpx;
@@ -298,6 +307,81 @@ defineExpose({
 .close-btn {
   width: 44rpx;
   height: 44rpx;
+  line-height: 44rpx;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 36rpx;
+  font-weight: 300;
+  padding: 0;
+}
+
+.close-btn:active {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(1rpx);
+}
+
+/* OCR 识别加载遮罩 */
+.ocr-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8rpx);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 24rpx;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.loading-spinner {
+  width: 80rpx;
+  height: 80rpx;
+  border: 6rpx solid rgba(13, 148, 136, 0.1);
+  border-top-color: #0d9488;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 28rpx;
+  color: #0d9488;
+  font-weight: 600;
+}
+
+.loading-hint {
+  font-size: 22rpx;
+  color: #6b7280;
+}
+
+/* 按钮禁用样式 */
+.save-footer-btn:disabled,
+.bet-footer-btn:disabled,
+.settle-btn:disabled,
+.cancel-footer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.16);
   border: 1px solid rgba(255, 255, 255, 0.45);
@@ -340,7 +424,7 @@ defineExpose({
   button {
     flex: 1;
     height: 72rpx;
-    border-radius: 12rpx;
+    border-radius: 8rpx;
     font-size: 26rpx;
     font-weight: 600;
     border: none;

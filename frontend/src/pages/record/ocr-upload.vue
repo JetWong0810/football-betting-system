@@ -314,7 +314,7 @@ const saveBet = async () => {
 
 .upload-box {
   background: white;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 80rpx 40rpx;
   display: flex;
   flex-direction: column;
@@ -341,7 +341,7 @@ const saveBet = async () => {
 
 .preview-box {
   background: white;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 20rpx;
   overflow: hidden;
 }
@@ -350,7 +350,7 @@ const saveBet = async () => {
   width: 100%;
   min-height: 400rpx;
   max-height: 800rpx;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   margin-bottom: 20rpx;
 }
 
@@ -375,7 +375,7 @@ const saveBet = async () => {
 /* 识别结果 */
 .result-section {
   background: white;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 30rpx;
   margin-bottom: 30rpx;
 }
@@ -392,7 +392,7 @@ const saveBet = async () => {
   align-items: center;
   padding: 20rpx;
   background-color: #fef2f2;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   border: 2rpx solid #fecaca;
 }
 
@@ -416,7 +416,7 @@ const saveBet = async () => {
 .raw-text-box {
   padding: 20rpx;
   background-color: #f9fafb;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   border: 2rpx solid #e5e7eb;
 }
 
@@ -446,7 +446,7 @@ const saveBet = async () => {
 .bet-info-box {
   padding: 20rpx;
   background-color: #ecfdf5;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   border: 2rpx solid #a7f3d0;
 }
 
@@ -519,13 +519,13 @@ const saveBet = async () => {
   margin-top: 20rpx;
   background-color: #0d9488;
   color: white;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
 }
 
 /* 使用说明 */
 .tips-section {
   background: white;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 30rpx;
 }
 

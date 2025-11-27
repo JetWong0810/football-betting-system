@@ -207,7 +207,7 @@ function goToLogin() {
 /* 表单区域 */
 .form-section {
   background: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 8rpx;
   padding: 32rpx 24rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 }
@@ -261,7 +261,7 @@ function goToLogin() {
   color: #ffffff;
   font-size: 26rpx;
   font-weight: 600;
-  border-radius: 12rpx;
+  border-radius: 8rpx;
   border: none;
   box-shadow: 0 4rpx 16rpx rgba(13, 148, 136, 0.3);
   margin-top: 32rpx;
