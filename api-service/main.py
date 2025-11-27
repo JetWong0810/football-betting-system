@@ -701,6 +701,14 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
             
             with get_db() as conn:
                 with conn.cursor() as cursor:
+                    # 为避免违反 openid 唯一约束，先将当前微信临时账号的 openid 置空
+                    # 然后再把 openid 绑定到已有账号上，最后删除临时账号
+                    if current_user["id"] != existing_user["id"] and current_user.get("openid"):
+                        cursor.execute(
+                            "UPDATE users SET openid = NULL WHERE id = %s",
+                            (current_user["id"],),
+                        )
+
                     # 将当前用户的 openid 和微信信息更新到已有账号
                     cursor.execute(
                         """
@@ -716,8 +724,8 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
                             current_user.get("openid"),
                             current_user.get("wechat_nickname"),
                             current_user.get("wechat_avatar"),
-                            existing_user["id"]
-                        )
+                            existing_user["id"],
+                        ),
                     )
                     
                     # 删除当前小程序临时账号（可选：也可以软删除）
