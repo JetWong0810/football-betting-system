@@ -715,9 +715,9 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
                         UPDATE users 
                         SET openid = %s,
                             wechat_nickname = COALESCE(wechat_nickname, %s),
-                            wechat_avatar = COALESCE(wechat_avatar, %s),
-                            login_type = 'both',
-                            updated_at = NOW()
+                            wechat_avatar   = COALESCE(wechat_avatar, %s),
+                            login_type      = 'both',
+                            updated_at      = NOW()
                         WHERE id = %s
                         """,
                         (
@@ -726,6 +726,17 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
                             current_user.get("wechat_avatar"),
                             existing_user["id"],
                         ),
+                    )
+
+                    # 如果合并后 wechat_nickname / wechat_avatar 仍为空，则用当前账号的昵称 / 头像兜底
+                    cursor.execute(
+                        """
+                        UPDATE users
+                        SET wechat_nickname = COALESCE(wechat_nickname, nickname),
+                            wechat_avatar   = COALESCE(wechat_avatar, avatar)
+                        WHERE id = %s
+                        """,
+                        (existing_user["id"],),
                     )
                     
                     # 删除当前小程序临时账号（可选：也可以软删除）
