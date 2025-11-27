@@ -124,7 +124,7 @@ async function checkLoginStatus() {
   // #endif
 }
 
-function handleStartLogin() {
+async function handleStartLogin() {
   if (loading.value) {
     return;
   }
@@ -137,13 +137,41 @@ function handleStartLogin() {
   return;
   // #endif
 
+  // #ifdef MP-WEIXIN
   loading.value = true;
-  uni.navigateTo({
-    url: `/pages/auth/wechat-profile?redirect=${encodeURIComponent(redirectUrl.value)}`,
-    complete: () => {
-      loading.value = false;
-    },
-  });
+  try {
+    // 第一步：只做微信登录，不获取头像昵称
+    const res = await userStore.loginWithWeChatMiniProgram({
+      requireProfile: false,
+    });
+
+    // 根据后端返回的 next_step 决定后续流程
+    if (res.next_step === "bind_phone") {
+      // 新用户或未绑定手机号的用户，先去绑定手机号
+      uni.navigateTo({ url: "/pages/auth/bind-phone" });
+    } else if (res.next_step === "complete_profile") {
+      // 已绑定手机号但资料未完善，跳转到头像昵称完善页
+      uni.navigateTo({
+        url: `/pages/auth/wechat-profile?redirect=${encodeURIComponent(redirectUrl.value)}`,
+      });
+    } else {
+      // 已完成所有步骤，直接进入应用
+      uni.showToast({ title: "登录成功", icon: "success", duration: 1000 });
+      setTimeout(() => {
+        navigateAfterLogin();
+      }, 800);
+    }
+  } catch (error) {
+    console.error("微信登录失败:", error);
+    uni.showToast({
+      title: error?.data?.detail || error?.message || "登录失败，请重试",
+      icon: "none",
+      duration: 2000,
+    });
+  } finally {
+    loading.value = false;
+  }
+  // #endif
 }
 
 async function handleAccountLogin() {

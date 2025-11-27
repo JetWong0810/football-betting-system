@@ -122,12 +122,27 @@ class UserRepository:
                 return cursor.rowcount > 0
 
     def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """根据ID获取用户"""
+        """根据ID获取用户
+        注意：这里需要返回 openid / wechat_nickname / wechat_avatar / login_type，
+        以便在账号合并、手机号绑定等场景中使用。
+        """
         with get_db() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """SELECT id, username, phone, email, nickname, avatar,
-                              created_at, last_login_at, status
+                    """SELECT id,
+                              username,
+                              phone,
+                              email,
+                              nickname,
+                              avatar,
+                              openid,
+                              unionid,
+                              wechat_nickname,
+                              wechat_avatar,
+                              login_type,
+                              created_at,
+                              last_login_at,
+                              status
                        FROM users WHERE id = %s""",
                     (user_id,)
                 )

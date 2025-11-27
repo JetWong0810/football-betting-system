@@ -89,6 +89,14 @@
       }
     },
     {
+      "path": "pages/auth/bind-phone",
+      "style": {
+        "navigationBarTitleText": "绑定手机号",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/matches/list",
       "style": {
         "navigationBarTitleText": "赛事中心",
