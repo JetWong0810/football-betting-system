@@ -68,14 +68,14 @@ async function handleBindPhone() {
     const res = await userStore.bindPhone(phone.value.trim());
 
     if (res.merged) {
-      // 账号合并成功
+      // 账号合并成功（已有账号 + 微信账号合并），一般资料已经比较完整
       uni.showToast({
         title: "账号已合并，欢迎回来",
         icon: "success",
         duration: 2000,
       });
     } else {
-      // 绑定成功
+      // 纯微信新用户第一次绑定手机号
       uni.showToast({
         title: "绑定成功",
         icon: "success",
@@ -83,12 +83,23 @@ async function handleBindPhone() {
       });
     }
 
-    // 延迟跳转到首页
+    const delay = res.merged ? 2000 : 1500;
+    const profileCompleted = res.user?.profile_completed === true;
+
+    // 绑定/合并完成后的导航逻辑：
+    // - 如果资料未完善（profile_completed=false），跳转到头像昵称完善页
+    // - 否则直接回首页
     setTimeout(() => {
-      uni.switchTab({
-        url: "/pages/home/home",
-      });
-    }, res.merged ? 2000 : 1500);
+      if (!profileCompleted) {
+        uni.navigateTo({
+          url: "/pages/auth/wechat-profile?redirect=/pages/home/home",
+        });
+      } else {
+        uni.switchTab({
+          url: "/pages/home/home",
+        });
+      }
+    }, delay);
   } catch (error) {
     uni.showToast({
       title: error.data?.detail || "绑定失败",

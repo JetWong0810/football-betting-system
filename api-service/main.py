@@ -770,7 +770,8 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
             logger.exception("账号合并失败")
             raise HTTPException(status_code=500, detail=f"账号合并失败：{str(e)}")
     
-    # 手机号未被使用 -> 直接绑定
+    # 手机号未被使用 -> 直接绑定（典型场景：纯微信新用户首次绑定手机）
+    # 这里我们认为资料尚未完善，需要后续引导到头像昵称完善页
     try:
         user_repo.update_user_profile(user_id=user_id, phone=req.phone)
         updated_user = user_repo.get_user_by_id(user_id)
@@ -786,7 +787,8 @@ async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)
                 "nickname": updated_user.get("nickname") or updated_user.get("wechat_nickname"),
                 "avatar": updated_user.get("avatar") or updated_user.get("wechat_avatar"),
                 "phone_bound": True,
-                "profile_completed": bool(updated_user.get("nickname") or updated_user.get("wechat_nickname"))
+                # 直接绑定场景统一视为资料未完善，后续由前端跳转到头像昵称完善页
+                "profile_completed": False,
             }
         }
     except Exception as e:
