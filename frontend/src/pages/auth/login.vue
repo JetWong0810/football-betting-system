@@ -17,7 +17,7 @@
             <text class="label-icon">👤</text>
             <text>用户名</text>
           </view>
-          <input class="input-field" v-model="form.username" placeholder="请输入用户名" placeholder-class="input-placeholder" />
+          <input class="input-field" v-model="form.username" placeholder="用户名/手机号" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">

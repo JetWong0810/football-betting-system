@@ -18,17 +18,55 @@
           <text class="welcome-text">欢迎使用</text>
         </view>
 
-        <!-- 授权按钮 -->
+        <!-- 微信一键登录（主要方式） -->
         <view class="button-section">
-          <button class="auth-btn" :disabled="loading" @tap="handleStartLogin" hover-class="auth-btn-active">
+          <button class="wechat-btn primary" :disabled="loading" @tap="handleStartLogin">
             <text v-if="loading">跳转中...</text>
-            <text v-else>微信快速登录</text>
+            <text v-else>微信一键登录</text>
           </button>
         </view>
 
-        <!-- 说明文字 -->
-        <view class="desc-section">
-          <text class="desc-text"> 点击按钮后，将跳转到"头像昵称填写"页，按照微信最新规范完成资料后即可登录。 </text>
+        <!-- 分割线 -->
+        <view class="divider">
+          <view class="divider-line"></view>
+          <text class="divider-text">或</text>
+          <view class="divider-line"></view>
+        </view>
+
+        <!-- 账号密码登录（次要方式） -->
+        <view class="account-login-section">
+          <view class="input-group">
+            <input 
+              v-model="accountForm.username" 
+              placeholder="用户名/手机号" 
+              placeholder-class="input-placeholder"
+              class="input-field"
+            />
+          </view>
+          <view class="input-group">
+            <input 
+              v-model="accountForm.password" 
+              type="password" 
+              placeholder="密码" 
+              placeholder-class="input-placeholder"
+              class="input-field"
+            />
+          </view>
+          <button class="account-btn" @tap="handleAccountLogin" :disabled="accountLoading">
+            <text v-if="accountLoading">登录中...</text>
+            <text v-else>账号登录</text>
+          </button>
+        </view>
+
+        <!-- 底部链接 -->
+        <view class="bottom-links">
+          <text class="link-text" @tap="goToRegister">还没有账号？立即注册</text>
+        </view>
+
+        <!-- 隐私协议 -->
+        <view class="privacy-tips">
+          <text>登录即表示同意</text>
+          <text class="link">《用户协议》</text>
         </view>
       </template>
     </view>
@@ -36,15 +74,21 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, reactive } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { useUserStore } from "@/stores/userStore";
 
 const userStore = useUserStore();
 const loading = ref(false);
+const accountLoading = ref(false);
 const silentLoginInProgress = ref(true); // 初始为true，显示检查状态
 const redirectUrl = ref("/pages/home/home");
 const tabPages = ["/pages/home/home", "/pages/matches/list", "/pages/record/record", "/pages/profile/profile"];
+
+const accountForm = reactive({
+  username: "",
+  password: "",
+});
 
 onLoad((options) => {
   if (options?.redirect) {
@@ -100,6 +144,38 @@ function handleStartLogin() {
       loading.value = false;
     },
   });
+}
+
+async function handleAccountLogin() {
+  if (!accountForm.username || !accountForm.password) {
+    uni.showToast({ title: "请输入用户名和密码", icon: "none" });
+    return;
+  }
+
+  accountLoading.value = true;
+
+  try {
+    await userStore.login({
+      username: accountForm.username,
+      password: accountForm.password,
+    });
+
+    uni.showToast({ title: "登录成功", icon: "success", duration: 1500 });
+    setTimeout(() => {
+      navigateAfterLogin();
+    }, 1500);
+  } catch (error) {
+    uni.showToast({ 
+      title: error.data?.detail || "登录失败", 
+      icon: "none" 
+    });
+  } finally {
+    accountLoading.value = false;
+  }
+}
+
+function goToRegister() {
+  uni.navigateTo({ url: "/pages/auth/register" });
 }
 
 function navigateAfterLogin() {
@@ -208,40 +284,123 @@ function navigateAfterLogin() {
   margin-bottom: 32rpx;
 }
 
-.auth-btn {
+.wechat-btn {
   width: 100%;
   height: 88rpx;
   background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
   color: #ffffff;
   font-size: 32rpx;
   font-weight: 600;
-  border-radius: 8rpx;
+  border-radius: 12rpx;
   border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4rpx 16rpx rgba(13, 148, 136, 0.3);
-  transition: all 0.3s;
+  box-shadow: 0 6rpx 20rpx rgba(13, 148, 136, 0.35);
+  transition: all 0.2s;
 }
 
-.auth-btn:active {
+.wechat-btn:active {
   transform: scale(0.98);
   opacity: 0.9;
 }
 
-.auth-btn[disabled] {
+.wechat-btn[disabled] {
   opacity: 0.6;
 }
 
-/* 说明区域 */
-.desc-section {
+/* 分割线 */
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 40rpx 0;
   width: 100%;
-  text-align: center;
 }
 
-.desc-text {
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.divider-text {
+  padding: 0 24rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+/* 账号密码登录 */
+.account-login-section {
+  width: 100%;
+}
+
+.input-group {
+  margin-bottom: 20rpx;
+}
+
+.input-field {
+  width: 100%;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8rpx;
+  padding: 0 20rpx;
+  font-size: 28rpx;
+  color: #111827;
+  transition: all 0.3s;
+  box-sizing: border-box;
+  height: 80rpx;
+  line-height: 80rpx;
+}
+
+.input-field:focus {
+  border-color: #0d9488;
+  background: #ffffff;
+}
+
+.input-placeholder {
+  color: #9ca3af;
+}
+
+.account-btn {
+  width: 100%;
+  height: 80rpx;
+  background: #ffffff;
+  color: #0d9488;
+  font-size: 28rpx;
+  font-weight: 500;
+  border-radius: 8rpx;
+  border: 2px solid #0d9488;
+  margin-top: 12rpx;
+  transition: all 0.2s;
+}
+
+.account-btn:active {
+  background: #f0fdfa;
+}
+
+.account-btn[disabled] {
+  opacity: 0.6;
+}
+
+/* 底部链接 */
+.bottom-links {
+  display: flex;
+  justify-content: center;
+  margin-top: 32rpx;
+}
+
+.link-text {
+  font-size: 24rpx;
+  color: #0d9488;
+  font-weight: 500;
+}
+
+/* 隐私协议 */
+.privacy-tips {
+  text-align: center;
+  margin-top: 24rpx;
   font-size: 22rpx;
   color: #9ca3af;
-  line-height: 1.5;
+}
+
+.privacy-tips .link {
+  color: #0d9488;
 }
 </style>

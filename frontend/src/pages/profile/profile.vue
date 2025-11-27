@@ -109,12 +109,10 @@
           </view>
         </view>
 
-        <!-- 退出登录按钮 (仅 H5 显示) -->
-        <!-- #ifndef MP-WEIXIN -->
+        <!-- 退出登录按钮 -->
         <view class="logout-section" v-if="userStore.isLoggedIn">
           <button class="logout-btn" @tap="handleLogout">退出登录</button>
         </view>
-        <!-- #endif -->
 
         <!-- 版本信息 -->
         <view class="version-info">
@@ -173,7 +171,18 @@ function handleLogout() {
     success: (res) => {
       if (res.confirm) {
         userStore.logout();
-        uni.showToast({ title: "已退出登录", icon: "success" });
+        uni.showToast({ title: "已退出登录", icon: "success", duration: 1500 });
+        
+        // 延迟跳转
+        setTimeout(() => {
+          // #ifdef MP-WEIXIN
+          uni.reLaunch({ url: "/pages/auth/wechat-login" });
+          // #endif
+          
+          // #ifndef MP-WEIXIN
+          uni.reLaunch({ url: "/pages/auth/login" });
+          // #endif
+        }, 1500);
       }
     },
   });

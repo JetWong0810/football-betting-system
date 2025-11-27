@@ -36,6 +36,16 @@ class UserRepository:
                 )
                 return cursor.fetchone()
 
+    def get_user_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
+        """根据手机号获取用户"""
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM users WHERE phone = %s",
+                    (phone,)
+                )
+                return cursor.fetchone()
+
     def get_user_by_openid(self, openid: str) -> Optional[Dict[str, Any]]:
         """根据openid获取用户"""
         with get_db() as conn:

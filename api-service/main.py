@@ -159,6 +159,11 @@ class WechatSilentLoginRequest(BaseModel):
     code: str  # 微信登录code
 
 
+class BindPhoneRequest(BaseModel):
+    phone: str
+    code: Optional[str] = None  # 短信验证码（预留）
+
+
 class UpdateProfileRequest(BaseModel):
     nickname: Optional[str] = None
     phone: Optional[str] = None
@@ -387,10 +392,25 @@ def get_match_plays(match_id: str):
 @app.post("/api/auth/register")
 def register(req: RegisterRequest):
     """用户注册"""
+    import re
+    
     # 检查用户名是否已存在
     existing_user = user_repo.get_user_by_username(req.username)
     if existing_user:
         raise HTTPException(status_code=400, detail="用户名已存在")
+    
+    # 手机号必填校验
+    if not req.phone:
+        raise HTTPException(status_code=400, detail="手机号为必填项")
+    
+    # 手机号格式验证
+    if not re.match(r'^1[3-9]\d{9}$', req.phone):
+        raise HTTPException(status_code=400, detail="手机号格式不正确")
+    
+    # 检查手机号是否已存在
+    existing_phone_user = user_repo.get_user_by_phone(req.phone)
+    if existing_phone_user:
+        raise HTTPException(status_code=400, detail="该手机号已被注册")
     
     # 创建用户
     password_hash = hash_password(req.password)
@@ -421,8 +441,17 @@ def register(req: RegisterRequest):
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
-    """用户登录"""
-    user = user_repo.get_user_by_username(req.username)
+    """用户登录（支持用户名或手机号）"""
+    import re
+    
+    # 判断是否为手机号格式
+    if re.match(r'^1[3-9]\d{9}$', req.username):
+        # 按手机号查询
+        user = user_repo.get_user_by_phone(req.username)
+    else:
+        # 按用户名查询
+        user = user_repo.get_user_by_username(req.username)
+    
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     
@@ -597,9 +626,23 @@ async def wechat_login(req: WechatLoginRequest, request: Request):
         # 6. 生成token
         token = create_access_token({"user_id": user_id, "username": user["username"]})
         
+        # 判断用户是否已绑定手机号和完善资料
+        phone_bound = bool(user.get("phone"))
+        profile_completed = bool(user.get("nickname") or user.get("wechat_nickname"))
+        
+        # 提示前端下一步操作
+        next_step = None
+        if not phone_bound:
+            next_step = "bind_phone"
+        elif not profile_completed:
+            next_step = "complete_profile"
+        
         return {
             "message": "登录成功",
             "token": token,
+            "phone_bound": phone_bound,
+            "profile_completed": profile_completed,
+            "next_step": next_step,
             "user": {
                 "id": user["id"],
                 "username": user["username"],
@@ -615,6 +658,121 @@ async def wechat_login(req: WechatLoginRequest, request: Request):
     except Exception as exc:
         logger.exception("Unhandled wechat login error")
         raise HTTPException(status_code=500, detail=f"微信登录失败：{str(exc)}")
+
+
+@app.post("/api/auth/bind-phone")
+async def bind_phone(req: BindPhoneRequest, user_id: int = Depends(require_auth)):
+    """手机号绑定接口（小程序）"""
+    import re
+    
+    # 手机号格式验证
+    if not re.match(r'^1[3-9]\d{9}$', req.phone):
+        raise HTTPException(status_code=400, detail="手机号格式不正确")
+    
+    # 获取当前用户信息
+    current_user = user_repo.get_user_by_id(user_id)
+    if not current_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    # 检查手机号是否已被其他账号使用
+    existing_user = user_repo.get_user_by_phone(req.phone)
+    
+    if existing_user and existing_user["id"] == user_id:
+        # 已经绑定过该手机号
+        return {
+            "message": "该手机号已经绑定到当前账号",
+            "merged": False,
+            "token": create_access_token({"user_id": user_id, "username": current_user["username"]}),
+            "user": {
+                "id": current_user["id"],
+                "username": current_user["username"],
+                "phone": current_user["phone"],
+                "nickname": current_user.get("nickname") or current_user.get("wechat_nickname"),
+                "avatar": current_user.get("avatar") or current_user.get("wechat_avatar"),
+                "phone_bound": True,
+                "profile_completed": bool(current_user.get("nickname") or current_user.get("wechat_nickname"))
+            }
+        }
+    
+    if existing_user:
+        # 手机号已被其他账号使用 -> 账号合并
+        try:
+            from database import get_db
+            
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    # 将当前用户的 openid 和微信信息更新到已有账号
+                    cursor.execute(
+                        """
+                        UPDATE users 
+                        SET openid = %s,
+                            wechat_nickname = COALESCE(wechat_nickname, %s),
+                            wechat_avatar = COALESCE(wechat_avatar, %s),
+                            login_type = 'both',
+                            updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (
+                            current_user.get("openid"),
+                            current_user.get("wechat_nickname"),
+                            current_user.get("wechat_avatar"),
+                            existing_user["id"]
+                        )
+                    )
+                    
+                    # 删除当前小程序临时账号（可选：也可以软删除）
+                    if current_user["id"] != existing_user["id"]:
+                        # 先删除关联的 user_configs
+                        cursor.execute("DELETE FROM user_configs WHERE user_id = %s", (current_user["id"],))
+                        # 再删除用户
+                        cursor.execute("DELETE FROM users WHERE id = %s", (current_user["id"],))
+            
+            # 重新获取合并后的用户信息
+            merged_user = user_repo.get_user_by_id(existing_user["id"])
+            
+            # 生成新 token
+            token = create_access_token({"user_id": merged_user["id"], "username": merged_user["username"]})
+            
+            return {
+                "message": "账号已合并，欢迎回来",
+                "merged": True,
+                "token": token,
+                "user": {
+                    "id": merged_user["id"],
+                    "username": merged_user["username"],
+                    "phone": merged_user["phone"],
+                    "nickname": merged_user.get("nickname") or merged_user.get("wechat_nickname"),
+                    "avatar": merged_user.get("avatar") or merged_user.get("wechat_avatar"),
+                    "phone_bound": True,
+                    "profile_completed": True
+                }
+            }
+        except Exception as e:
+            logger.exception("账号合并失败")
+            raise HTTPException(status_code=500, detail=f"账号合并失败：{str(e)}")
+    
+    # 手机号未被使用 -> 直接绑定
+    try:
+        user_repo.update_user_profile(user_id=user_id, phone=req.phone)
+        updated_user = user_repo.get_user_by_id(user_id)
+        
+        return {
+            "message": "绑定成功",
+            "merged": False,
+            "token": create_access_token({"user_id": user_id, "username": updated_user["username"]}),
+            "user": {
+                "id": updated_user["id"],
+                "username": updated_user["username"],
+                "phone": updated_user["phone"],
+                "nickname": updated_user.get("nickname") or updated_user.get("wechat_nickname"),
+                "avatar": updated_user.get("avatar") or updated_user.get("wechat_avatar"),
+                "phone_bound": True,
+                "profile_completed": bool(updated_user.get("nickname") or updated_user.get("wechat_nickname"))
+            }
+        }
+    except Exception as e:
+        logger.exception("手机号绑定失败")
+        raise HTTPException(status_code=500, detail=f"绑定失败：{str(e)}")
 
 
 @app.get("/api/user/profile")

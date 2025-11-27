@@ -233,6 +233,37 @@ export const useUserStore = defineStore("user", {
       // #endif
     },
 
+    // 手机号绑定（小程序）
+    async bindPhone(phone) {
+      try {
+        const res = await request({
+          url: "/api/auth/bind-phone",
+          method: "POST",
+          data: { phone },
+        });
+
+        // 更新 token 和用户信息
+        if (res.token) {
+          this.token = res.token;
+          uni.setStorageSync("token", res.token);
+        }
+
+        if (res.user) {
+          this.user = res.user;
+          uni.setStorageSync("user", res.user);
+        }
+
+        // 如果是账号合并，重新加载用户数据
+        if (res.merged) {
+          await afterLoginSideEffects();
+        }
+
+        return res;
+      } catch (error) {
+        throw error;
+      }
+    },
+
     // 退出登录
     async logout() {
       this.token = "";

@@ -32,8 +32,9 @@
           <view class="input-label">
             <text class="label-icon">📱</text>
             <text>手机号</text>
+            <text class="required-mark">*</text>
           </view>
-          <input class="input-field" v-model="form.phone" type="number" placeholder="请输入手机号（可选）" placeholder-class="input-placeholder" />
+          <input class="input-field" v-model="form.phone" type="number" placeholder="请输入手机号" placeholder-class="input-placeholder" />
         </view>
 
         <view class="input-group">
@@ -92,6 +93,19 @@ async function handleRegister() {
     return;
   }
 
+  // 手机号必填验证
+  if (!form.phone.trim()) {
+    uni.showToast({ title: "请输入手机号", icon: "none" });
+    return;
+  }
+
+  // 手机号格式验证
+  const phoneRegex = /^1[3-9]\d{9}$/;
+  if (!phoneRegex.test(form.phone.trim())) {
+    uni.showToast({ title: "请输入正确的手机号", icon: "none" });
+    return;
+  }
+
   if (!form.password.trim()) {
     uni.showToast({ title: "请输入密码", icon: "none" });
     return;
@@ -113,14 +127,11 @@ async function handleRegister() {
     const data = {
       username: form.username.trim(),
       password: form.password.trim(),
+      phone: form.phone.trim(), // 手机号必填
     };
 
     if (form.nickname.trim()) {
       data.nickname = form.nickname.trim();
-    }
-
-    if (form.phone.trim()) {
-      data.phone = form.phone.trim();
     }
 
     await userStore.register(data);
@@ -290,5 +301,11 @@ function goToLogin() {
   font-size: 24rpx;
   color: #0d9488;
   font-weight: 500;
+}
+
+.required-mark {
+  color: #ef4444;
+  margin-left: 4rpx;
+  font-size: 24rpx;
 }
 </style>
