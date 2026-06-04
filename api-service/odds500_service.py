@@ -536,3 +536,204 @@ def fetch_ou_history(fid: str, cid: int) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"获取大小球历史失败 fid={fid} cid={cid}: {e}")
         return []
+
+
+def fetch_match_data(fid: str) -> Dict[str, Any]:
+    """获取基本面数据：交锋历史、近期战绩、未来赛程"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch_shuju_page() -> str:
+        """获取数据页面 HTML"""
+        url = f"{BASE_URL}/fenxi/shuju-{fid}.shtml"
+        with httpx.Client(timeout=15, headers=HEADERS) as client:
+            resp = client.get(url)
+        return resp.content.decode("gbk", errors="replace")
+
+    def _fetch_recent(hoa: int) -> str:
+        """POST 获取近期战绩 HTML (hoa=1 主队, hoa=0 客队)"""
+        url = f"{BASE_URL}/fenxi1/inc/shuju_zhanji.php"
+        data = {
+            "id": fid,
+            "limit": "15",
+            "hoa": str(hoa),
+            "bhbc": "0",
+            "callback": "ajax",
+            "r": "1",
+        }
+        headers = {
+            **HEADERS,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{BASE_URL}/fenxi/shuju-{fid}.shtml",
+        }
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(url, data=data, headers=headers)
+        return resp.content.decode("utf-8", errors="replace")
+
+    def _parse_h2h(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+        """解析交锋历史表格
+        列结构: [赛事, 日期, 对阵, 半场, 结果, 欧赔, 亚盘信息, 亚指结果, 大小结果, ?]
+        """
+        records = []
+        div = soup.find("div", id="team_jiaozhan")
+        if not div:
+            return records
+        table = div.find("table")
+        if not table:
+            return records
+        rows = table.find_all("tr")
+        for tr in rows:
+            tds = tr.find_all("td")
+            if len(tds) < 9:
+                continue
+            competition = tds[0].get_text(strip=True)
+            date = tds[1].get_text(strip=True)
+            match = tds[2].get_text(strip=True)
+            half_score = tds[3].get_text(strip=True)
+            result = tds[4].get_text(strip=True)
+            # tds[5] = 欧赔 (跳过)
+            # tds[6] = 亚盘信息 "0.78半球1.02" -> 提取盘口
+            asian_raw = tds[6].get_text(strip=True)
+            asian_result = tds[7].get_text(strip=True) if len(tds) > 7 else ""
+            ou_result = tds[8].get_text(strip=True) if len(tds) > 8 else ""
+
+            # 从亚盘信息提取盘口并转为数值，格式如 "0.78半球1.02" or "0.78受平手/半球0.97"
+            handicap = ""
+            hc_match = re.search(r'[\d.]+(受?[^\d.]+)[\d.]+', asian_raw)
+            if hc_match:
+                hc_text = hc_match.group(1)
+                hc_val = _parse_handicap_value(hc_text)
+                if hc_val is not None:
+                    handicap = str(hc_val)
+
+            records.append({
+                "competition": competition,
+                "date": date,
+                "match": match,
+                "halfScore": half_score,
+                "result": result,
+                "handicap": handicap,
+                "asianResult": asian_result,
+                "ouResult": ou_result,
+            })
+        return records
+
+    def _parse_recent(html: str) -> List[Dict[str, Any]]:
+        """解析近期战绩 POST 响应"""
+        records = []
+        soup = BeautifulSoup(html, "html.parser")
+        rows = soup.find_all("tr")
+        for tr in rows:
+            tds = tr.find_all("td")
+            if len(tds) < 8:
+                continue
+            competition = tds[0].get_text(strip=True)
+            # 跳过汇总行
+            if competition.startswith("最近"):
+                continue
+            date = tds[1].get_text(strip=True)
+            match = tds[2].get_text(strip=True)
+            handicap = tds[3].get_text(strip=True)
+            half_score = tds[4].get_text(strip=True)
+            # 跳过未完赛（第5列为 VS）
+            if half_score == "VS":
+                continue
+            result = tds[5].get_text(strip=True)
+            asian_result = tds[6].get_text(strip=True)
+            ou_result = tds[7].get_text(strip=True)
+            records.append({
+                "competition": competition,
+                "date": date,
+                "match": match,
+                "handicap": handicap,
+                "halfScore": half_score,
+                "result": result,
+                "asianResult": asian_result,
+                "ouResult": ou_result,
+            })
+        return records
+
+    def _parse_future(soup: BeautifulSoup) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """解析未来赛程（主队、客队）"""
+        home_future: List[Dict[str, Any]] = []
+        away_future: List[Dict[str, Any]] = []
+
+        # 找到 h4 包含 "未来赛事" 的标签，取其后续兄弟 .M_content
+        h4_tags = soup.find_all("h4")
+        target_h4 = None
+        for h4 in h4_tags:
+            if "未来赛事" in h4.get_text():
+                target_h4 = h4
+                break
+
+        if not target_h4:
+            return home_future, away_future
+
+        # h4 在 .M_title div 内，需要取其父级的下一个兄弟 .M_content
+        title_div = target_h4.parent
+        content_div = title_div.find_next_sibling(class_="M_content") if title_div else None
+        if not content_div:
+            return home_future, away_future
+
+        tables = content_div.find_all("table")
+
+        def _parse_future_table(table) -> List[Dict[str, Any]]:
+            results = []
+            rows = table.find_all("tr")
+            for tr in rows:
+                tds = tr.find_all("td")
+                if len(tds) < 4:
+                    continue
+                competition = tds[0].get_text(strip=True)
+                date = tds[1].get_text(strip=True)
+                match = tds[2].get_text(strip=True)
+                interval = tds[3].get_text(strip=True)
+                results.append({
+                    "competition": competition,
+                    "date": date,
+                    "match": match,
+                    "interval": interval,
+                })
+            return results
+
+        if len(tables) >= 1:
+            home_future = _parse_future_table(tables[0])
+        if len(tables) >= 2:
+            away_future = _parse_future_table(tables[1])
+
+        return home_future, away_future
+
+    # 并发请求：页面 HTML + 主队近期 + 客队近期
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            page_future = executor.submit(_fetch_shuju_page)
+            home_recent_future = executor.submit(_fetch_recent, 1)
+            away_recent_future = executor.submit(_fetch_recent, 0)
+
+            page_html = page_future.result()
+            home_recent_html = home_recent_future.result()
+            away_recent_html = away_recent_future.result()
+    except Exception as e:
+        logger.error(f"获取基本面数据失败 fid={fid}: {e}")
+        return {
+            "h2h": [],
+            "homeRecent": [],
+            "awayRecent": [],
+            "homeFuture": [],
+            "awayFuture": [],
+        }
+
+    # 解析页面
+    soup = BeautifulSoup(page_html, "html.parser")
+    h2h = _parse_h2h(soup)
+    home_future, away_future = _parse_future(soup)
+    home_recent = _parse_recent(home_recent_html)
+    away_recent = _parse_recent(away_recent_html)
+
+    return {
+        "h2h": h2h,
+        "homeRecent": home_recent,
+        "awayRecent": away_recent,
+        "homeFuture": home_future,
+        "awayFuture": away_future,
+    }

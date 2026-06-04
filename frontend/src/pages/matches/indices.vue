@@ -265,210 +265,19 @@
 
       <!-- 数据 - 基本面 -->
       <view v-if="activePrimaryTab === 'data' && activeSecondaryTab === 'fundamentals'" class="content-section">
-        <!-- 1. 主队历史比赛数据 -->
-        <view class="section-block">
-          <view class="section-header h2h-section-header" @tap="toggleSection('homeHistory')">
-            <text class="section-title">{{ matchInfo.homeTeam }} 近期战绩</text>
-            <view class="h2h-header-right">
-              <view class="h2h-filters">
-                <view class="filter-item" :class="{ active: homeFilters.homeOnly }" @tap.stop="toggleHomeFilter('homeOnly')">
-                  <text>主场</text>
-                </view>
-                <view class="filter-item" :class="{ active: homeFilters.sameCompetition }" @tap.stop="toggleHomeFilter('sameCompetition')">
-                  <text>同赛事</text>
-                </view>
-                <view class="filter-item" :class="{ active: homeFilters.matchCount === 10 }" @tap.stop="setHomeMatchCount(10)">
-                  <text>10场</text>
-                </view>
-                <view class="filter-item" :class="{ active: homeFilters.matchCount === 20 }" @tap.stop="setHomeMatchCount(20)">
-                  <text>20场</text>
-                </view>
-                <view class="filter-item" :class="{ active: homeFilters.matchCount === 30 }" @tap.stop="setHomeMatchCount(30)">
-                  <text>30场</text>
-                </view>
-              </view>
-            </view>
-          </view>
-          <view v-if="expandedSections.homeHistory" class="section-content h2h-content">
-            <!-- 筛选器 -->
-            <view class="h2h-filters-row">
-              <view class="filter-dropdown">
-                <text>36*</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-              <view class="filter-dropdown">
-                <text>初盘</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-            </view>
-
-            <!-- 表格 -->
-            <view class="h2h-table">
-              <!-- 表头 -->
-              <view class="h2h-table-header">
-                <view class="col-event">赛事</view>
-                <view class="col-teams">主队　比分　客队</view>
-                <view class="col-asian">亚指</view>
-                <view class="col-ou">大小</view>
-              </view>
-
-              <!-- 数据行 -->
-              <view v-for="(match, index) in recentMatches.home" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
-                <view class="col-event">
-                  <text class="event-date">{{ match.dateShort }}</text>
-                  <text class="event-name">{{ match.competition }}</text>
-                </view>
-                <view class="col-teams">
-                  <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
-                  </view>
-                  <view class="score-wrapper">
-                    <text class="match-score">{{ match.score }}</text>
-                    <text class="halftime-score">{{ match.halftimeScore }}</text>
-                  </view>
-                  <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
-                  </view>
-                </view>
-                <view class="col-asian">
-                  <text class="data-value" :class="match.asianClass">{{ match.asian }}</text>
-                  <text class="data-label" :class="match.asianClass">{{ match.asianLabel }}</text>
-                </view>
-                <view class="col-ou">
-                  <text class="data-value" :class="match.ouClass">{{ match.ou }}</text>
-                  <text class="data-label" :class="match.ouClass">{{ match.ouLabel }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <!-- 2. 客队历史比赛数据 -->
-        <view class="section-block">
-          <view class="section-header h2h-section-header" @tap="toggleSection('awayHistory')">
-            <text class="section-title">{{ matchInfo.awayTeam }} 近期战绩</text>
-            <view class="h2h-header-right">
-              <view class="h2h-filters">
-                <view class="filter-item" :class="{ active: awayFilters.awayOnly }" @tap.stop="toggleAwayFilter('awayOnly')">
-                  <text>客场</text>
-                </view>
-                <view class="filter-item" :class="{ active: awayFilters.sameCompetition }" @tap.stop="toggleAwayFilter('sameCompetition')">
-                  <text>同赛事</text>
-                </view>
-                <view class="filter-item" :class="{ active: awayFilters.matchCount === 10 }" @tap.stop="setAwayMatchCount(10)">
-                  <text>10场</text>
-                </view>
-                <view class="filter-item" :class="{ active: awayFilters.matchCount === 20 }" @tap.stop="setAwayMatchCount(20)">
-                  <text>20场</text>
-                </view>
-                <view class="filter-item" :class="{ active: awayFilters.matchCount === 30 }" @tap.stop="setAwayMatchCount(30)">
-                  <text>30场</text>
-                </view>
-              </view>
-            </view>
-          </view>
-          <view v-if="expandedSections.awayHistory" class="section-content h2h-content">
-            <!-- 筛选器 -->
-            <view class="h2h-filters-row">
-              <view class="filter-dropdown">
-                <text>36*</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-              <view class="filter-dropdown">
-                <text>初盘</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-            </view>
-
-            <!-- 表格 -->
-            <view class="h2h-table">
-              <!-- 表头 -->
-              <view class="h2h-table-header">
-                <view class="col-event">赛事</view>
-                <view class="col-teams">主队　比分　客队</view>
-                <view class="col-asian">亚指</view>
-                <view class="col-ou">大小</view>
-              </view>
-
-              <!-- 数据行 -->
-              <view v-for="(match, index) in recentMatches.away" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
-                <view class="col-event">
-                  <text class="event-date">{{ match.dateShort }}</text>
-                  <text class="event-name">{{ match.competition }}</text>
-                </view>
-                <view class="col-teams">
-                  <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
-                  </view>
-                  <view class="score-wrapper">
-                    <text class="match-score">{{ match.score }}</text>
-                    <text class="halftime-score">{{ match.halftimeScore }}</text>
-                  </view>
-                  <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
-                  </view>
-                </view>
-                <view class="col-asian">
-                  <text class="data-value" :class="match.asianClass">{{ match.asian }}</text>
-                  <text class="data-label" :class="match.asianClass">{{ match.asianLabel }}</text>
-                </view>
-                <view class="col-ou">
-                  <text class="data-value" :class="match.ouClass">{{ match.ou }}</text>
-                  <text class="data-label" :class="match.ouClass">{{ match.ouLabel }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <!-- 3. 两队交锋数据 -->
-        <view class="section-block">
+        <!-- 1. 历史交锋 -->
+        <view v-if="h2hMatches.length" class="section-block">
           <view class="section-header h2h-section-header" @tap="toggleSection('h2h')">
             <text class="section-title">历史交锋</text>
-            <view class="h2h-header-right">
-              <view class="h2h-filters">
-                <view class="filter-item" :class="{ active: h2hFilters.sameVenue }" @tap.stop="toggleH2hFilter('sameVenue')">
-                  <text>同主客</text>
-                </view>
-                <view class="filter-item" :class="{ active: h2hFilters.sameCompetition }" @tap.stop="toggleH2hFilter('sameCompetition')">
-                  <text>同赛事</text>
-                </view>
-                <view class="filter-item" :class="{ active: h2hFilters.matchCount === 10 }" @tap.stop="setH2hMatchCount(10)">
-                  <text>10场</text>
-                </view>
-                <view class="filter-item" :class="{ active: h2hFilters.matchCount === 20 }" @tap.stop="setH2hMatchCount(20)">
-                  <text>20场</text>
-                </view>
-                <view class="filter-item" :class="{ active: h2hFilters.matchCount === 30 }" @tap.stop="setH2hMatchCount(30)">
-                  <text>30场</text>
-                </view>
-              </view>
-            </view>
           </view>
           <view v-if="expandedSections.h2h" class="section-content h2h-content">
-            <!-- 筛选器 -->
-            <view class="h2h-filters-row">
-              <view class="filter-dropdown">
-                <text>36*</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-              <view class="filter-dropdown">
-                <text>初盘</text>
-                <text class="dropdown-icon">▼</text>
-              </view>
-            </view>
-
-            <!-- 表格 -->
             <view class="h2h-table">
-              <!-- 表头 -->
               <view class="h2h-table-header">
                 <view class="col-event">赛事</view>
                 <view class="col-teams">主队　比分　客队</view>
-                <view class="col-asian">亚指</view>
+                <view class="col-asian">盘口</view>
                 <view class="col-ou">大小</view>
               </view>
-
-              <!-- 数据行 -->
               <view v-for="(match, index) in h2hMatches" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
                 <view class="col-event">
                   <text class="event-date">{{ match.dateShort }}</text>
@@ -491,7 +300,128 @@
                   <text class="data-label" :class="match.asianClass">{{ match.asianLabel }}</text>
                 </view>
                 <view class="col-ou">
-                  <text class="data-value" :class="match.ouClass">{{ match.ou }}</text>
+                  <text class="data-label" :class="match.ouClass">{{ match.ouLabel }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 2. 主队近期战绩 -->
+        <view class="section-block">
+          <view class="section-header h2h-section-header" @tap="toggleSection('homeHistory')">
+            <text class="section-title">{{ matchInfo.homeTeam }} 近期战绩</text>
+            <view class="h2h-header-right">
+              <view class="h2h-filters">
+                <view class="filter-item" :class="{ active: homeFilters.homeOnly }" @tap.stop="toggleHomeFilter('homeOnly')">
+                  <text>同主客</text>
+                </view>
+                <view class="filter-item" :class="{ active: homeFilters.sameCompetition }" @tap.stop="toggleHomeFilter('sameCompetition')">
+                  <text>同赛事</text>
+                </view>
+                <view class="filter-item" :class="{ active: homeFilters.matchCount === 10 }" @tap.stop="setHomeMatchCount(10)">
+                  <text>10场</text>
+                </view>
+                <view class="filter-item" :class="{ active: homeFilters.matchCount === 15 }" @tap.stop="setHomeMatchCount(15)">
+                  <text>15场</text>
+                </view>
+              </view>
+            </view>
+          </view>
+          <view v-if="expandedSections.homeHistory" class="section-content h2h-content">
+            <view class="h2h-table">
+              <!-- 表头 -->
+              <view class="h2h-table-header">
+                <view class="col-event">赛事</view>
+                <view class="col-teams">主队　比分　客队</view>
+                <view class="col-asian">亚指</view>
+                <view class="col-ou">大小</view>
+              </view>
+
+              <!-- 数据行 -->
+              <view v-for="(match, index) in filteredHomeRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
+                <view class="col-event">
+                  <text class="event-date">{{ match.dateShort }}</text>
+                  <text class="event-name">{{ match.competition }}</text>
+                </view>
+                <view class="col-teams">
+                  <view class="team-left">
+                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
+                  </view>
+                  <view class="score-wrapper">
+                    <text class="match-score">{{ match.score }}</text>
+                    <text class="halftime-score">{{ match.halftimeScore }}</text>
+                  </view>
+                  <view class="team-right">
+                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
+                  </view>
+                </view>
+                <view class="col-asian">
+                  <text class="data-value" :class="match.asianClass">{{ match.asian }}</text>
+                  <text class="data-label" :class="match.asianClass">{{ match.asianLabel }}</text>
+                </view>
+                <view class="col-ou">
+                  <text class="data-label" :class="match.ouClass">{{ match.ouLabel }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 3. 客队近期战绩 -->
+        <view class="section-block">
+          <view class="section-header h2h-section-header" @tap="toggleSection('awayHistory')">
+            <text class="section-title">{{ matchInfo.awayTeam }} 近期战绩</text>
+            <view class="h2h-header-right">
+              <view class="h2h-filters">
+                <view class="filter-item" :class="{ active: awayFilters.awayOnly }" @tap.stop="toggleAwayFilter('awayOnly')">
+                  <text>同主客</text>
+                </view>
+                <view class="filter-item" :class="{ active: awayFilters.sameCompetition }" @tap.stop="toggleAwayFilter('sameCompetition')">
+                  <text>同赛事</text>
+                </view>
+                <view class="filter-item" :class="{ active: awayFilters.matchCount === 10 }" @tap.stop="setAwayMatchCount(10)">
+                  <text>10场</text>
+                </view>
+                <view class="filter-item" :class="{ active: awayFilters.matchCount === 15 }" @tap.stop="setAwayMatchCount(15)">
+                  <text>15场</text>
+                </view>
+              </view>
+            </view>
+          </view>
+          <view v-if="expandedSections.awayHistory" class="section-content h2h-content">
+            <view class="h2h-table">
+              <!-- 表头 -->
+              <view class="h2h-table-header">
+                <view class="col-event">赛事</view>
+                <view class="col-teams">主队　比分　客队</view>
+                <view class="col-asian">亚指</view>
+                <view class="col-ou">大小</view>
+              </view>
+
+              <!-- 数据行 -->
+              <view v-for="(match, index) in filteredAwayRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
+                <view class="col-event">
+                  <text class="event-date">{{ match.dateShort }}</text>
+                  <text class="event-name">{{ match.competition }}</text>
+                </view>
+                <view class="col-teams">
+                  <view class="team-left">
+                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
+                  </view>
+                  <view class="score-wrapper">
+                    <text class="match-score">{{ match.score }}</text>
+                    <text class="halftime-score">{{ match.halftimeScore }}</text>
+                  </view>
+                  <view class="team-right">
+                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
+                  </view>
+                </view>
+                <view class="col-asian">
+                  <text class="data-value" :class="match.asianClass">{{ match.asian }}</text>
+                  <text class="data-label" :class="match.asianClass">{{ match.asianLabel }}</text>
+                </view>
+                <view class="col-ou">
                   <text class="data-label" :class="match.ouClass">{{ match.ouLabel }}</text>
                 </view>
               </view>
@@ -501,28 +431,24 @@
 
         <!-- 4. 未来赛程数据 -->
         <view class="section-block">
-          <view class="section-header" @tap="toggleSection('schedule')">
+          <view class="section-header h2h-section-header">
             <text class="section-title">未来赛程</text>
-            <text class="toggle-icon">{{ expandedSections.schedule ? "▼" : "▶" }}</text>
           </view>
-          <view v-if="expandedSections.schedule" class="section-content">
+          <view class="section-content">
             <view class="future-schedule-wrapper">
               <!-- 主队赛程 -->
               <view class="team-schedule-section">
                 <text class="team-schedule-title">{{ matchInfo.homeTeam }}</text>
                 <view class="schedule-table">
-                  <!-- 表头 -->
                   <view class="schedule-header">
                     <view class="schedule-col-time">时间</view>
                     <view class="schedule-col-event">赛事</view>
                     <view class="schedule-col-match">对阵</view>
                     <view class="schedule-col-interval">间隔</view>
                   </view>
-                  <!-- 数据行 -->
-                  <view v-for="match in futureSchedule.home" :key="match.id" class="schedule-row">
+                  <view v-for="match in futureSchedule.home.slice(0, 3)" :key="match.id" class="schedule-row">
                     <view class="schedule-col-time">
-                      <text class="schedule-date">{{ match.dateShort }}</text>
-                      <text class="schedule-time">{{ match.time }}</text>
+                      <text>{{ match.dateShort }}</text>
                     </view>
                     <view class="schedule-col-event">
                       <text>{{ match.competition }}</text>
@@ -531,7 +457,7 @@
                       <text>{{ match.matchup }}</text>
                     </view>
                     <view class="schedule-col-interval">
-                      <text :class="match.intervalClass">{{ match.interval }}</text>
+                      <text>{{ match.interval }}</text>
                     </view>
                   </view>
                 </view>
@@ -541,18 +467,15 @@
               <view class="team-schedule-section">
                 <text class="team-schedule-title">{{ matchInfo.awayTeam }}</text>
                 <view class="schedule-table">
-                  <!-- 表头 -->
                   <view class="schedule-header">
                     <view class="schedule-col-time">时间</view>
                     <view class="schedule-col-event">赛事</view>
                     <view class="schedule-col-match">对阵</view>
                     <view class="schedule-col-interval">间隔</view>
                   </view>
-                  <!-- 数据行 -->
-                  <view v-for="match in futureSchedule.away" :key="match.id" class="schedule-row">
+                  <view v-for="match in futureSchedule.away.slice(0, 3)" :key="match.id" class="schedule-row">
                     <view class="schedule-col-time">
-                      <text class="schedule-date">{{ match.dateShort }}</text>
-                      <text class="schedule-time">{{ match.time }}</text>
+                      <text>{{ match.dateShort }}</text>
                     </view>
                     <view class="schedule-col-event">
                       <text>{{ match.competition }}</text>
@@ -561,7 +484,7 @@
                       <text>{{ match.matchup }}</text>
                     </view>
                     <view class="schedule-col-interval">
-                      <text :class="match.intervalClass">{{ match.interval }}</text>
+                      <text>{{ match.interval }}</text>
                     </view>
                   </view>
                 </view>
@@ -695,8 +618,8 @@ async function loadIndices() {
         league: res.match.league || "",
         date: res.match.matchDate || "",
         time: res.match.matchTime || "",
-        status: res.match.status || "未开赛",
-        statusClass: "pending",
+        status: { not_started: "未开赛", finished: "已结束", cancelled: "取消" }[res.match.status] || "未开赛",
+        statusClass: res.match.status === "finished" ? "finished" : "pending",
       };
     }
   } catch (e) {
@@ -811,408 +734,140 @@ const awayFilters = reactive({
 
 // 近期状态
 const recentForm = ref({
-  home: ["win", "draw", "win", "lose", "draw", "win"],
-  away: ["win", "win", "draw", "win", "lose", "win"],
-  homeSummary: "3胜2平1负",
-  awaySummary: "4胜1平1负",
+  home: [],
+  away: [],
+  homeSummary: "",
+  awaySummary: "",
 });
 
-// 近期比赛
-const recentMatches = ref({
-  home: [
-    {
-      id: 1,
-      dateShort: "24-03-10",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "切尔西",
-      score: "2:1",
-      halftimeScore: "(1-0)",
-      homeScore: 2,
-      awayScore: 1,
-      asian: "-0.5",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "2.5",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-    {
-      id: 2,
-      dateShort: "24-03-03",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "阿森纳",
-      score: "1:1",
-      halftimeScore: "(0-1)",
-      homeScore: 1,
-      awayScore: 1,
-      asian: "-0.25",
-      asianClass: "lose",
-      asianLabel: "输",
-      ou: "2.5",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-    {
-      id: 3,
-      dateShort: "24-02-25",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "埃弗顿",
-      score: "3:0",
-      halftimeScore: "(2-0)",
-      homeScore: 3,
-      awayScore: 0,
-      asian: "-1",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "2.5",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 4,
-      dateShort: "24-02-18",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "热刺",
-      score: "0:2",
-      halftimeScore: "(0-1)",
-      homeScore: 0,
-      awayScore: 2,
-      asian: "-0.5",
-      asianClass: "lose",
-      asianLabel: "输",
-      ou: "3",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-    {
-      id: 5,
-      dateShort: "24-02-11",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "纽卡斯尔",
-      score: "2:2",
-      halftimeScore: "(1-1)",
-      homeScore: 2,
-      awayScore: 2,
-      asian: "-0.25",
-      asianClass: "lose",
-      asianLabel: "输",
-      ou: "2.5",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 6,
-      dateShort: "24-02-04",
-      competition: "英超",
-      homeTeam: "曼联",
-      awayTeam: "布莱顿",
-      score: "1:0",
-      halftimeScore: "(0-0)",
-      homeScore: 1,
-      awayScore: 0,
-      asian: "-0.5",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "2.5",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-  ],
-  away: [
-    {
-      id: 1,
-      dateShort: "24-03-10",
-      competition: "英超",
-      homeTeam: "曼城",
-      awayTeam: "利物浦",
-      score: "1:3",
-      halftimeScore: "(0-2)",
-      homeScore: 1,
-      awayScore: 3,
-      asian: "0.25",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "3",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 2,
-      dateShort: "24-03-03",
-      competition: "英超",
-      homeTeam: "维拉",
-      awayTeam: "利物浦",
-      score: "1:2",
-      halftimeScore: "(1-1)",
-      homeScore: 1,
-      awayScore: 2,
-      asian: "0.5",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "2.5",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 3,
-      dateShort: "24-02-25",
-      competition: "英超",
-      homeTeam: "西汉姆",
-      awayTeam: "利物浦",
-      score: "1:1",
-      halftimeScore: "(0-1)",
-      homeScore: 1,
-      awayScore: 1,
-      asian: "0.5",
-      asianClass: "lose",
-      asianLabel: "输",
-      ou: "2.5",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-    {
-      id: 4,
-      dateShort: "24-02-18",
-      competition: "英超",
-      homeTeam: "伯恩利",
-      awayTeam: "利物浦",
-      score: "0:3",
-      halftimeScore: "(0-2)",
-      homeScore: 0,
-      awayScore: 3,
-      asian: "1",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "3",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 5,
-      dateShort: "24-02-11",
-      competition: "英超",
-      homeTeam: "布伦特福德",
-      awayTeam: "利物浦",
-      score: "3:2",
-      halftimeScore: "(2-1)",
-      homeScore: 3,
-      awayScore: 2,
-      asian: "0.75",
-      asianClass: "lose",
-      asianLabel: "输",
-      ou: "2.5",
-      ouClass: "big",
-      ouLabel: "大",
-    },
-    {
-      id: 6,
-      dateShort: "24-02-04",
-      competition: "英超",
-      homeTeam: "谢菲尔德",
-      awayTeam: "利物浦",
-      score: "0:2",
-      halftimeScore: "(0-1)",
-      homeScore: 0,
-      awayScore: 2,
-      asian: "1.25",
-      asianClass: "win",
-      asianLabel: "赢",
-      ou: "2.5",
-      ouClass: "small",
-      ouLabel: "小",
-    },
-  ],
+// 近期比赛 (从API加载)
+const recentMatches = ref({ home: [], away: [] });
+
+function _findMostCommonComp(list) {
+  const counts = {};
+  list.forEach((m) => { if (m.competition) counts[m.competition] = (counts[m.competition] || 0) + 1; });
+  let max = "", maxCount = 0;
+  for (const [k, v] of Object.entries(counts)) {
+    if (v > maxCount) { max = k; maxCount = v; }
+  }
+  return max;
+}
+
+const filteredHomeRecent = computed(() => {
+  let list = recentMatches.value.home;
+  if (homeFilters.homeOnly) {
+    const team = matchInfo.value.homeTeam;
+    list = list.filter((m) => m.homeTeam && m.homeTeam.includes(team));
+  }
+  if (homeFilters.sameCompetition) {
+    const comp = _findMostCommonComp(list);
+    if (comp) list = list.filter((m) => m.competition === comp);
+  }
+  return list.slice(0, homeFilters.matchCount);
 });
 
-// 交战历史
-const h2hStats = ref({
-  homeWins: 45,
-  draws: 20,
-  awayWins: 35,
+const filteredAwayRecent = computed(() => {
+  let list = recentMatches.value.away;
+  if (awayFilters.awayOnly) {
+    const team = matchInfo.value.awayTeam;
+    list = list.filter((m) => m.awayTeam && m.awayTeam.includes(team));
+  }
+  if (awayFilters.sameCompetition) {
+    const comp = _findMostCommonComp(list);
+    if (comp) list = list.filter((m) => m.competition === comp);
+  }
+  return list.slice(0, awayFilters.matchCount);
 });
+const h2hStats = ref({ homeWins: 0, draws: 0, awayWins: 0 });
+const h2hMatches = ref([]);
+const futureSchedule = ref({ home: [], away: [] });
+const dataLoading = ref(false);
 
-const h2hMatches = ref([
-  {
-    id: 1,
-    dateShort: "25-04-26",
-    competition: "澳超",
-    homeTeam: "墨尔本城",
-    awayTeam: "阿德莱德联",
-    score: "0:0",
-    halftimeScore: "(0-0)",
-    homeScore: 0,
-    awayScore: 0,
-    asian: "-0.5",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3.25",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 2,
-    dateShort: "25-02-07",
-    competition: "澳超",
-    homeTeam: "阿德莱德联",
-    awayTeam: "墨尔本城",
-    score: "1:0",
-    halftimeScore: "(0-0)",
-    homeScore: 1,
-    awayScore: 0,
-    asian: "-0.25",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 3,
-    dateShort: "24-01-25",
-    competition: "澳超",
-    homeTeam: "墨尔本城",
-    awayTeam: "阿德莱德联",
-    score: "1:0",
-    halftimeScore: "(1-0)",
-    homeScore: 1,
-    awayScore: 0,
-    asian: "-0.5",
-    asianClass: "lose",
-    asianLabel: "输",
-    ou: "3.5",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 4,
-    dateShort: "23-10-29",
-    competition: "澳超",
-    homeTeam: "阿德莱德联",
-    awayTeam: "墨尔本城",
-    score: "6:0",
-    halftimeScore: "(2-0)",
-    homeScore: 6,
-    awayScore: 0,
-    asian: "0.25",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "2.5",
-    ouClass: "big",
-    ouLabel: "大",
-  },
-  {
-    id: 5,
-    dateShort: "23-03-03",
-    competition: "澳超",
-    homeTeam: "阿德莱德联",
-    awayTeam: "墨尔本城",
-    score: "4:2",
-    halftimeScore: "(1-1)",
-    homeScore: 4,
-    awayScore: 2,
-    asian: "0.5",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3",
-    ouClass: "big",
-    ouLabel: "大",
-  },
-  {
-    id: 6,
-    dateShort: "23-01-29",
-    competition: "澳超",
-    homeTeam: "墨尔本城",
-    awayTeam: "阿德莱德联",
-    score: "3:3",
-    halftimeScore: "(1-3)",
-    homeScore: 3,
-    awayScore: 3,
-    asian: "-1",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3",
-    ouClass: "big",
-    ouLabel: "大",
-  },
-  {
-    id: 7,
-    dateShort: "22-05-22",
-    competition: "澳超",
-    homeTeam: "墨尔本城",
-    awayTeam: "阿德莱德联",
-    score: "1:1",
-    halftimeScore: "(0-0)",
-    homeScore: 1,
-    awayScore: 1,
-    asian: "-1",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 8,
-    dateShort: "22-05-18",
-    competition: "澳超",
-    homeTeam: "阿德莱德联",
-    awayTeam: "墨尔本城",
-    score: "0:0",
-    halftimeScore: "(0-0)",
-    homeScore: 0,
-    awayScore: 0,
-    asian: "0.5",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "2.5",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 9,
-    dateShort: "22-02-15",
-    competition: "澳超",
-    homeTeam: "墨尔本城",
-    awayTeam: "阿德莱德联",
-    score: "1:2",
-    halftimeScore: "(1-1)",
-    homeScore: 1,
-    awayScore: 2,
-    asian: "-1",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3.25",
-    ouClass: "small",
-    ouLabel: "小",
-  },
-  {
-    id: 10,
-    dateShort: "22-01-15",
-    competition: "澳超",
-    homeTeam: "阿德莱德联",
-    awayTeam: "墨尔本城",
-    score: "2:2",
-    halftimeScore: "(0-1)",
-    homeScore: 2,
-    awayScore: 2,
-    asian: "0.75",
-    asianClass: "win",
-    asianLabel: "赢",
-    ou: "3",
-    ouClass: "big",
-    ouLabel: "大",
-  },
-]);
+async function loadMatchData() {
+  if (!matchId.value) return;
+  dataLoading.value = true;
+  try {
+    const res = await request({ url: `/api/matches/${matchId.value}/data` });
+    const d = res.data || {};
+
+    // 近期战绩
+    recentMatches.value = {
+      home: (d.homeRecent || []).map((m, i) => _formatRecent(m, i)),
+      away: (d.awayRecent || []).map((m, i) => _formatRecent(m, i)),
+    };
+
+    // 交锋历史
+    h2hMatches.value = (d.h2h || [])
+      .filter((m) => m.halfScore !== "VS")
+      .map((m, i) => _formatH2h(m, i));
+
+    // 未来赛程
+    futureSchedule.value = {
+      home: (d.homeFuture || []).map((m, i) => ({ id: i, competition: m.competition, dateShort: m.date, matchup: m.match, interval: m.interval })),
+      away: (d.awayFuture || []).map((m, i) => ({ id: i, competition: m.competition, dateShort: m.date, matchup: m.match, interval: m.interval })),
+    };
+  } catch (e) {
+    console.error("加载基本面数据失败:", e);
+  } finally {
+    dataLoading.value = false;
+  }
+}
+
+function _formatRecent(m, i) {
+  const matchText = m.match || "";
+  const scoreMatch = matchText.match(/(\d+):(\d+)/);
+  const homeScore = scoreMatch ? parseInt(scoreMatch[1]) : 0;
+  const awayScore = scoreMatch ? parseInt(scoreMatch[2]) : 0;
+  const teams = matchText.replace(/\d+:\d+/, "|").split("|");
+  return {
+    id: i,
+    dateShort: m.date,
+    competition: m.competition,
+    homeTeam: teams[0] || "",
+    awayTeam: teams[1] || "",
+    score: scoreMatch ? `${homeScore}:${awayScore}` : "-",
+    halftimeScore: m.halfScore ? `(${m.halfScore})` : "",
+    homeScore,
+    awayScore,
+    asian: m.handicap || "",
+    asianClass: m.asianResult === "赢" ? "win" : m.asianResult === "输" ? "lose" : "draw",
+    asianLabel: m.asianResult || "",
+    ou: "",
+    ouClass: m.ouResult === "大" ? "big" : m.ouResult === "小" ? "small" : "",
+    ouLabel: m.ouResult || "",
+  };
+}
+
+function _formatH2h(m, i) {
+  const matchText = m.match || "";
+  const scoreMatch = matchText.match(/(\d+):(\d+)/);
+  const homeScore = scoreMatch ? parseInt(scoreMatch[1]) : 0;
+  const awayScore = scoreMatch ? parseInt(scoreMatch[2]) : 0;
+  const teams = matchText.replace(/\[.*?\]/g, "").replace(/\d+:\d+/, "|").split("|");
+
+  return {
+    id: i,
+    dateShort: m.date,
+    competition: m.competition,
+    homeTeam: teams[0] || "",
+    awayTeam: teams[1] || "",
+    score: scoreMatch ? `${homeScore}:${awayScore}` : "-",
+    halftimeScore: m.halfScore ? `(${m.halfScore})` : "",
+    homeScore,
+    awayScore,
+    asian: m.handicap || "",
+    asianClass: m.asianResult === "赢" ? "win" : m.asianResult === "输" ? "lose" : "draw",
+    asianLabel: m.asianResult || "",
+    ou: "",
+    ouClass: m.ouResult === "大" ? "big" : m.ouResult === "小" ? "small" : "",
+    ouLabel: m.ouResult || "",
+  };
+}
 
 // 获取队伍颜色样式
 function getTeamColorClass(match, side) {
   if (match.homeScore === match.awayScore) {
-    return "team-draw"; // 平局 - 黑色
+    return "team-draw";
   }
   if (side === "home") {
     return match.homeScore > match.awayScore ? "team-win" : "team-lose";
@@ -1221,93 +876,15 @@ function getTeamColorClass(match, side) {
   }
 }
 
-// 未来赛程
-const futureSchedule = ref({
-  home: [
-    {
-      id: 1,
-      dateShort: "25-11-07",
-      time: "16:35",
-      competition: "澳超",
-      matchup: "阿德莱德联 2:0 西悉尼流浪者",
-      interval: "14天",
-      intervalClass: "",
-    },
-    {
-      id: 2,
-      dateShort: "25-11-21",
-      time: "16:35",
-      competition: "澳超",
-      matchup: "阿德莱德联 vs 墨尔本城",
-      interval: "本场",
-      intervalClass: "current-match",
-    },
-    {
-      id: 3,
-      dateShort: "25-11-29",
-      time: "12:00",
-      competition: "澳超",
-      matchup: "惠灵顿凤凰 vs 阿德莱德联",
-      interval: "8天",
-      intervalClass: "",
-    },
-    {
-      id: 4,
-      dateShort: "25-12-07",
-      time: "16:35",
-      competition: "澳超",
-      matchup: "阿德莱德联 vs 布里斯班狮吼",
-      interval: "16天",
-      intervalClass: "",
-    },
-  ],
-  away: [
-    {
-      id: 1,
-      dateShort: "25-11-07",
-      time: "16:35",
-      competition: "澳超",
-      matchup: "墨尔本城 1:2 悉尼FC",
-      interval: "14天",
-      intervalClass: "",
-    },
-    {
-      id: 2,
-      dateShort: "25-11-21",
-      time: "16:35",
-      competition: "澳超",
-      matchup: "阿德莱德联 vs 墨尔本城",
-      interval: "本场",
-      intervalClass: "current-match",
-    },
-    {
-      id: 3,
-      dateShort: "25-11-28",
-      time: "19:00",
-      competition: "澳超",
-      matchup: "墨尔本城 vs 中央海岸水手",
-      interval: "7天",
-      intervalClass: "",
-    },
-    {
-      id: 4,
-      dateShort: "25-12-06",
-      time: "17:00",
-      competition: "澳超",
-      matchup: "纽卡斯尔喷气机 vs 墨尔本城",
-      interval: "15天",
-      intervalClass: "",
-    },
-  ],
-});
-
 // 切换一级 Tab
 function switchPrimaryTab(tabId) {
   activePrimaryTab.value = tabId;
-  // 切换到第一个二级 Tab
   const tabs = secondaryTabsMap[tabId];
   if (tabs && tabs.length > 0) {
     activeSecondaryTab.value = tabs[0].id;
+  }
+  if (tabId === "data" && recentMatches.value.home.length === 0) {
+    loadMatchData();
   }
 }
 
@@ -1607,6 +1184,7 @@ function setAwayMatchCount(count) {
   border-radius: 24rpx 24rpx 0 0;
   display: flex;
   flex-direction: column;
+  padding-right: 32rpx;
 }
 
 .modal-header {
@@ -1642,7 +1220,7 @@ function setAwayMatchCount(count) {
 .modal-body {
   flex: 1;
   max-height: 60vh;
-  padding: 0 32rpx 24rpx;
+  padding: 0 48rpx 24rpx 32rpx;
 }
 
 .history-header {
@@ -2103,7 +1681,7 @@ function setAwayMatchCount(count) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 24rpx 16rpx 8rpx 16rpx;
+  padding: 16rpx;
   background: transparent;
   border-bottom: none;
 }
@@ -2356,7 +1934,7 @@ function setAwayMatchCount(count) {
 .col-teams {
   flex: 1;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: 0;
   padding: 0;
@@ -2365,16 +1943,16 @@ function setAwayMatchCount(count) {
     flex: 1;
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     padding-right: 12rpx;
-    padding-top: 2rpx;
   }
 
   .team-right {
     flex: 1;
     display: flex;
     justify-content: flex-start;
+    align-items: center;
     padding-left: 12rpx;
-    padding-top: 2rpx;
   }
 
   .team-name {
@@ -2399,6 +1977,7 @@ function setAwayMatchCount(count) {
 
   .score-wrapper {
     flex-shrink: 0;
+    width: 80rpx;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2519,21 +2098,22 @@ function setAwayMatchCount(count) {
 }
 
 .schedule-col-time {
-  width: 100rpx;
+  width: 130rpx;
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2rpx;
   align-items: center;
+  white-space: nowrap;
+  font-size: 22rpx;
+  color: #6b7280;
 
   .schedule-date {
-    font-size: 20rpx;
+    font-size: 22rpx;
     color: #6b7280;
     line-height: 1.4;
   }
 
   .schedule-time {
-    font-size: 20rpx;
+    font-size: 22rpx;
     color: #6b7280;
     line-height: 1.4;
   }
