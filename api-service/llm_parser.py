@@ -73,10 +73,18 @@ def parse_with_llm(ocr_text: str) -> Dict[str, Any]:
         response_format={"type": "json_object"},
     )
 
-    content = response.choices[0].message.content
+    content = response.choices[0].message.content or ""
     logger.info(f"DeepSeek 返回: {content}")
 
-    result = json.loads(content)
+    # 去除可能的 markdown 代码块包裹
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    result = json.loads(text)
 
     if "legs" not in result:
         result["legs"] = []
