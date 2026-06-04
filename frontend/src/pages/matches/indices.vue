@@ -61,8 +61,9 @@
           <template v-for="(item, index) in europeanOdds" :key="item.bookmaker">
             <!-- 每个公司的数据组 -->
             <view class="table-group" :class="{ 'row-even': index % 2 === 1 }">
-              <view class="company-cell">
+              <view class="company-cell" @tap="item.cid && toggleHistory('european', item.cid, index)">
                 <text class="company-name">{{ item.bookmaker }}</text>
+                <text v-if="item.cid" class="expand-arrow" :class="{ expanded: expandedHistory[`euro_${index}`] }">▶</text>
               </view>
               <view class="data-rows">
                 <!-- 初盘行 -->
@@ -118,6 +119,31 @@
                 </view>
               </view>
             </view>
+            <!-- 欧赔变动历史 -->
+            <view v-if="expandedHistory[`euro_${index}`]" class="history-panel">
+              <view v-if="historyLoading[`euro_${index}`]" class="history-loading">
+                <text>加载中...</text>
+              </view>
+              <view v-else-if="historyData[`euro_${index}`]?.length" class="history-list">
+                <view class="history-header">
+                  <text class="h-col-time">时间</text>
+                  <text class="h-col">主胜</text>
+                  <text class="h-col">平局</text>
+                  <text class="h-col">客胜</text>
+                  <text class="h-col">返还</text>
+                </view>
+                <view v-for="(h, hi) in historyData[`euro_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
+                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
+                  <text class="h-col">{{ formatNumber(h.win) }}</text>
+                  <text class="h-col">{{ formatNumber(h.draw) }}</text>
+                  <text class="h-col">{{ formatNumber(h.lose) }}</text>
+                  <text class="h-col">{{ h.returnRate }}%</text>
+                </view>
+              </view>
+              <view v-else class="history-empty">
+                <text>暂无变动记录</text>
+              </view>
+            </view>
           </template>
         </view>
       </view>
@@ -137,8 +163,9 @@
           <template v-for="(item, index) in asianOdds" :key="item.bookmaker">
             <!-- 每个公司的数据组 -->
             <view class="table-group" :class="{ 'row-even': index % 2 === 1 }">
-              <view class="company-cell">
+              <view class="company-cell" @tap="item.cid && toggleHistory('asian', item.cid, index)">
                 <text class="company-name">{{ item.bookmaker }}</text>
+                <text v-if="item.cid" class="expand-arrow" :class="{ expanded: expandedHistory[`asian_${index}`] }">▶</text>
               </view>
               <view class="data-rows">
                 <!-- 初盘行 -->
@@ -185,6 +212,29 @@
                 </view>
               </view>
             </view>
+            <!-- 亚盘变动历史 -->
+            <view v-if="expandedHistory[`asian_${index}`]" class="history-panel">
+              <view v-if="historyLoading[`asian_${index}`]" class="history-loading">
+                <text>加载中...</text>
+              </view>
+              <view v-else-if="historyData[`asian_${index}`]?.length" class="history-list">
+                <view class="history-header">
+                  <text class="h-col-time">时间</text>
+                  <text class="h-col">主队</text>
+                  <text class="h-col">盘口</text>
+                  <text class="h-col">客队</text>
+                </view>
+                <view v-for="(h, hi) in historyData[`asian_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
+                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
+                  <text class="h-col">{{ formatNumber(h.home) }}</text>
+                  <text class="h-col">{{ h.handicapText || formatNumber(h.handicap) }}</text>
+                  <text class="h-col">{{ formatNumber(h.away) }}</text>
+                </view>
+              </view>
+              <view v-else class="history-empty">
+                <text>暂无变动记录</text>
+              </view>
+            </view>
           </template>
         </view>
       </view>
@@ -202,59 +252,85 @@
           </view>
 
           <!-- 数据行 -->
-          <view v-for="(item, index) in overUnderOdds" :key="item.bookmaker" class="table-group-ou" :class="{ 'row-even': index % 2 === 0 }">
-            <!-- 公司名称 -->
-            <view class="company-cell-ou">
-              <text class="company-name">{{ item.bookmaker }}</text>
-            </view>
-
-            <!-- 数据行 -->
-            <view class="data-rows-ou">
-              <!-- 初盘 -->
-              <view class="table-row-ou">
-                <view class="col-label">
-                  <text class="label-text initial">初</text>
-                </view>
-                <view class="col-over">
-                  <text class="odds-value">{{ formatNumber(item.initial.over) }}</text>
-                </view>
-                <view class="col-line">
-                  <text class="line-value">{{ formatNumber(item.initial.line) }}</text>
-                </view>
-                <view class="col-under">
-                  <text class="odds-value">{{ formatNumber(item.initial.under) }}</text>
-                </view>
+          <template v-for="(item, index) in overUnderOdds" :key="item.bookmaker">
+            <view class="table-group-ou" :class="{ 'row-even': index % 2 === 0 }">
+              <!-- 公司名称 -->
+              <view class="company-cell-ou" @tap="item.cid && toggleHistory('overunder', item.cid, index)">
+                <text class="company-name">{{ item.bookmaker }}</text>
+                <text v-if="item.cid" class="expand-arrow" :class="{ expanded: expandedHistory[`ou_${index}`] }">▶</text>
               </view>
 
-              <!-- 即时 -->
-              <view class="table-row-ou">
-                <view class="col-label">
-                  <text class="label-text instant">即</text>
+              <!-- 数据行 -->
+              <view class="data-rows-ou">
+                <!-- 初盘 -->
+                <view class="table-row-ou">
+                  <view class="col-label">
+                    <text class="label-text initial">初</text>
+                  </view>
+                  <view class="col-over">
+                    <text class="odds-value">{{ formatNumber(item.initial.over) }}</text>
+                  </view>
+                  <view class="col-line">
+                    <text class="line-value">{{ formatNumber(item.initial.line) }}</text>
+                  </view>
+                  <view class="col-under">
+                    <text class="odds-value">{{ formatNumber(item.initial.under) }}</text>
+                  </view>
                 </view>
-                <view class="col-over">
-                  <text class="odds-value" :class="getChangeClass(item.initial.over, item.current.over)">
-                    {{ formatNumber(item.current.over) }}
-                    <text class="arrow-icon" v-if="item.initial.over !== item.current.over">
-                      {{ item.current.over > item.initial.over ? "↑" : "↓" }}
+
+                <!-- 即时 -->
+                <view class="table-row-ou">
+                  <view class="col-label">
+                    <text class="label-text instant">即</text>
+                  </view>
+                  <view class="col-over">
+                    <text class="odds-value" :class="getChangeClass(item.initial.over, item.current.over)">
+                      {{ formatNumber(item.current.over) }}
+                      <text class="arrow-icon" v-if="item.initial.over !== item.current.over">
+                        {{ item.current.over > item.initial.over ? "↑" : "↓" }}
+                      </text>
                     </text>
-                  </text>
-                </view>
-                <view class="col-line">
-                  <text class="line-value" :class="getLineChangeClass(item.initial.line, item.current.line)">
-                    {{ formatNumber(item.current.line) }}
-                  </text>
-                </view>
-                <view class="col-under">
-                  <text class="odds-value" :class="getChangeClass(item.initial.under, item.current.under)">
-                    {{ formatNumber(item.current.under) }}
-                    <text class="arrow-icon" v-if="item.initial.under !== item.current.under">
-                      {{ item.current.under > item.initial.under ? "↑" : "↓" }}
+                  </view>
+                  <view class="col-line">
+                    <text class="line-value" :class="getLineChangeClass(item.initial.line, item.current.line)">
+                      {{ formatNumber(item.current.line) }}
                     </text>
-                  </text>
+                  </view>
+                  <view class="col-under">
+                    <text class="odds-value" :class="getChangeClass(item.initial.under, item.current.under)">
+                      {{ formatNumber(item.current.under) }}
+                      <text class="arrow-icon" v-if="item.initial.under !== item.current.under">
+                        {{ item.current.under > item.initial.under ? "↑" : "↓" }}
+                      </text>
+                    </text>
+                  </view>
                 </view>
               </view>
             </view>
-          </view>
+            <!-- 大小球变动历史 -->
+            <view v-if="expandedHistory[`ou_${index}`]" class="history-panel">
+              <view v-if="historyLoading[`ou_${index}`]" class="history-loading">
+                <text>加载中...</text>
+              </view>
+              <view v-else-if="historyData[`ou_${index}`]?.length" class="history-list">
+                <view class="history-header">
+                  <text class="h-col-time">时间</text>
+                  <text class="h-col">大球</text>
+                  <text class="h-col">盘口</text>
+                  <text class="h-col">小球</text>
+                </view>
+                <view v-for="(h, hi) in historyData[`ou_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
+                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
+                  <text class="h-col">{{ formatNumber(h.over) }}</text>
+                  <text class="h-col">{{ formatNumber(h.line) }}</text>
+                  <text class="h-col">{{ formatNumber(h.under) }}</text>
+                </view>
+              </view>
+              <view v-else class="history-empty">
+                <text>暂无变动记录</text>
+              </view>
+            </view>
+          </template>
         </view>
       </view>
 
@@ -598,6 +674,7 @@ const matchInfo = ref({
 const loading = ref(false);
 const errorMsg = ref("");
 const matchId = ref("");
+const fid = ref("");
 
 const lastUpdateTime = computed(() => {
   return dayjs().format("YYYY-MM-DD HH:mm:ss");
@@ -650,6 +727,7 @@ async function loadIndices() {
     const res = await request({ url: `/api/matches/${matchId.value}/indices` });
     const indices = res.indices || {};
 
+    fid.value = res.fid || "";
     europeanOdds.value = indices.european || [];
     asianOdds.value = indices.asian || [];
     overUnderOdds.value = indices.overUnder || [];
@@ -678,6 +756,45 @@ onLoad((query) => {
   matchId.value = query.matchId || "";
   loadIndices();
 });
+
+// 赔率变动历史
+const expandedHistory = reactive({});
+const historyData = reactive({});
+const historyLoading = reactive({});
+
+async function toggleHistory(type, cid, index) {
+  const keyMap = { european: "euro", asian: "asian", overunder: "ou" };
+  const key = `${keyMap[type]}_${index}`;
+
+  if (expandedHistory[key]) {
+    expandedHistory[key] = false;
+    return;
+  }
+
+  expandedHistory[key] = true;
+
+  if (historyData[key]) return;
+
+  historyLoading[key] = true;
+  try {
+    const res = await request({
+      url: `/api/odds/history?fid=${fid.value}&cid=${cid}&type=${type}`,
+    });
+    historyData[key] = res.history || [];
+  } catch (e) {
+    historyData[key] = [];
+    console.error("加载变动历史失败:", e);
+  } finally {
+    historyLoading[key] = false;
+  }
+}
+
+function formatTime(time) {
+  if (!time) return "";
+  // "2026-06-04 17:15:39" -> "06-04 17:15" or "06-04 16:56" -> as-is
+  if (time.length > 16) return time.slice(5, 16);
+  return time;
+}
 
 // 展开/收起状态
 const expandedSections = reactive({
@@ -1469,6 +1586,81 @@ function setAwayMatchCount(count) {
     color: #fff;
     font-size: 26rpx;
   }
+}
+
+// 展开箭头
+.expand-arrow {
+  font-size: 18rpx;
+  color: #9ca3af;
+  margin-left: 4rpx;
+  transition: transform 0.2s;
+  display: inline-block;
+
+  &.expanded {
+    transform: rotate(90deg);
+    color: #0d9488;
+  }
+}
+
+// 变动历史面板
+.history-panel {
+  background: #f9fafb;
+  margin: 0 24rpx 8rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 0 0 8rpx 8rpx;
+  border: 1px solid #e5e7eb;
+  border-top: none;
+}
+
+.history-loading,
+.history-empty {
+  text-align: center;
+  padding: 16rpx;
+  text {
+    font-size: 24rpx;
+    color: #9ca3af;
+  }
+}
+
+.history-list {
+  max-height: 500rpx;
+  overflow-y: auto;
+}
+
+.history-header {
+  display: flex;
+  padding: 8rpx 0;
+  border-bottom: 1px solid #e5e7eb;
+  text {
+    font-size: 22rpx;
+    color: #6b7280;
+    font-weight: 500;
+  }
+}
+
+.history-row {
+  display: flex;
+  padding: 8rpx 0;
+  border-bottom: 1px solid #f3f4f6;
+  text {
+    font-size: 22rpx;
+    color: #374151;
+  }
+
+  &.h-row-alt {
+    background: #f3f4f6;
+  }
+}
+
+.h-col-time {
+  flex: 2;
+  min-width: 0;
+}
+
+.h-col {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
 }
 
 // 内容区域

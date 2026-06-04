@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from database import init_db, fetch_sync_status
 from repository import OddsRepository
 from user_repository import UserRepository
-from odds500_service import get_fid_for_match, fetch_all_indices
+from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
 import httpx
@@ -417,6 +417,20 @@ def get_match_indices(match_id: str):
         "fid": fid,
         "indices": indices,
     }
+
+
+@app.get("/api/odds/history")
+def get_odds_history(fid: str, cid: int, type: str = "european"):
+    """获取某公司赔率变动历史"""
+    if type == "european":
+        data = fetch_euro_history(fid, cid)
+    elif type == "asian":
+        data = fetch_asian_history(fid, cid)
+    elif type == "overunder":
+        data = fetch_ou_history(fid, cid)
+    else:
+        raise HTTPException(status_code=400, detail="type 必须是 european/asian/overunder")
+    return {"history": data}
 
 
 # ==================== 用户相关API ====================

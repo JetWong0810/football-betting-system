@@ -290,10 +290,12 @@ def _parse_asian_page(html: str) -> List[Dict[str, Any]]:
     companies = []
     i = 0
     while i < len(rows):
-        tds = rows[i].find_all("td")
+        tr = rows[i]
+        tds = tr.find_all("td")
         if len(tds) >= 12 and tds[0].get("class") == ["td_one"]:
             company_raw = tds[1].get_text(strip=True)
             company = _identify_company(company_raw)
+            cid = tr.get("id", "")
 
             latest_home = _parse_odds(tds[3].get_text(strip=True))
             latest_hcap_text = _clean_handicap(tds[4].get_text(strip=True))
@@ -304,6 +306,7 @@ def _parse_asian_page(html: str) -> List[Dict[str, Any]]:
 
             companies.append({
                 "bookmaker": company,
+                "cid": int(cid) if cid.isdigit() else 0,
                 "initial": {
                     "home": init_home,
                     "handicap": _parse_handicap_value(init_hcap_text),
@@ -349,10 +352,12 @@ def _parse_over_under_page(html: str) -> List[Dict[str, Any]]:
     companies = []
     i = 0
     while i < len(rows):
-        tds = rows[i].find_all("td")
+        tr = rows[i]
+        tds = tr.find_all("td")
         if len(tds) >= 12 and tds[0].get("class") == ["td_one"]:
             company_raw = tds[1].get_text(strip=True)
             company = _identify_company(company_raw)
+            cid = tr.get("id", "")
 
             latest_over = _parse_odds(tds[3].get_text(strip=True))
             latest_line_text = tds[4].get_text(strip=True).replace("升", "").replace("降", "")
@@ -366,6 +371,7 @@ def _parse_over_under_page(html: str) -> List[Dict[str, Any]]:
 
             companies.append({
                 "bookmaker": company,
+                "cid": int(cid) if cid.isdigit() else 0,
                 "initial": {
                     "over": init_over,
                     "line": init_line,
@@ -431,3 +437,102 @@ def fetch_all_indices(fid: str) -> Dict[str, Any]:
         "asian": asian_data,
         "overUnder": ou_data,
     }
+
+
+def fetch_euro_history(fid: str, cid: int) -> List[Dict[str, Any]]:
+    """获取某公司欧赔变动历史 (JSON API)"""
+    url = f"{BASE_URL}/fenxi1/json/ouzhi.php"
+    params = {"fid": fid, "cid": cid, "r": 1}
+    headers = {
+        **HEADERS,
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"{BASE_URL}/fenxi/ouzhi-{fid}.shtml",
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url, params=params, headers=headers)
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+        return [
+            {
+                "win": float(r[0]),
+                "draw": float(r[1]),
+                "lose": float(r[2]),
+                "returnRate": float(r[3]),
+                "time": r[4],
+            }
+            for r in data if len(r) >= 5
+        ]
+    except Exception as e:
+        logger.error(f"获取欧赔历史失败 fid={fid} cid={cid}: {e}")
+        return []
+
+
+def fetch_asian_history(fid: str, cid: int) -> List[Dict[str, Any]]:
+    """获取某公司亚盘变动历史 (AJAX API)"""
+    url = f"{BASE_URL}/fenxi1/inc/yazhiajax.php"
+    params = {"fid": fid, "id": cid, "t": int(time.time() * 1000), "r": 1}
+    headers = {
+        **HEADERS,
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"{BASE_URL}/fenxi/yazhi-{fid}.shtml",
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url, params=params, headers=headers)
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+
+        records = []
+        for html_str in data:
+            soup = BeautifulSoup(html_str, "html.parser")
+            tds = soup.find_all("td")
+            if len(tds) < 4:
+                continue
+            records.append({
+                "home": _parse_odds(tds[0].get_text(strip=True)),
+                "handicap": _parse_handicap_value(_clean_handicap(tds[1].get_text(strip=True))),
+                "handicapText": _clean_handicap(tds[1].get_text(strip=True)),
+                "away": _parse_odds(tds[2].get_text(strip=True)),
+                "time": tds[3].get_text(strip=True),
+            })
+        return records
+    except Exception as e:
+        logger.error(f"获取亚盘历史失败 fid={fid} cid={cid}: {e}")
+        return []
+
+
+def fetch_ou_history(fid: str, cid: int) -> List[Dict[str, Any]]:
+    """获取某公司大小球变动历史 (AJAX API)"""
+    url = f"{BASE_URL}/fenxi1/inc/daxiaoajax.php"
+    params = {"fid": fid, "id": cid, "t": int(time.time() * 1000), "r": 1}
+    headers = {
+        **HEADERS,
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"{BASE_URL}/fenxi/daxiao-{fid}.shtml",
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url, params=params, headers=headers)
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+
+        records = []
+        for html_str in data:
+            soup = BeautifulSoup(html_str, "html.parser")
+            tds = soup.find_all("td")
+            if len(tds) < 4:
+                continue
+            records.append({
+                "over": _parse_odds(tds[0].get_text(strip=True)),
+                "line": _parse_odds(tds[1].get_text(strip=True)),
+                "under": _parse_odds(tds[2].get_text(strip=True)),
+                "time": tds[3].get_text(strip=True),
+            })
+        return records
+    except Exception as e:
+        logger.error(f"获取大小球历史失败 fid={fid} cid={cid}: {e}")
+        return []
