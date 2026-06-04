@@ -41,6 +41,7 @@ services:
       WECHAT_APPID: ${WECHAT_APPID}
       WECHAT_SECRET: ${WECHAT_SECRET}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
     depends_on:
       mysql:
         condition: service_healthy
