@@ -11,17 +11,17 @@ const getBaseURL = () => {
   if (import.meta.env.DEV) {
     return "/api";
   }
-  return "https://api.football.jetwong.top";
+  return "";
   // #endif
 
   // #ifdef MP-WEIXIN
   // 微信小程序环境：使用生产环境API域名
-  return "https://api.football.jetwong.top";
+  return "https://fc.jetwong.top";
   // #endif
 
   // #ifndef H5 || MP-WEIXIN
   // 其他环境使用生产环境域名
-  return "https://api.football.jetwong.top";
+  return "https://fc.jetwong.top";
   // #endif
 };
 

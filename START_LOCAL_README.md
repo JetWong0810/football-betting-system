@@ -102,12 +102,12 @@ sudo systemctl start mysql
 WECHAT_APPID=your_appid
 WECHAT_SECRET=your_secret
 
-# MySQL 数据库配置（可选，使用默认值）
-# MYSQL_HOST=localhost
-# MYSQL_PORT=3306
-# MYSQL_USER=root
-# MYSQL_PASSWORD=your_password
-# MYSQL_DATABASE=football_betting
+# MySQL 数据库配置（连接到内网服务器 Docker MySQL）
+MYSQL_HOST=10.130.130.139
+MYSQL_PORT=3321
+MYSQL_USER=root
+MYSQL_PASSWORD=football_betting_2024
+MYSQL_DATABASE=football_betting
 ```
 
 ## 常见问题
@@ -198,14 +198,17 @@ rm -f /tmp/football-betting-*.pid
 **本地开发环境**:
 - API Service: 直接运行 `python3 main.py`（带 auto-reload）
 - Frontend: Vite 开发服务器，支持热更新
-- 数据库: 本地 MySQL（localhost）
+- 数据库: 连接内网服务器 MySQL（10.130.130.139:3321）
 
 **生产环境**:
-- API Service: systemd 管理，部署在 guiyun 服务器
-- Frontend: 编译为静态文件，由 Nginx 提供服务
-- 数据库: 远程 MySQL（guiyun 服务器）
+- 所有服务 Docker 化，部署在内网服务器 mysql-backup (10.130.130.139)
+- API Service: Docker 容器 football-api (端口 7001)
+- Frontend: Docker 容器 football-frontend (nginx 静态服务，端口 8088)
+- Scraper: Docker 容器 football-scraper (循环抓取)
+- 数据库: Docker 容器 football-mysql (端口 3321)
+- 公网访问: https://fc.jetwong.top (经 SSH 隧道穿透到内网)
 
-详见项目根目录的 `WARP.md` 了解生产环境部署。
+详见项目根目录的 `WARP.md` 和 `QUICK_DEPLOY.md` 了解生产环境部署。
 
 ## 脚本结构
 

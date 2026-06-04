@@ -1,323 +1,187 @@
-# 🚀 快速部署指南
+# 快速部署指南
 
-本文档介绍代码修改并推送到 GitHub 后，如何在本地快速一键部署。
+本项目所有服务通过 Docker 部署在内网服务器 (mysql-backup / 10.130.130.139)，通过 SSH 隧道经由外网 VPS 暴露到公网。
 
-## 📋 前置条件
+## 前置条件
 
-1. ✅ 代码已推送到 GitHub
-2. ✅ 本地已配置 SSH 密钥，可以免密登录服务器
-3. ✅ 服务器上已首次部署过系统（使用 `deploy.sh` 完整部署）
+1. 本地已配置 SSH 免密登录：`ssh mysql-backup` 和 `ssh gouyun`
+2. 目标服务器已安装 Docker 和 docker-compose
+3. SSH 隧道服务已启动（首次部署时自动配置）
 
-## 🎯 快速部署流程
-
-### 标准流程（3 步）
+## 一键部署
 
 ```bash
-# 1. 提交并推送到 GitHub
-git add .
-git commit -m "你的提交信息"
-git push origin main
-
-# 2. 一键部署所有服务
-./deploy.sh
-
-# 3. 完成！✅
+# 从项目根目录执行，自动打包、同步、构建、启动所有服务
+bash deploy/deploy-remote.sh
 ```
 
-### 只更新某个服务
+部署脚本会：
+1. 打包 api-service、scraper-service、frontend 源码
+2. rsync 到 mysql-backup:/opt/football-betting-system/
+3. 执行 `docker-compose up -d --build`
+4. 验证所有容器运行状态
 
-如果只修改了某个服务的代码，可以只部署该服务：
+## 访问地址
+
+| 环境 | 地址 |
+|------|------|
+| 公网前端 | https://fc.jetwong.top |
+| 公网 API | https://fc.jetwong.top/api/health |
+| 内网前端 | http://10.130.130.139:8088 |
+| 内网 API | http://10.130.130.139:7001/docs |
+| 数据库 | 10.130.130.139:3321 (root/football_betting_2024) |
+
+## 只更新某个服务
 
 ```bash
-# 只更新 API 服务
-./deploy.sh --api-only
+# 只重新构建前端（代码修改后）
+rsync -az --exclude='node_modules' --exclude='dist' frontend/ mysql-backup:/opt/football-betting-system/frontend/
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose up -d --build frontend"
 
-# 只更新抓取服务
-./deploy.sh --scraper-only
+# 只重新构建 API
+rsync -az --exclude='__pycache__' --exclude='.env' api-service/ mysql-backup:/opt/football-betting-system/api-service/
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose up -d --build api"
 
-# 只更新前端服务（会自动构建）
-./deploy.sh --frontend-only
+# 只重新构建 Scraper
+rsync -az --exclude='__pycache__' --exclude='.env' scraper-service/ mysql-backup:/opt/football-betting-system/scraper-service/
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose up -d --build scraper"
 ```
 
-### 前端快速更新（跳过构建）
-
-如果前端代码没有变化，只是重新部署：
+## 服务管理
 
 ```bash
-./deploy.sh --frontend-only --skip-build
+# 查看容器状态
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose ps"
+
+# 查看日志
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose logs -f"
+ssh mysql-backup "docker logs football-api --tail 50"
+ssh mysql-backup "docker logs football-scraper --tail 20"
+
+# 重启所有服务
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose restart"
+
+# 停止所有服务
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose down"
+
+# 重启并重新构建（代码更新后）
+ssh mysql-backup "cd /opt/football-betting-system && docker-compose up -d --build"
 ```
 
-## 📝 详细说明
+## SSH 隧道管理
 
-### 部署脚本会自动做什么？
-
-1. **自动检测 Git 仓库**
-
-   - 从本地 `.git` 配置自动获取 GitHub 仓库地址
-   - 无需手动输入仓库 URL
-
-2. **自动拉取最新代码**
-
-   - 在服务器上执行 `git pull origin main`
-   - 自动切换到指定分支（默认 `main`）
-
-3. **自动更新依赖**
-
-   - API 服务：更新 Python 依赖
-   - 抓取服务：更新 Python 依赖
-   - 前端服务：自动构建（除非使用 `--skip-build`）
-
-4. **自动重启服务**
-   - API 服务：重启 Systemd 服务
-   - 抓取服务：定时任务自动运行（无需重启）
-   - 前端服务：Nginx 自动重载配置
-
-### 指定 Git 分支
-
-如果代码在其他分支（如 `develop`）：
+公网访问依赖 SSH 反向隧道（mysql-backup → VPS），由 systemd 管理：
 
 ```bash
-./deploy.sh --branch develop
+# 查看隧道状态
+ssh mysql-backup "systemctl status football-tunnel"
+
+# 重启隧道（如果公网访问断了）
+ssh mysql-backup "systemctl restart football-tunnel"
+
+# 验证隧道（在 VPS 端检查）
+ssh gouyun "ss -tlnp | grep 5002"
 ```
 
-### 完整部署命令示例
+## 本地开发
 
 ```bash
-# 部署所有服务（main 分支）
-./deploy.sh
+# 启动本地前后端（连接远程数据库）
+./start-local.sh
 
-# 部署所有服务（develop 分支）
-./deploy.sh --branch develop
+# 停止
+./start-local.sh --stop
 
-# 只部署 API（main 分支）
-./deploy.sh --api-only
-
-# 只部署前端（跳过构建）
-./deploy.sh --frontend-only --skip-build
-
-# 组合使用
-./deploy.sh --api-only --branch develop
+# 本地访问
+# 前端: http://localhost:5173
+# API:  http://localhost:7001
+# Docs: http://localhost:7001/docs
 ```
 
-## ⚡ 最快部署方式
+## 故障排查
 
-### 场景 1: 只修改了 API 代码
+### 公网无法访问
 
 ```bash
-git push origin main
-./deploy.sh --api-only
+# Step 1: 检查隧道
+ssh mysql-backup "systemctl status football-tunnel"
+
+# Step 2: 检查 VPS 端口
+ssh gouyun "ss -tlnp | grep 5002"
+
+# Step 3: 检查容器
+ssh mysql-backup "docker ps --filter 'name=football-'"
+
+# Step 4: 重启隧道
+ssh mysql-backup "systemctl restart football-tunnel"
 ```
 
-**耗时**: ~30 秒
-
-### 场景 2: 只修改了前端代码
+### API 返回 500
 
 ```bash
-git push origin main
-./deploy.sh --frontend-only
+ssh mysql-backup "docker logs football-api --tail 30"
+# 通常是数据库连接问题，检查 MySQL 容器是否健康
+ssh mysql-backup "docker exec football-mysql mysqladmin ping -u root -pfootball_betting_2024"
 ```
 
-**耗时**: ~2-3 分钟（包含构建时间）
+### 前端接口 404
 
-### 场景 3: 只修改了抓取服务代码
+确认前端代码中 `http.js` 的 `getBaseURL()` 在 H5 生产环境返回空字符串（使用相对路径 `/api/xxx`），而非硬编码域名。
+
+### 数据不更新
 
 ```bash
-git push origin main
-./deploy.sh --scraper-only
+ssh mysql-backup "docker logs football-scraper --tail 20"
+# 正常应看到 "同步完成 - 比赛数: X, 赔率数: Y"
+# 如果报错，可能是外网 API 不可达
 ```
 
-**耗时**: ~20 秒
+## 架构图
 
-### 场景 4: 修改了多个服务
-
-```bash
-git push origin main
-./deploy.sh
+```
+用户浏览器
+    ↓ HTTPS
+fc.jetwong.top (DNS → VPS 38.147.187.103)
+    ↓
+VPS nginx :443 → proxy_pass 127.0.0.1:5002
+    ↓ SSH 反向隧道 (autossh systemd)
+内网 10.130.130.139:8088 (football-frontend 容器)
+    ├── /         → 静态文件 (Vue H5)
+    ├── /api/     → football-api:7001
+    └── /static/  → football-api:7001
+                          ↓
+                   football-mysql:3306 (对外 :3321)
+                          ↑
+                   football-scraper (每10分钟同步竞彩数据)
 ```
 
-**耗时**: ~3-5 分钟
+## 端口分配
 
-## 🔍 验证部署
+| 端口 | 服务 | 说明 |
+|------|------|------|
+| 3321 | football-mysql | 避开已有 3316-3320 |
+| 7001 | football-api | FastAPI |
+| 8088 | football-frontend | Nginx + 前端静态文件 |
+| 5002 | SSH 隧道 (VPS端) | autossh 反向端口 |
 
-部署完成后，脚本会自动验证，你也可以手动检查：
+## 关键文件
 
-### 检查 API 服务
-
-```bash
-# 检查服务状态
-ssh guiyun "sudo systemctl status football-betting-api"
-
-# 测试 API
-curl http://103.140.229.232:7001/api/health
-
-# 查看最新日志
-ssh guiyun "sudo journalctl -u football-betting-api -n 20"
 ```
+deploy/
+├── docker-compose.yml      # 容器编排 (v2.4)
+├── deploy-remote.sh        # 一键部署脚本
+├── init-sql/01_schema.sql  # 数据库初始化
+├── api-service/Dockerfile
+├── scraper-service/Dockerfile
+├── scraper-service/entrypoint.py  # 循环运行包装
+├── frontend/Dockerfile     # Node 构建 + nginx 静态服务
+└── frontend/nginx.conf     # API 代理 + SPA fallback
 
-### 检查抓取服务
+# 隧道服务 (mysql-backup)
+/etc/systemd/system/football-tunnel.service
 
-```bash
-# 查看定时任务日志
-ssh mysql-backup "tail -f /var/log/football_scraper.log"
-
-# 手动测试
-ssh mysql-backup "docker exec py39-dev bash -c 'cd /workspace/scraper-service && python3 main.py'"
+# VPS nginx
+/etc/nginx/sites-enabled/fc.jetwong.top
+/etc/nginx/ssl/fc.jetwong.top_chain.pem
+/etc/nginx/ssl/fc.jetwong.top_key.key
 ```
-
-### 检查前端服务
-
-```bash
-# 浏览器访问
-open https://www.jetwong.top
-
-# 或检查文件
-ssh guiyun "ls -la /opt/football-betting-system/frontend/dist/"
-```
-
-## 🐛 常见问题
-
-### Q1: 提示 "无法连接到服务器"
-
-**原因**: SSH 配置问题
-
-**解决**:
-
-```bash
-# 测试 SSH 连接
-ssh guiyun
-ssh mysql-backup
-
-# 如果失败，检查 ~/.ssh/config
-cat ~/.ssh/config
-```
-
-### Q2: Git pull 失败
-
-**原因**: 服务器上的代码有本地修改
-
-**解决**:
-
-```bash
-# 在服务器上重置代码
-ssh guiyun "cd /opt/football-betting-system && git reset --hard origin/main && git pull"
-```
-
-### Q3: API 服务启动失败
-
-**原因**: 依赖更新或代码错误
-
-**解决**:
-
-```bash
-# 查看详细日志
-ssh guiyun "sudo journalctl -u football-betting-api -n 50"
-
-# 手动测试
-ssh guiyun "cd /opt/football-betting-system/api-service && source venv/bin/activate && python3 main.py"
-```
-
-### Q4: 前端构建失败
-
-**原因**: Node.js 版本或依赖问题
-
-**解决**:
-
-```bash
-# 清理并重新安装
-cd frontend
-rm -rf node_modules package-lock.json
-npm install
-npm run build:h5
-```
-
-## 💡 最佳实践
-
-1. **提交前测试**
-
-   ```bash
-   # 本地测试 API
-   cd api-service
-   source venv/bin/activate
-   uvicorn main:app --reload
-
-   # 本地测试前端
-   cd frontend
-   npm run dev:h5
-   ```
-
-2. **使用分支管理**
-
-   ```bash
-   # 开发分支
-   git checkout develop
-   git push origin develop
-   ./deploy.sh --branch develop --api-only
-
-   # 生产分支
-   git checkout main
-   git merge develop
-   git push origin main
-   ./deploy.sh
-   ```
-
-3. **部署前检查**
-
-   ```bash
-   # 查看将要部署的更改
-   git log origin/main..HEAD
-   git diff origin/main
-   ```
-
-4. **部署后验证**
-
-   > 部署脚本会自动检测 `api.football.jetwong.top` 和 `www.jetwong.top` 的可访问性，
-   > 如提示域名不可达，请按照下列命令自行确认并排查 DNS / Nginx。
-
-   ```bash
-   # 快速健康检查
-   curl http://103.140.229.232:7001/api/health
-   open https://www.jetwong.top
-   ```
-
-### ❗ 常见问题：前端域名重定向次数过多
-
-- **症状**：访问 `https://www.jetwong.top` 提示 `ERR_TOO_MANY_REDIRECTS`，`curl -I https://www.jetwong.top` 持续返回 `301 Moved Permanently`。
-- **原因**：服务器上残留旧版 `www.jetwong.top.conf`，其内容是把请求永久重定向到同一个地址，导致浏览器在 `https://www.jetwong.top` 与自己之间死循环。新脚本写入的正确配置没有生效。
-- **修复办法**：
-  1. 重新执行 `./deploy.sh --frontend-only --skip-build`（已内置清理逻辑，会删除残留的 `sites-available/sites-enabled` 旧文件并重新生成配置）。
-  2. 或者手工清理：`ssh guiyun 'sudo rm -f /etc/nginx/sites-{available,enabled}/www.jetwong.top*'`，再运行脚本写回配置。
-  3. 执行 `ssh guiyun 'sudo nginx -t && sudo systemctl reload nginx'`，随后 `curl -I https://www.jetwong.top` 应该返回 `200`/`304`。
-
-> 新配置还额外提供 `jetwong.top -> www.jetwong.top` 的显式跳转，等根域名解析生效后即可自动汇聚到 `www`。
-
-## 📊 部署时间参考
-
-| 服务     | 首次部署 | 更新部署  |
-| -------- | -------- | --------- |
-| API 服务 | ~2 分钟  | ~30 秒    |
-| 抓取服务 | ~1 分钟  | ~20 秒    |
-| 前端服务 | ~5 分钟  | ~2-3 分钟 |
-| 全部服务 | ~8 分钟  | ~3-5 分钟 |
-
-## 🎯 一键部署命令总结
-
-```bash
-# 最常用：部署所有服务
-./deploy.sh
-
-# 只更新 API
-./deploy.sh --api-only
-
-# 只更新前端
-./deploy.sh --frontend-only
-
-# 指定分支
-./deploy.sh --branch develop
-
-# 前端跳过构建
-./deploy.sh --frontend-only --skip-build
-```
-
----
-
-**提示**: 首次部署请使用完整部署流程，后续更新使用快速部署即可。
