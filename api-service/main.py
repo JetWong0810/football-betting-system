@@ -31,9 +31,9 @@ import httpx
 logger = logging.getLogger("football_betting_api")
 logging.basicConfig(level=logging.INFO)
 
-# OCR相关模块（延迟导入，避免启动时加载）
+# OCR相关模块
 try:
-    from ocr_service import recognize_image
+    from ocr_service import recognize_image, get_ocr_instance
     from bet_parser import parse_bet_image_result
     OCR_AVAILABLE = True
 except ImportError as e:
@@ -243,9 +243,11 @@ async def startup_event():
     不启动定时爬虫任务（数据同步由 mysql-backup 服务器负责）
     """
     init_db()
-    # 注释掉定时任务相关代码
-    # start_scheduler()
-    # run_sync_job()
+
+    # 后台线程预热 OCR 模型，避免首次请求阻塞
+    if OCR_AVAILABLE:
+        import threading
+        threading.Thread(target=get_ocr_instance, daemon=True).start()
 
 
 @app.on_event("shutdown")

@@ -66,10 +66,10 @@ def parse_with_llm(ocr_text: str) -> Dict[str, Any]:
         model=DEEPSEEK_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"请从以下OCR文本中提取投注信息：\n\n{ocr_text}"},
+            {"role": "user", "content": ocr_text},
         ],
-        temperature=0.1,
-        max_tokens=2048,
+        temperature=0,
+        max_tokens=512,
         response_format={"type": "json_object"},
     )
 

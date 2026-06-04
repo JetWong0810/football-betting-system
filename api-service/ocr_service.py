@@ -192,8 +192,8 @@ def recognize_image(
         else:
             raise ValueError(f"不支持的来源类型: {source_type}")
         
-        # 检查图片尺寸，如果太大则缩放（更积极的缩放策略以提升速度）
-        max_size = 1600  # 降低最大尺寸限制，加快处理速度
+        # 投注截图文字较大，不需要高分辨率
+        max_size = 1200
         if max(image.size) > max_size:
             ratio = max_size / max(image.size)
             new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
