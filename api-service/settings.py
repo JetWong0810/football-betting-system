@@ -11,10 +11,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # MySQL 数据库配置（默认仅使用 MySQL）
 MYSQL_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", "10.130.130.139"),
-    "port": int(os.getenv("MYSQL_PORT", "3321")),
+    "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
+    "port": int(os.getenv("MYSQL_PORT", "3306")),
     "user": os.getenv("MYSQL_USER", "root"),
-    "password": os.getenv("MYSQL_PASSWORD", "football_betting_2024"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": os.getenv("MYSQL_DATABASE", "football_betting"),
     "charset": "utf8mb4",
 }

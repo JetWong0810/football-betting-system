@@ -11,7 +11,7 @@ from fastapi import HTTPException, Header
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT配置
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

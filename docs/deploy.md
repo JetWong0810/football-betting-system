@@ -35,7 +35,7 @@ VPS (38.147.187.103) nginx :443 → proxy_pass 127.0.0.1:5002
 | 公网 | https://fc.jetwong.top |
 | 内网前端 | http://10.130.130.139:8088 |
 | 内网 API | http://10.130.130.139:7001/docs |
-| 数据库 | 10.130.130.139:3321 (root/football_betting_2024) |
+| 数据库 | 10.130.130.139:3321 (见 deploy/.env) |
 
 ## 一键部署
 
@@ -146,7 +146,7 @@ ssh mysql-backup "docker ps --filter 'name=football-'"  # 容器在运行？
 ### API 返回 500
 ```bash
 ssh mysql-backup "docker logs football-api --tail 30"
-ssh mysql-backup "docker exec football-mysql mysqladmin ping -u root -pfootball_betting_2024"
+ssh mysql-backup "docker exec football-mysql mysqladmin ping -u root -p\$MYSQL_ROOT_PASSWORD"
 ```
 
 ### 前端接口 404

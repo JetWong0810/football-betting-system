@@ -6,8 +6,8 @@ services:
     container_name: football-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: football_betting_2024
-      MYSQL_DATABASE: football_betting
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_unicode_ci
     ports:
@@ -17,7 +17,7 @@ services:
       - ./init-sql:/docker-entrypoint-initdb.d
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pfootball_betting_2024"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,10 +36,11 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
       MYSQL_USER: root
-      MYSQL_PASSWORD: football_betting_2024
-      MYSQL_DATABASE: football_betting
-      WECHAT_APPID: wx5b2bc2de132728b8
-      WECHAT_SECRET: c4370b66b44a8f7f5a70bfd548007a8a
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      WECHAT_APPID: ${WECHAT_APPID}
+      WECHAT_SECRET: ${WECHAT_SECRET}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
       mysql:
         condition: service_healthy
@@ -56,10 +57,10 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
       MYSQL_USER: root
-      MYSQL_PASSWORD: football_betting_2024
-      MYSQL_DATABASE: football_betting
-      SYNC_INTERVAL_SECONDS: "600"
-      HTTP_TIMEOUT: "20"
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-600}
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-20}
     depends_on:
       mysql:
         condition: service_healthy
