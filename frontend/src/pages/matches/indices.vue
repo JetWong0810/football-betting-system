@@ -676,13 +676,6 @@ async function loadIndices() {
 
 onLoad((query) => {
   matchId.value = query.matchId || "";
-  if (query.title) {
-    const parts = decodeURIComponent(query.title).split(" VS ");
-    if (parts.length === 2) {
-      matchInfo.value.homeTeam = parts[0];
-      matchInfo.value.awayTeam = parts[1];
-    }
-  }
   loadIndices();
 });
 
