@@ -1,15 +1,15 @@
 # 部署指南
 
-本项目所有服务通过 Docker 部署在内网服务器 (mysql-backup / 10.130.130.139)，通过 SSH 隧道经由外网 VPS 暴露到公网。
+本项目所有服务通过 Docker 部署在内网服务器 (ssh mysql-backup)，通过 SSH 隧道经由外网 VPS 暴露到公网。
 
 ## 架构
 
 ```
 用户浏览器 → https://fc.jetwong.top
        ↓
-VPS (38.147.187.103) nginx :443 → proxy_pass 127.0.0.1:5002
+VPS (gouyun) nginx :443 → proxy_pass 127.0.0.1:5002
        ↓ SSH 反向隧道 (autossh, systemd: football-tunnel)
-内网 (10.130.130.139) :8088 nginx (football-frontend 容器)
+内网 (mysql-backup) :8088 nginx (football-frontend 容器)
        ├── /         → 静态文件 (Vue H5)
        ├── /api/     → football-api:7001
        └── /static/  → football-api:7001
@@ -33,9 +33,9 @@ VPS (38.147.187.103) nginx :443 → proxy_pass 127.0.0.1:5002
 | 环境 | 地址 |
 |------|------|
 | 公网 | https://fc.jetwong.top |
-| 内网前端 | http://10.130.130.139:8088 |
-| 内网 API | http://10.130.130.139:7001/docs |
-| 数据库 | 10.130.130.139:3321 (见 deploy/.env) |
+| 内网前端 | http://mysql-backup:8088 |
+| 内网 API | http://mysql-backup:7001/docs |
+| 数据库 | mysql-backup:3321 (见 deploy/.env) |
 
 ## 一键部署
 
@@ -121,7 +121,7 @@ ssh gouyun "ss -tlnp | grep 5002"
 环境要求:
 - Python 3.9+
 - Node.js 14+
-- 能访问内网 10.130.130.139 (数据库)
+- 能访问内网 mysql-backup (数据库)
 
 ## 端口分配
 

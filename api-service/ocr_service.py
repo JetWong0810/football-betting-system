@@ -1,6 +1,6 @@
 """OCR图片识别服务模块
 
-使用PaddleOCR进行图片文字识别
+使用 RapidOCR (onnxruntime) 进行图片文字识别
 """
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
@@ -12,7 +12,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# 延迟导入PaddleOCR，避免启动时加载耗时
 _ocr_instance = None
 
 
@@ -21,28 +20,11 @@ def get_ocr_instance():
     global _ocr_instance
     if _ocr_instance is None:
         try:
-            from paddleocr import PaddleOCR
-            # PaddleOCR 3.x 极速配置（使用轻量级mobile模型）
-            # 关键优化：
-            # 1. 使用mobile模型而非server模型（速度提升 5-10x！）
-            # 2. 禁用所有不必要的检测步骤
-            # 3. 降低分辨率限制
-            _ocr_instance = PaddleOCR(
-                # 使用轻量级模型（最关键的优化！）
-                text_detection_model_name='PP-OCRv4_mobile_det',
-                text_recognition_model_name='PP-OCRv4_mobile_rec',
-                # 禁用不必要的功能
-                use_textline_orientation=False,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                # 性能优化参数
-                text_recognition_batch_size=8,
-                text_det_limit_side_len=800,  # 进一步降低
-                lang='ch'
-            )
-            logger.info("PaddleOCR初始化成功（已启用性能优化）")
+            from rapidocr_onnxruntime import RapidOCR
+            _ocr_instance = RapidOCR()
+            logger.info("RapidOCR初始化成功")
         except Exception as e:
-            logger.error(f"PaddleOCR初始化失败: {e}")
+            logger.error(f"RapidOCR初始化失败: {e}")
             raise RuntimeError(f"OCR引擎初始化失败: {e}")
     return _ocr_instance
 
@@ -128,27 +110,17 @@ def parse_file_image(file_bytes: bytes) -> Image.Image:
 
 def extract_text_from_image(
     image: Image.Image,
-    preprocess: bool = False,  # 默认关闭预处理以提升速度
+    preprocess: bool = False,
     fast_mode: bool = True
 ) -> Tuple[str, List[Dict[str, Any]], float]:
     """从图片中提取文字
-    
-    Args:
-        image: PIL Image对象
-        preprocess: 是否进行图片预处理
-        
+
     Returns:
         Tuple[全文本, OCR详细结果列表, 平均置信度]
-        OCR详细结果格式：[{
-            "text": "识别的文字",
-            "confidence": 0.95,
-            "box": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]  # 文字区域坐标
-        }]
     """
     try:
         ocr = get_ocr_instance()
-        
-        # 图片预处理
+
         if preprocess:
             img_array = preprocess_image(image, fast_mode=fast_mode)
         else:
@@ -156,86 +128,38 @@ def extract_text_from_image(
             if len(img_array.shape) == 3 and img_array.shape[2] == 4:
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
             img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
-        # 调用PaddleOCR识别（PaddleOCR 3.x 版本不支持 cls 参数）
-        result = ocr.ocr(img_array)
-        
-        logger.info(f"OCR原始结果类型: {type(result)}")
-        
-        # PaddleOCR 3.x 返回新格式：字典列表
+
+        # RapidOCR 返回格式: (result, elapse)
+        # result: [[box, text, score], ...] 或 None
+        result, elapse = ocr(img_array)
+
+        logger.info(f"OCR识别耗时: {elapse}")
+
         if not result:
             logger.warning("OCR未识别到任何文字")
             return "", [], 0.0
-        
-        # 解析OCR结果
+
         texts = []
         details = []
         confidences = []
-        
-        # 处理新版 PaddleOCR 3.x 的返回格式
-        if isinstance(result, list) and len(result) > 0:
-            first_item = result[0]
-            
-            # 新版本：返回字典格式
-            if isinstance(first_item, dict):
-                logger.info("检测到 PaddleOCR 3.x 新格式")
-                
-                # 提取识别结果
-                rec_texts = first_item.get('rec_texts', [])
-                rec_scores = first_item.get('rec_scores', [])
-                rec_polys = first_item.get('rec_polys', [])
-                
-                logger.info(f"识别到 {len(rec_texts)} 行文字")
-                
-                for i, text in enumerate(rec_texts):
-                    confidence = rec_scores[i] if i < len(rec_scores) else 0.9
-                    box = rec_polys[i].tolist() if i < len(rec_polys) else []
-                    
-                    texts.append(text)
-                    confidences.append(confidence)
-                    details.append({
-                        "text": text,
-                        "confidence": confidence,
-                        "box": box
-                    })
-            
-            # 旧版本：[box, (text, confidence)] 格式
-            elif isinstance(first_item, list):
-                logger.info("检测到 PaddleOCR 旧格式")
-                for line in result[0]:
-                    try:
-                        box = line[0]
-                        if isinstance(line[1], tuple) and len(line[1]) >= 2:
-                            text = line[1][0]
-                            confidence = line[1][1]
-                        elif isinstance(line[1], str):
-                            text = line[1]
-                            confidence = 0.9
-                        else:
-                            text = str(line[1])
-                            confidence = 0.9
-                        
-                        texts.append(text)
-                        confidences.append(confidence)
-                        details.append({
-                            "text": text,
-                            "confidence": confidence,
-                            "box": box
-                        })
-                    except (IndexError, TypeError) as e:
-                        logger.warning(f"解析 OCR 结果失败: {e}")
-                        continue
-        
-        # 合并所有文本，用空格分隔
+
+        for item in result:
+            box, text, score = item
+            texts.append(text)
+            confidences.append(score)
+            details.append({
+                "text": text,
+                "confidence": score,
+                "box": box
+            })
+
         full_text = " ".join(texts)
-        
-        # 计算平均置信度
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        
+
         logger.info(f"OCR识别成功，识别{len(texts)}行文字，平均置信度: {avg_confidence:.2f}")
-        
+
         return full_text, details, avg_confidence
-        
+
     except Exception as e:
         logger.error(f"OCR识别失败: {e}", exc_info=True)
         raise RuntimeError(f"OCR识别失败: {e}")

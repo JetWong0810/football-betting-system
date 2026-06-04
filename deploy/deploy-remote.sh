@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Football Betting System - Deploy to 10.130.130.139 (via ssh mysql-backup)
+# Football Betting System - Deploy to remote server (via ssh mysql-backup)
 # This script syncs files and starts services using docker-compose
 
 SSH_HOST="mysql-backup"
@@ -16,7 +16,7 @@ NC='\033[0m'
 
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}  Football Betting System - Remote Deploy${NC}"
-echo -e "${GREEN}  Target: 10.130.130.139 (ssh mysql-backup)${NC}"
+echo -e "${GREEN}  Target: ssh mysql-backup${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 
@@ -41,9 +41,8 @@ rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='.env' \
     "$LOCAL_PROJECT/api-service/" "$STAGING/api-service/"
 # Use deploy Dockerfile
 cp "$DEPLOY_DIR/api-service/Dockerfile" "$STAGING/api-service/Dockerfile"
-# Create stripped requirements (no OCR deps for lighter build)
-grep -v -E "^(paddleocr|paddlepaddle|opencv-python|Pillow)" \
-    "$LOCAL_PROJECT/api-service/requirements.txt" > "$STAGING/api-service/requirements.txt"
+# Copy requirements (RapidOCR is lightweight, no need to strip)
+cp "$LOCAL_PROJECT/api-service/requirements.txt" "$STAGING/api-service/requirements.txt"
 
 # Copy scraper-service source + Dockerfile + entrypoint
 mkdir -p "$STAGING/scraper-service"
@@ -98,10 +97,10 @@ echo -e "${GREEN}  Deployment Complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 echo -e "${YELLOW}Services:${NC}"
-echo -e "  MySQL:    10.130.130.139:3321"
-echo -e "  API:      http://10.130.130.139:7001"
-echo -e "  API Docs: http://10.130.130.139:7001/docs"
-echo -e "  Frontend: http://10.130.130.139:8088"
+echo -e "  MySQL:    \$SSH_HOST:3321"
+echo -e "  API:      http://\$SSH_HOST:7001"
+echo -e "  API Docs: http://\$SSH_HOST:7001/docs"
+echo -e "  Frontend: http://\$SSH_HOST:8088"
 echo ""
 echo -e "${YELLOW}Management:${NC}"
 echo -e "  ssh mysql-backup 'cd $REMOTE_DIR && docker-compose logs -f'"

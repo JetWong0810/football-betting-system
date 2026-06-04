@@ -20,10 +20,10 @@ def test_ocr_basic():
         from ocr_service import get_ocr_instance
         
         print("✓ OCR模块导入成功")
-        
+
         # 初始化OCR实例
         ocr = get_ocr_instance()
-        print("✓ PaddleOCR初始化成功")
+        print("✓ RapidOCR初始化成功")
         
         return True
     except Exception as e:

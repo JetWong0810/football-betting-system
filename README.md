@@ -7,7 +7,7 @@
 ```
 用户 → https://fc.jetwong.top
        ↓
-VPS nginx (38.147.187.103) → SSH 隧道 → 内网服务器 (10.130.130.139)
+VPS nginx → SSH 隧道 → 内网服务器 (mysql-backup)
        ↓
 ┌─────────────────────────────────────────────────────┐
 │  Docker Compose (football-net)                      │
