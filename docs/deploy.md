@@ -64,25 +64,25 @@ ssh mysql-backup "cd /opt/football-betting-system && docker-compose up -d --buil
 ## 从 GitHub 更新
 
 ```bash
-ssh mysql-backup "cd /opt/football-betting-system && git pull origin main && docker-compose up -d --build"
+ssh mysql-backup "cd /opt/football-betting-system && git pull origin main && cd deploy && docker-compose up -d --build"
 ```
 
 ## 服务管理
 
 ```bash
 # 状态
-ssh mysql-backup "cd /opt/football-betting-system && docker-compose ps"
+ssh mysql-backup "cd /opt/football-betting-system/deploy && docker-compose ps"
 
 # 日志
 ssh mysql-backup "docker logs football-api --tail 50"
 ssh mysql-backup "docker logs football-scraper --tail 20"
-ssh mysql-backup "cd /opt/football-betting-system && docker-compose logs -f"
+ssh mysql-backup "cd /opt/football-betting-system/deploy && docker-compose logs -f"
 
 # 重启
-ssh mysql-backup "cd /opt/football-betting-system && docker-compose restart"
+ssh mysql-backup "cd /opt/football-betting-system/deploy && docker-compose restart"
 
 # 停止
-ssh mysql-backup "cd /opt/football-betting-system && docker-compose down"
+ssh mysql-backup "cd /opt/football-betting-system/deploy && docker-compose down"
 ```
 
 ## SSH 隧道管理

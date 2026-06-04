@@ -2,12 +2,10 @@
 set -e
 
 # Football Betting System - Deploy to remote server (via ssh mysql-backup)
-# This script syncs files and starts services using docker-compose
+# Pulls latest code from GitHub and rebuilds Docker services
 
 SSH_HOST="mysql-backup"
 REMOTE_DIR="/opt/football-betting-system"
-LOCAL_PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,76 +14,48 @@ NC='\033[0m'
 
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}  Football Betting System - Remote Deploy${NC}"
-echo -e "${GREEN}  Target: ssh mysql-backup${NC}"
+echo -e "${GREEN}  Target: ssh $SSH_HOST${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 
-# Step 1: Prepare deploy directory with source code
-echo -e "${YELLOW}[1/5] Preparing deployment package...${NC}"
+# Step 1: Check if repo exists on remote, clone if not
+echo -e "${YELLOW}[1/4] Checking remote repository...${NC}"
 
-# Create temp staging area
-STAGING="/tmp/football-deploy-staging"
-rm -rf "$STAGING"
-mkdir -p "$STAGING"
+ssh "$SSH_HOST" "
+if [ -d $REMOTE_DIR/.git ]; then
+    echo 'Git repo exists, pulling latest...'
+    cd $REMOTE_DIR && git pull origin main
+else
+    echo 'Cloning repository...'
+    rm -rf $REMOTE_DIR
+    git clone https://github.com/JetWong0810/football-betting-system.git $REMOTE_DIR
+fi
+"
 
-# Copy docker-compose and configs
-cp "$DEPLOY_DIR/docker-compose.yml" "$STAGING/"
-cp -r "$DEPLOY_DIR/init-sql" "$STAGING/"
+echo -e "${GREEN}  ✓ Code updated${NC}"
 
-# Copy api-service source + Dockerfile
-mkdir -p "$STAGING/api-service"
-cp "$DEPLOY_DIR/api-service/Dockerfile" "$STAGING/api-service/"
-# Copy api source files (exclude venv, __pycache__, etc.)
-rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='.env' \
-    --exclude='data/' --exclude='static/uploads/' \
-    "$LOCAL_PROJECT/api-service/" "$STAGING/api-service/"
-# Use deploy Dockerfile
-cp "$DEPLOY_DIR/api-service/Dockerfile" "$STAGING/api-service/Dockerfile"
-# Copy requirements (RapidOCR is lightweight, no need to strip)
-cp "$LOCAL_PROJECT/api-service/requirements.txt" "$STAGING/api-service/requirements.txt"
+# Step 2: Ensure .env exists
+echo -e "${YELLOW}[2/4] Checking environment config...${NC}"
 
-# Copy scraper-service source + Dockerfile + entrypoint
-mkdir -p "$STAGING/scraper-service"
-rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='.env' --exclude='data/' \
-    "$LOCAL_PROJECT/scraper-service/" "$STAGING/scraper-service/"
-cp "$DEPLOY_DIR/scraper-service/Dockerfile" "$STAGING/scraper-service/Dockerfile"
-cp "$DEPLOY_DIR/scraper-service/entrypoint.py" "$STAGING/scraper-service/entrypoint.py"
+ssh "$SSH_HOST" "
+if [ ! -f $REMOTE_DIR/deploy/.env ]; then
+    echo 'ERROR: deploy/.env not found! Copy from .env.example and fill in values.'
+    exit 1
+fi
+echo '.env file exists'
+"
 
-# Copy frontend source + Dockerfile + nginx.conf
-mkdir -p "$STAGING/frontend"
-rsync -a --exclude='node_modules' --exclude='dist' --exclude='.env*' \
-    "$LOCAL_PROJECT/frontend/" "$STAGING/frontend/"
-cp "$DEPLOY_DIR/frontend/Dockerfile" "$STAGING/frontend/Dockerfile"
-cp "$DEPLOY_DIR/frontend/nginx.conf" "$STAGING/frontend/nginx.conf"
+echo -e "${GREEN}  ✓ Config verified${NC}"
 
-echo -e "${GREEN}  ✓ Package prepared${NC}"
+# Step 3: Build and start
+echo -e "${YELLOW}[3/4] Building and starting services...${NC}"
 
-# Step 2: Sync to remote
-echo -e "${YELLOW}[2/5] Syncing files to remote server...${NC}"
-
-ssh "$SSH_HOST" "mkdir -p $REMOTE_DIR"
-rsync -az --delete \
-    --exclude='mysql_data' \
-    "$STAGING/" "$SSH_HOST:$REMOTE_DIR/"
-
-echo -e "${GREEN}  ✓ Files synced${NC}"
-
-# Step 3: Stop existing containers (if any)
-echo -e "${YELLOW}[3/5] Stopping existing containers (if any)...${NC}"
-
-ssh "$SSH_HOST" "cd $REMOTE_DIR && docker-compose down 2>/dev/null || true"
-
-echo -e "${GREEN}  ✓ Old containers stopped${NC}"
-
-# Step 4: Build and start
-echo -e "${YELLOW}[4/5] Building and starting services...${NC}"
-
-ssh "$SSH_HOST" "cd $REMOTE_DIR && docker-compose up -d --build"
+ssh "$SSH_HOST" "cd $REMOTE_DIR/deploy && docker-compose up -d --build"
 
 echo -e "${GREEN}  ✓ Services started${NC}"
 
-# Step 5: Verify
-echo -e "${YELLOW}[5/5] Verifying services...${NC}"
+# Step 4: Verify
+echo -e "${YELLOW}[4/4] Verifying services...${NC}"
 
 sleep 10
 
@@ -97,16 +67,11 @@ echo -e "${GREEN}  Deployment Complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 echo -e "${YELLOW}Services:${NC}"
-echo -e "  MySQL:    \$SSH_HOST:3321"
-echo -e "  API:      http://\$SSH_HOST:7001"
-echo -e "  API Docs: http://\$SSH_HOST:7001/docs"
-echo -e "  Frontend: http://\$SSH_HOST:8088"
+echo -e "  Frontend: https://fc.jetwong.top"
+echo -e "  API Docs: https://fc.jetwong.top/api/docs"
 echo ""
 echo -e "${YELLOW}Management:${NC}"
-echo -e "  ssh mysql-backup 'cd $REMOTE_DIR && docker-compose logs -f'"
-echo -e "  ssh mysql-backup 'cd $REMOTE_DIR && docker-compose ps'"
-echo -e "  ssh mysql-backup 'cd $REMOTE_DIR && docker-compose restart'"
-echo -e "  ssh mysql-backup 'cd $REMOTE_DIR && docker-compose down'"
-
-# Cleanup staging
-rm -rf "$STAGING"
+echo -e "  ssh $SSH_HOST 'cd $REMOTE_DIR/deploy && docker-compose logs -f'"
+echo -e "  ssh $SSH_HOST 'cd $REMOTE_DIR/deploy && docker-compose ps'"
+echo -e "  ssh $SSH_HOST 'cd $REMOTE_DIR/deploy && docker-compose restart'"
+echo -e "  ssh $SSH_HOST 'cd $REMOTE_DIR/deploy && docker-compose down'"
