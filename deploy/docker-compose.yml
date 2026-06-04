@@ -26,8 +26,8 @@ services:
 
   api:
     build:
-      context: ./api-service
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deploy/api-service/Dockerfile
     container_name: football-api
     restart: always
     ports:
@@ -49,8 +49,8 @@ services:
 
   scraper:
     build:
-      context: ./scraper-service
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deploy/scraper-service/Dockerfile
     container_name: football-scraper
     restart: always
     environment:
@@ -69,8 +69,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deploy/frontend/Dockerfile
     container_name: football-frontend
     restart: always
     ports:
