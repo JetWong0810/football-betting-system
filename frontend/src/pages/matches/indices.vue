@@ -1642,12 +1642,12 @@ function setAwayMatchCount(count) {
 .modal-body {
   flex: 1;
   max-height: 60vh;
-  padding: 0 24rpx 24rpx;
+  padding: 0 32rpx 24rpx;
 }
 
 .history-header {
   display: flex;
-  padding: 16rpx 0;
+  padding: 16rpx 8rpx 16rpx 0;
   border-bottom: 1px solid #e5e7eb;
   position: sticky;
   top: 0;
@@ -1661,7 +1661,7 @@ function setAwayMatchCount(count) {
 
 .history-row {
   display: flex;
-  padding: 14rpx 0;
+  padding: 14rpx 8rpx 14rpx 0;
   border-bottom: 1px solid #f3f4f6;
   text {
     font-size: 24rpx;
