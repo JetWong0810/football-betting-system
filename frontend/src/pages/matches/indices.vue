@@ -119,31 +119,6 @@
                 </view>
               </view>
             </view>
-            <!-- 欧赔变动历史 -->
-            <view v-if="expandedHistory[`euro_${index}`]" class="history-panel">
-              <view v-if="historyLoading[`euro_${index}`]" class="history-loading">
-                <text>加载中...</text>
-              </view>
-              <view v-else-if="historyData[`euro_${index}`]?.length" class="history-list">
-                <view class="history-header">
-                  <text class="h-col-time">时间</text>
-                  <text class="h-col">主胜</text>
-                  <text class="h-col">平局</text>
-                  <text class="h-col">客胜</text>
-                  <text class="h-col">返还</text>
-                </view>
-                <view v-for="(h, hi) in historyData[`euro_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
-                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
-                  <text class="h-col">{{ formatNumber(h.win) }}</text>
-                  <text class="h-col">{{ formatNumber(h.draw) }}</text>
-                  <text class="h-col">{{ formatNumber(h.lose) }}</text>
-                  <text class="h-col">{{ h.returnRate }}%</text>
-                </view>
-              </view>
-              <view v-else class="history-empty">
-                <text>暂无变动记录</text>
-              </view>
-            </view>
           </template>
         </view>
       </view>
@@ -210,29 +185,6 @@
                     </text>
                   </view>
                 </view>
-              </view>
-            </view>
-            <!-- 亚盘变动历史 -->
-            <view v-if="expandedHistory[`asian_${index}`]" class="history-panel">
-              <view v-if="historyLoading[`asian_${index}`]" class="history-loading">
-                <text>加载中...</text>
-              </view>
-              <view v-else-if="historyData[`asian_${index}`]?.length" class="history-list">
-                <view class="history-header">
-                  <text class="h-col-time">时间</text>
-                  <text class="h-col">主队</text>
-                  <text class="h-col">盘口</text>
-                  <text class="h-col">客队</text>
-                </view>
-                <view v-for="(h, hi) in historyData[`asian_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
-                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
-                  <text class="h-col">{{ formatNumber(h.home) }}</text>
-                  <text class="h-col">{{ h.handicapText || formatNumber(h.handicap) }}</text>
-                  <text class="h-col">{{ formatNumber(h.away) }}</text>
-                </view>
-              </view>
-              <view v-else class="history-empty">
-                <text>暂无变动记录</text>
               </view>
             </view>
           </template>
@@ -305,29 +257,6 @@
                     </text>
                   </view>
                 </view>
-              </view>
-            </view>
-            <!-- 大小球变动历史 -->
-            <view v-if="expandedHistory[`ou_${index}`]" class="history-panel">
-              <view v-if="historyLoading[`ou_${index}`]" class="history-loading">
-                <text>加载中...</text>
-              </view>
-              <view v-else-if="historyData[`ou_${index}`]?.length" class="history-list">
-                <view class="history-header">
-                  <text class="h-col-time">时间</text>
-                  <text class="h-col">大球</text>
-                  <text class="h-col">盘口</text>
-                  <text class="h-col">小球</text>
-                </view>
-                <view v-for="(h, hi) in historyData[`ou_${index}`]" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
-                  <text class="h-col-time">{{ formatTime(h.time) }}</text>
-                  <text class="h-col">{{ formatNumber(h.over) }}</text>
-                  <text class="h-col">{{ formatNumber(h.line) }}</text>
-                  <text class="h-col">{{ formatNumber(h.under) }}</text>
-                </view>
-              </view>
-              <view v-else class="history-empty">
-                <text>暂无变动记录</text>
               </view>
             </view>
           </template>
@@ -651,6 +580,32 @@
         </view>
       </view>
     </scroll-view>
+
+    <!-- 赔率变动弹窗 -->
+    <view v-if="historyModal.show" class="modal-mask" @tap="closeHistoryModal">
+      <view class="modal-content" @tap.stop>
+        <view class="modal-header">
+          <text class="modal-title">{{ historyModal.companyName }} 赔率变动</text>
+          <text class="modal-close" @tap="closeHistoryModal">✕</text>
+        </view>
+        <view v-if="historyModal.loading" class="modal-loading">
+          <text>加载中...</text>
+        </view>
+        <scroll-view v-else-if="historyModal.data?.length" scroll-y class="modal-body">
+          <view class="history-header">
+            <text class="h-col-time">时间</text>
+            <text class="h-col" v-for="col in historyModal.columns" :key="col">{{ col }}</text>
+          </view>
+          <view v-for="(h, hi) in historyModal.data" :key="hi" class="history-row" :class="{ 'h-row-alt': hi % 2 === 0 }">
+            <text class="h-col-time">{{ formatTime(h.time) }}</text>
+            <text class="h-col" v-for="(col, ci) in historyModal.fields" :key="ci">{{ formatHistoryValue(h, col) }}</text>
+          </view>
+        </scroll-view>
+        <view v-else class="modal-empty">
+          <text>暂无变动记录</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -757,41 +712,70 @@ onLoad((query) => {
   loadIndices();
 });
 
-// 赔率变动历史
+// 赔率变动弹窗
 const expandedHistory = reactive({});
-const historyData = reactive({});
-const historyLoading = reactive({});
+const historyModal = reactive({
+  show: false,
+  loading: false,
+  companyName: "",
+  type: "",
+  columns: [],
+  fields: [],
+  data: [],
+});
+
+const HISTORY_CONFIG = {
+  european: { columns: ["主胜", "平局", "客胜", "返还"], fields: ["win", "draw", "lose", "returnRate"] },
+  asian: { columns: ["主队", "盘口", "客队"], fields: ["home", "handicapText", "away"] },
+  overunder: { columns: ["大球", "盘口", "小球"], fields: ["over", "line", "under"] },
+};
 
 async function toggleHistory(type, cid, index) {
   const keyMap = { european: "euro", asian: "asian", overunder: "ou" };
   const key = `${keyMap[type]}_${index}`;
+  expandedHistory[key] = !expandedHistory[key];
 
-  if (expandedHistory[key]) {
-    expandedHistory[key] = false;
-    return;
-  }
+  // Find company name
+  const lists = { european: europeanOdds, asian: asianOdds, overunder: overUnderOdds };
+  const item = lists[type]?.value?.[index];
+  const config = HISTORY_CONFIG[type];
 
-  expandedHistory[key] = true;
+  historyModal.show = true;
+  historyModal.loading = true;
+  historyModal.companyName = item?.bookmaker || "";
+  historyModal.type = type;
+  historyModal.columns = config.columns;
+  historyModal.fields = config.fields;
+  historyModal.data = [];
 
-  if (historyData[key]) return;
-
-  historyLoading[key] = true;
   try {
     const res = await request({
       url: `/api/odds/history?fid=${fid.value}&cid=${cid}&type=${type}`,
     });
-    historyData[key] = res.history || [];
+    historyModal.data = res.history || [];
   } catch (e) {
-    historyData[key] = [];
+    historyModal.data = [];
     console.error("加载变动历史失败:", e);
   } finally {
-    historyLoading[key] = false;
+    historyModal.loading = false;
   }
+}
+
+function closeHistoryModal() {
+  historyModal.show = false;
+}
+
+function formatHistoryValue(h, field) {
+  const val = h[field];
+  if (val === null || val === undefined) return "-";
+  if (field === "returnRate") return val + "%";
+  if (field === "handicapText") return val || formatNumber(h.handicap);
+  if (typeof val === "number") return formatNumber(val);
+  return val;
 }
 
 function formatTime(time) {
   if (!time) return "";
-  // "2026-06-04 17:15:39" -> "06-04 17:15" or "06-04 16:56" -> as-is
   if (time.length > 16) return time.slice(5, 16);
   return time;
 }
@@ -1590,11 +1574,12 @@ function setAwayMatchCount(count) {
 
 // 展开箭头
 .expand-arrow {
-  font-size: 18rpx;
+  font-size: 16rpx;
   color: #9ca3af;
-  margin-left: 4rpx;
+  margin-left: auto;
+  padding-left: 4rpx;
+  flex-shrink: 0;
   transition: transform 0.2s;
-  display: inline-block;
 
   &.expanded {
     transform: rotate(90deg);
@@ -1602,37 +1587,73 @@ function setAwayMatchCount(count) {
   }
 }
 
-// 变动历史面板
-.history-panel {
-  background: #f9fafb;
-  margin: 0 24rpx 8rpx;
-  padding: 12rpx 16rpx;
-  border-radius: 0 0 8rpx 8rpx;
-  border: 1px solid #e5e7eb;
-  border-top: none;
+// 赔率变动弹窗
+.modal-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-end;
+  z-index: 999;
 }
 
-.history-loading,
-.history-empty {
+.modal-content {
+  width: 100%;
+  max-height: 70vh;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 32rpx;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-title {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #111827;
+}
+
+.modal-close {
+  font-size: 36rpx;
+  color: #9ca3af;
+  padding: 8rpx;
+}
+
+.modal-loading,
+.modal-empty {
   text-align: center;
-  padding: 16rpx;
+  padding: 60rpx;
   text {
-    font-size: 24rpx;
+    font-size: 28rpx;
     color: #9ca3af;
   }
 }
 
-.history-list {
-  max-height: 500rpx;
-  overflow-y: auto;
+.modal-body {
+  flex: 1;
+  max-height: 60vh;
+  padding: 0 24rpx 24rpx;
 }
 
 .history-header {
   display: flex;
-  padding: 8rpx 0;
+  padding: 16rpx 0;
   border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
   text {
-    font-size: 22rpx;
+    font-size: 24rpx;
     color: #6b7280;
     font-weight: 500;
   }
@@ -1640,20 +1661,20 @@ function setAwayMatchCount(count) {
 
 .history-row {
   display: flex;
-  padding: 8rpx 0;
+  padding: 14rpx 0;
   border-bottom: 1px solid #f3f4f6;
   text {
-    font-size: 22rpx;
+    font-size: 24rpx;
     color: #374151;
   }
 
   &.h-row-alt {
-    background: #f3f4f6;
+    background: #f9fafb;
   }
 }
 
 .h-col-time {
-  flex: 2;
+  flex: 2.5;
   min-width: 0;
 }
 
@@ -1716,9 +1737,9 @@ function setAwayMatchCount(count) {
 }
 
 .header-company {
-  width: 100rpx;
+  width: 130rpx;
   flex-shrink: 0;
-  padding: 10rpx 16rpx;
+  padding: 10rpx 8rpx;
   display: flex;
   align-items: center;
 }
@@ -1726,7 +1747,7 @@ function setAwayMatchCount(count) {
 .header-data {
   flex: 1;
   display: flex;
-  padding: 10rpx 16rpx 10rpx 0;
+  padding: 10rpx 8rpx 10rpx 0;
   align-items: center;
 
   &.asian-header {
@@ -1757,18 +1778,22 @@ function setAwayMatchCount(count) {
 
 // 公司名称单元格（垂直居中两行）
 .company-cell {
-  width: 100rpx;
+  width: 130rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 16rpx;
+  padding: 0 8rpx;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .company-name {
   font-size: 22rpx;
   color: #111827;
   font-weight: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // 数据行容器
@@ -1781,7 +1806,7 @@ function setAwayMatchCount(count) {
 // 单行数据（初盘或即时）
 .table-row {
   display: flex;
-  padding: 6rpx 16rpx 6rpx 0;
+  padding: 6rpx 8rpx 6rpx 0;
   align-items: center;
   min-height: 36rpx;
 }
@@ -1941,17 +1966,21 @@ function setAwayMatchCount(count) {
 
 // 公司名称单元格
 .company-cell-ou {
-  width: 100rpx;
+  width: 130rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 16rpx;
+  padding: 0 8rpx;
+  white-space: nowrap;
+  overflow: hidden;
 
   .company-name {
     font-size: 22rpx;
     color: #111827;
     font-weight: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
