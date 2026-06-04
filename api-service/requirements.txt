@@ -14,3 +14,5 @@ opencv-python>=4.8.1
 Pillow>=10.1.0
 # LLM parsing
 openai>=1.0.0
+# 500.com odds scraping
+beautifulsoup4>=4.12.0

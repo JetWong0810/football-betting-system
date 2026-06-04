@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from database import init_db, fetch_sync_status
 from repository import OddsRepository
 from user_repository import UserRepository
+from odds500_service import get_fid_for_match, fetch_all_indices
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
 import httpx
@@ -387,6 +388,35 @@ def get_match_plays(match_id: str):
         "hafu": repo.get_hafu(match_id),
     }
     return {"match": format_match(match), "plays": plays}
+
+
+@app.get("/api/matches/{match_id}/indices")
+def get_match_indices(match_id: str):
+    """获取比赛指数数据(欧赔/亚盘/大小球) - 实时从500.com抓取"""
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+
+    match_code = match.get("match_code")
+    if not match_code:
+        raise HTTPException(status_code=400, detail="比赛缺少编号信息")
+
+    # 售卖日期从期号解析 (260604201 -> 2026-06-04)
+    from repository import derive_sale_date
+    sale_date = derive_sale_date(match) or match.get("match_date")
+    if not sale_date:
+        raise HTTPException(status_code=400, detail="比赛缺少日期信息")
+
+    fid = get_fid_for_match(sale_date, match_code)
+    if not fid:
+        raise HTTPException(status_code=404, detail="未找到500.com对应比赛")
+
+    indices = fetch_all_indices(fid)
+    return {
+        "match": format_match(match),
+        "fid": fid,
+        "indices": indices,
+    }
 
 
 # ==================== 用户相关API ====================

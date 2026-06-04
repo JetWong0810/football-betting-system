@@ -34,8 +34,19 @@
 
     <!-- 内容区域 -->
     <scroll-view scroll-y class="content-area">
+      <!-- 加载/错误状态 -->
+      <view v-if="loading" class="loading-state">
+        <text class="loading-text">加载中...</text>
+      </view>
+      <view v-else-if="errorMsg" class="error-state">
+        <text class="error-text">{{ errorMsg }}</text>
+        <view class="retry-btn" @tap="loadIndices">
+          <text>重试</text>
+        </view>
+      </view>
+
       <!-- 指数 - 欧指 -->
-      <view v-if="activePrimaryTab === 'indices' && activeSecondaryTab === 'european'" class="content-section">
+      <view v-if="!loading && activePrimaryTab === 'indices' && activeSecondaryTab === 'european'" class="content-section">
         <view class="compact-table">
           <view class="table-header">
             <view class="header-company">公司</view>
@@ -112,7 +123,7 @@
       </view>
 
       <!-- 指数 - 亚指 -->
-      <view v-if="activePrimaryTab === 'indices' && activeSecondaryTab === 'asian'" class="content-section">
+      <view v-if="!loading && activePrimaryTab === 'indices' && activeSecondaryTab === 'asian'" class="content-section">
         <view class="compact-table">
           <view class="table-header">
             <view class="header-company">公司</view>
@@ -179,7 +190,7 @@
       </view>
 
       <!-- 指数 - 大小 -->
-      <view v-if="activePrimaryTab === 'indices' && activeSecondaryTab === 'overunder'" class="content-section">
+      <view v-if="!loading && activePrimaryTab === 'indices' && activeSecondaryTab === 'overunder'" class="content-section">
         <view class="compact-table-ou">
           <!-- 表头 -->
           <view class="table-header-ou">
@@ -569,18 +580,24 @@
 
 <script setup>
 import { ref, computed, reactive } from "vue";
+import { onLoad } from "@dcloudio/uni-app";
 import dayjs from "dayjs";
+import { request } from "@/utils/http";
 
 // 比赛信息
 const matchInfo = ref({
-  homeTeam: "曼联",
-  awayTeam: "利物浦",
-  league: "英超",
-  date: "2024-03-17",
-  time: "20:00",
-  status: "未开赛",
+  homeTeam: "",
+  awayTeam: "",
+  league: "",
+  date: "",
+  time: "",
+  status: "",
   statusClass: "pending",
 });
+
+const loading = ref(false);
+const errorMsg = ref("");
+const matchId = ref("");
 
 const lastUpdateTime = computed(() => {
   return dayjs().format("YYYY-MM-DD HH:mm:ss");
@@ -619,127 +636,55 @@ const statistics = ref({
   overunder: { up: 7, neutral: 3, down: 5 },
 });
 
-// 欧洲指数数据（模拟）
-const europeanOdds = ref([
-  {
-    bookmaker: "最大值",
-    initial: { win: 2.14, draw: 3.75, lose: 3.25 },
-    current: { win: 2.26, draw: 3.5, lose: 3.55 },
-    returnRate: 94.78,
-  },
-  {
-    bookmaker: "最小值",
-    initial: { win: 1.96, draw: 3.25, lose: 2.82 },
-    current: { win: 1.99, draw: 3.1, lose: 2.82 },
-    returnRate: 86.92,
-  },
-  {
-    bookmaker: "平均值",
-    initial: { win: 2.07, draw: 3.49, lose: 3.05 },
-    current: { win: 2.17, draw: 3.29, lose: 3.12 },
-    returnRate: 91.96,
-  },
-  {
-    bookmaker: "365*",
-    initial: { win: 2.05, draw: 3.6, lose: 3.05 },
-    current: { win: 2.1, draw: 3.25, lose: 3.4 },
-    returnRate: 92.76,
-  },
-  {
-    bookmaker: "威廉**",
-    initial: { win: 2.1, draw: 3.25, lose: 3.0 },
-    current: { win: 2.15, draw: 3.1, lose: 2.9 },
-    returnRate: 88.3,
-  },
-  {
-    bookmaker: "立*",
-    initial: { win: 2.05, draw: 3.4, lose: 2.9 },
-    current: { win: 2.15, draw: 3.2, lose: 3.0 },
-    returnRate: 90.01,
-  },
-  {
-    bookmaker: "皇*",
-    initial: { win: 2.13, draw: 3.55, lose: 3.05 },
-    current: { win: 2.19, draw: 3.35, lose: 3.05 },
-    returnRate: 92.34,
-  },
-  {
-    bookmaker: "香*",
-    initial: { win: 1.99, draw: 3.35, lose: 3.0 },
-    current: { win: 1.99, draw: 3.3, lose: 3.05 },
-    returnRate: 88.23,
-  },
-  {
-    bookmaker: "韦*",
-    initial: { win: 2.1, draw: 3.5, lose: 3.1 },
-    current: { win: 2.15, draw: 3.4, lose: 3.2 },
-    returnRate: 93.31,
-  },
-  {
-    bookmaker: "澳*",
-    initial: { win: 2.0, draw: 3.38, lose: 2.82 },
-    current: { win: 2.0, draw: 3.38, lose: 2.82 },
-    returnRate: 86.92,
-  },
-]);
+// 指数数据 (从API加载)
+const europeanOdds = ref([]);
+const asianOdds = ref([]);
+const overUnderOdds = ref([]);
 
-// 亚洲盘口数据（模拟）
-const asianOdds = ref([
-  {
-    bookmaker: "365*",
-    initial: { home: 0.95, handicap: -0.5, away: 0.9 },
-    current: { home: 0.98, handicap: -0.5, away: 0.87 },
-  },
-  {
-    bookmaker: "皇冠*",
-    initial: { home: 0.93, handicap: -0.5, away: 0.92 },
-    current: { home: 0.93, handicap: -0.25, away: 0.92 },
-  },
-  {
-    bookmaker: "明陞*",
-    initial: { home: 0.91, handicap: -0.5, away: 0.94 },
-    current: { home: 0.89, handicap: -0.5, away: 0.96 },
-  },
-  {
-    bookmaker: "12bet*",
-    initial: { home: 0.92, handicap: -0.5, away: 0.93 },
-    current: { home: 0.95, handicap: -0.5, away: 0.9 },
-  },
-  {
-    bookmaker: "立博*",
-    initial: { home: 0.9, handicap: -0.5, away: 0.95 },
-    current: { home: 0.93, handicap: -0.5, away: 0.92 },
-  },
-]);
+// 加载指数数据
+async function loadIndices() {
+  if (!matchId.value) return;
+  loading.value = true;
+  errorMsg.value = "";
+  try {
+    const res = await request({ url: `/api/matches/${matchId.value}/indices` });
+    const indices = res.indices || {};
 
-// 大小球数据（模拟）
-const overUnderOdds = ref([
-  {
-    bookmaker: "365*",
-    initial: { over: 1.83, line: 2.5, under: 2.03 },
-    current: { over: 1.9, line: 2.5, under: 1.95 },
-  },
-  {
-    bookmaker: "威廉*",
-    initial: { over: 1.78, line: 2.5, under: 2.07 },
-    current: { over: 1.85, line: 2.5, under: 2.0 },
-  },
-  {
-    bookmaker: "立博*",
-    initial: { over: 1.8, line: 2.5, under: 2.05 },
-    current: { over: 1.88, line: 2.5, under: 1.97 },
-  },
-  {
-    bookmaker: "皇冠*",
-    initial: { over: 1.85, line: 2.5, under: 2.0 },
-    current: { over: 1.92, line: 2.5, under: 1.93 },
-  },
-  {
-    bookmaker: "明陞*",
-    initial: { over: 1.81, line: 2.5, under: 2.04 },
-    current: { over: 1.89, line: 2.5, under: 1.96 },
-  },
-]);
+    europeanOdds.value = indices.european || [];
+    asianOdds.value = indices.asian || [];
+    overUnderOdds.value = indices.overUnder || [];
+
+    // 更新比赛信息
+    if (res.match) {
+      matchInfo.value = {
+        homeTeam: res.match.homeTeam?.name || "",
+        awayTeam: res.match.awayTeam?.name || "",
+        league: res.match.league || "",
+        date: res.match.matchDate || "",
+        time: res.match.matchTime || "",
+        status: res.match.status || "未开赛",
+        statusClass: "pending",
+      };
+    }
+  } catch (e) {
+    errorMsg.value = e.message || "加载失败";
+    console.error("加载指数数据失败:", e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+onLoad((query) => {
+  matchId.value = query.matchId || "";
+  if (query.title) {
+    const parts = decodeURIComponent(query.title).split(" VS ");
+    if (parts.length === 2) {
+      matchInfo.value.homeTeam = parts[0];
+      matchInfo.value.awayTeam = parts[1];
+    }
+  }
+  loadIndices();
+});
 
 // 展开/收起状态
 const expandedSections = reactive({
@@ -1499,6 +1444,37 @@ function setAwayMatchCount(count) {
       color: #ffffff;
       font-weight: normal;
     }
+  }
+}
+
+// 加载/错误状态
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80rpx 40rpx;
+}
+
+.loading-text {
+  font-size: 28rpx;
+  color: #6b7280;
+}
+
+.error-text {
+  font-size: 28rpx;
+  color: #ef4444;
+  margin-bottom: 20rpx;
+}
+
+.retry-btn {
+  padding: 12rpx 32rpx;
+  background: #0d9488;
+  border-radius: 8rpx;
+  text {
+    color: #fff;
+    font-size: 26rpx;
   }
 }
 
