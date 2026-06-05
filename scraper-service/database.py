@@ -25,10 +25,41 @@ def _init_mysql_db() -> None:
                 for command in sql_commands:
                     command = command.strip()
                     if command:
-                        cursor.execute(command)
+                        try:
+                            cursor.execute(command)
+                        except Exception as e:
+                            if "already exists" not in str(e).lower() and "duplicate" not in str(e).lower():
+                                print(f"警告: 执行 SQL 失败: {command[:50]}... {e}")
+            # 为旧库补充比分/fid字段
+            _ensure_match_columns(cursor)
         conn.commit()
     finally:
         conn.close()
+
+
+def _ensure_match_columns(cursor) -> None:
+    """确保 matches 表有 home_score/away_score/fid_500 字段（兼容旧库）"""
+    columns = {
+        "home_score": "TINYINT DEFAULT NULL COMMENT '主队比分'",
+        "away_score": "TINYINT DEFAULT NULL COMMENT '客队比分'",
+        "fid_500": "VARCHAR(20) DEFAULT NULL COMMENT '500.com fixture id'",
+    }
+    for col, definition in columns.items():
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='matches' AND COLUMN_NAME=%s
+            """,
+            (col,),
+        )
+        exists = cursor.fetchone()
+        count = exists[0] if isinstance(exists, (tuple, list)) else (exists.get("COUNT(*)") if isinstance(exists, dict) else 0)
+        if not count:
+            try:
+                cursor.execute(f"ALTER TABLE matches ADD COLUMN {col} {definition}")
+            except Exception as e:
+                if "duplicate" not in str(e).lower():
+                    print(f"警告: 添加字段 {col} 失败: {e}")
 
 
 def _connect():

@@ -24,6 +24,7 @@ from database import init_db, fetch_sync_status
 from repository import OddsRepository
 from user_repository import UserRepository
 from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history, fetch_match_data
+from predict_service import predict_match
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
 import httpx
@@ -228,6 +229,8 @@ def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
             "name": row.get("away_team_name"),
             "rank": row.get("away_team_rank"),
         },
+        "homeScore": row.get("home_score"),
+        "awayScore": row.get("away_score"),
         "isSingle": bool(row.get("is_single")),
         "isLatestIssue": bool(row.get("is_latest_issue")),
         "status": row.get("match_status"),
@@ -1050,3 +1053,203 @@ def ocr_status():
         "available": OCR_AVAILABLE,
         "message": "OCR服务正常" if OCR_AVAILABLE else "OCR服务不可用"
     }
+
+
+# ==================== 预测相关API ====================
+
+class PredictRequest(BaseModel):
+    market_heat: Optional[str] = Field(default=None, description="用户手动输入的市场热度描述")
+
+
+@app.get("/api/predict/matches")
+def list_predict_matches(
+    status: str = Query(default="not_started", description="not_started 或 finished"),
+    date: Optional[str] = Query(default=None, description="按日期过滤 YYYY-MM-DD"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=50),
+):
+    """获取预测页可选赛事列表（包含未开始和已结束）"""
+    import time as _time
+    offset = (page - 1) * page_size
+    now_ts = int(_time.time())
+
+    where = []
+    params: List = []
+
+    if status == "finished":
+        # 已开赛的比赛（通过 match_timestamp 判断）
+        where.append("match_timestamp IS NOT NULL AND match_timestamp < %s")
+        params.append(now_ts)
+    else:
+        # 未开赛：match_timestamp 在未来
+        where.append("(match_timestamp IS NULL OR match_timestamp >= %s)")
+        params.append(now_ts)
+
+    if date:
+        where.append("match_date = %s")
+        params.append(date)
+
+    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+    order = "ORDER BY match_date DESC, match_time DESC" if status == "finished" else "ORDER BY match_date ASC, match_time ASC"
+
+    from database import get_db
+    with get_db() as conn:
+        count_sql = f"SELECT COUNT(*) as cnt FROM matches {where_clause}"
+        cur = conn.cursor()
+        cur.execute(count_sql, params)
+        total = cur.fetchone()["cnt"]
+
+        sql = f"SELECT * FROM matches {where_clause} {order} LIMIT %s OFFSET %s"
+        cur.execute(sql, (*params, page_size, offset))
+        rows = cur.fetchall()
+
+    items = []
+    match_ids = [row["match_id"] for row in rows]
+    odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
+
+    for row in rows:
+        item = format_match(row)
+        wdl = odds_map.get(row["match_id"], {})
+        item["wdl"] = wdl
+        ts = row.get("match_timestamp")
+        item["matchStatus"] = "finished" if (ts and ts < now_ts) else "not_started"
+        # 让球信息从让球胜平负赔率中获取
+        if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
+            item["handicap"] = float(wdl["hhad"]["handicap"])
+        items.append(item)
+
+    return {"items": items, "total": total, "page": page, "pageSize": page_size}
+
+
+@app.post("/api/predict/{match_id}")
+def predict_match_direction(match_id: str, req: PredictRequest = None):
+    """对指定比赛进行亚盘方向预测"""
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+
+    # 判断是否单关：赔率表中任意玩法有 is_single=1 即为单关
+    is_single = bool(match.get("is_single"))
+    if not is_single:
+        from database import get_db as _get_db
+        with _get_db() as _conn:
+            _cur = _conn.cursor()
+            _cur.execute("SELECT MAX(is_single) as s FROM odds_win_draw_lose WHERE match_id=%s", (match_id,))
+            row = _cur.fetchone()
+            if row and row["s"]:
+                is_single = True
+
+    # 构建比赛信息
+    match_info = {
+        "league": match.get("league_name"),
+        "home_team": match.get("home_team_name"),
+        "away_team": match.get("away_team_name"),
+        "home_rank": match.get("home_team_rank"),
+        "away_rank": match.get("away_team_rank"),
+        "match_date": match.get("match_date"),
+        "is_single": is_single,
+    }
+
+    # 获取让球盘口
+    odds_data = repo.get_wdl_odds(match_id)
+    if odds_data and odds_data.get("hhad"):
+        handicap_val = odds_data["hhad"].get("handicap")
+        if handicap_val is not None:
+            match_info["handicap"] = float(handicap_val)
+
+    # 如果用户提供了市场热度描述
+    if req and req.market_heat:
+        match_info["market_heat_desc"] = req.market_heat
+
+    # 获取500.com的fid，用于拉取基本面和亚盘数据
+    match_data = None
+    asian_data = None
+    fid = None
+
+    # 优先使用数据库已存储的 fid_500
+    stored_fid = match.get("fid_500")
+    if stored_fid:
+        fid = str(stored_fid)
+    else:
+        match_code = match.get("match_code")
+        if match_code:
+            from repository import derive_sale_date
+            sale_date = derive_sale_date(match) or match.get("match_date")
+            if sale_date:
+                fid = get_fid_for_match(sale_date, match_code)
+                # 缓存 fid 到数据库，避免重复请求
+                if fid:
+                    try:
+                        from database import get_db as _get_db2
+                        with _get_db2() as _conn2:
+                            _conn2.cursor().execute(
+                                "UPDATE matches SET fid_500 = %s WHERE match_id = %s",
+                                (fid, match_id))
+                    except Exception:
+                        pass
+
+    if fid:
+        try:
+            match_data = fetch_match_data(fid)
+        except Exception as e:
+            logger.warning(f"获取基本面数据失败: {e}")
+        try:
+            from odds500_service import fetch_asian_handicap
+            asian_data = fetch_asian_handicap(fid)
+        except Exception as e:
+            logger.warning(f"获取亚盘数据失败: {e}")
+
+    # 优先使用500.com亚盘的真实盘口值（比竞彩hhad的整数盘口更精确）
+    # 500.com: 正值=主队让球, 负值=客队让球(受让)
+    # 系统内统一: 负值=主队让球(与竞彩hhad一致)
+    # 取多家主流公司初盘的中位数作为基准盘口
+    if asian_data:
+        mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
+        init_handicaps = []
+        for c in asian_data:
+            if c.get("bookmaker") in mainstream:
+                h = c.get("initial", {}).get("handicap")
+                if h is not None:
+                    init_handicaps.append(float(h))
+        if init_handicaps:
+            init_handicaps.sort()
+            mid = len(init_handicaps) // 2
+            median_hcap = init_handicaps[mid]
+            match_info["handicap"] = -median_hcap
+
+    # 比分回填：已结束但DB无比分时，从500.com竞彩列表页抓取并落库
+    import time as _t
+    ts = match.get("match_timestamp")
+    is_finished = ts and ts < int(_t.time())
+    if is_finished and match.get("home_score") is None:
+        try:
+            from repository import derive_sale_date
+            from odds500_service import fetch_match_score
+            sale_date = derive_sale_date(match) or match.get("match_date")
+            mcode = match.get("match_code")
+            if sale_date and mcode:
+                score = fetch_match_score(sale_date, mcode)
+                if score:
+                    match["home_score"], match["away_score"] = score[0], score[1]
+                    from database import get_db as _get_db3
+                    with _get_db3() as _conn3:
+                        _conn3.cursor().execute(
+                            "UPDATE matches SET home_score=%s, away_score=%s, match_status='finished' "
+                            "WHERE match_id=%s", (score[0], score[1], match_id))
+        except Exception as e:
+            logger.warning(f"比分回填失败: {e}")
+
+    try:
+        result = predict_match(match_info, match_data=match_data, asian_data=asian_data)
+        match_formatted = format_match(match)
+        # 返回实际使用的亚盘盘口值
+        if match_info.get("handicap") is not None:
+            match_formatted["handicap"] = match_info["handicap"]
+        return {
+            "match": match_formatted,
+            "factors": result["factors"],
+            "prediction": result["prediction"],
+        }
+    except Exception as e:
+        logger.error(f"预测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"预测分析失败：{str(e)}")

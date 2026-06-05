@@ -128,6 +128,50 @@ def _clean_handicap(text: str) -> str:
     return text.strip().replace("升", "").replace("降", "")
 
 
+# 竞彩列表页比分缓存: {match_date:match_number} -> (home_score, away_score) 或 None
+_score_cache: Dict[str, Optional[tuple]] = {}
+
+
+def _load_jczq_list(match_date: str) -> None:
+    """抓取竞彩亚盘列表页，缓存该日所有比赛的 fid 和比分"""
+    url = f"{BASE_URL}/yazhi_jczq_{match_date}.shtml"
+    with httpx.Client(timeout=15, headers=HEADERS) as client:
+        resp = client.get(url)
+        if resp.status_code != 200:
+            logger.warning(f"获取竞彩列表失败: {resp.status_code}")
+            return
+
+    content = resp.content.decode("gbk", errors="replace")
+    soup = BeautifulSoup(content, "html.parser")
+
+    for tr in soup.find_all("tr", attrs={"data-fid": True}):
+        tds = tr.find_all("td")
+        if len(tds) < 7:
+            continue
+        num = tds[0].get_text(strip=True)
+        fid = tr["data-fid"]
+        key = f"{match_date}:{num}"
+        _fid_cache[key] = fid
+
+        # 比分在 td[5]，格式 "1:2"；未开赛为空或"-"
+        score_text = tds[5].get_text(strip=True)
+        score = _parse_score(score_text)
+        _score_cache[key] = score
+
+
+def _parse_score(text: str) -> Optional[tuple]:
+    """解析比分文本 '1:2' -> (1, 2)，无效返回 None"""
+    if not text or ":" not in text:
+        return None
+    parts = text.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        return (int(parts[0].strip()), int(parts[1].strip()))
+    except (ValueError, TypeError):
+        return None
+
+
 def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
     """通过竞彩列表页获取 500.com fixture ID"""
     cache_key = f"{match_date}:{match_number}"
@@ -135,29 +179,24 @@ def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
         return _fid_cache[cache_key]
 
     try:
-        url = f"{BASE_URL}/yazhi_jczq_{match_date}.shtml"
-        with httpx.Client(timeout=15, headers=HEADERS) as client:
-            resp = client.get(url)
-            if resp.status_code != 200:
-                logger.warning(f"获取竞彩列表失败: {resp.status_code}")
-                return None
-
-        content = resp.content.decode("gbk", errors="replace")
-        soup = BeautifulSoup(content, "html.parser")
-
-        for tr in soup.find_all("tr", attrs={"data-fid": True}):
-            tds = tr.find_all("td")
-            if len(tds) < 7:
-                continue
-            num = tds[0].get_text(strip=True)
-            fid = tr["data-fid"]
-            key = f"{match_date}:{num}"
-            _fid_cache[key] = fid
-
+        _load_jczq_list(match_date)
         return _fid_cache.get(cache_key)
-
     except Exception as e:
         logger.error(f"获取FID失败: {e}")
+        return None
+
+
+def fetch_match_score(match_date: str, match_number: str) -> Optional[tuple]:
+    """获取比赛最终比分 (home_score, away_score)，未结束或无数据返回 None"""
+    cache_key = f"{match_date}:{match_number}"
+    if cache_key in _score_cache:
+        return _score_cache[cache_key]
+
+    try:
+        _load_jczq_list(match_date)
+        return _score_cache.get(cache_key)
+    except Exception as e:
+        logger.error(f"获取比分失败: {e}")
         return None
 
 

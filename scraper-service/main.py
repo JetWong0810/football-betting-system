@@ -31,7 +31,7 @@ def run_sync():
     try:
         logger.info("开始数据同步...")
         stats = service.run_once()
-        logger.info(f"同步完成 - 比赛数: {stats.get('matches', 0)}, 赔率数: {stats.get('odds', 0)}")
+        logger.info(f"同步完成 - 比赛数: {stats.get('matches', 0)}, 赔率数: {stats.get('odds', 0)}, 回填比分: {stats.get('scores', 0)}")
         return stats
     except Exception as e:
         logger.exception(f"同步失败: {e}")

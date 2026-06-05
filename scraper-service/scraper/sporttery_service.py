@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -5,6 +6,23 @@ import httpx
 
 import settings
 from repository import OddsRepository
+from scraper.score_500 import fetch_match_score, clear_cache as clear_score_cache
+
+logger = logging.getLogger(__name__)
+
+
+def derive_sale_date(match: Dict) -> Optional[str]:
+    """从 match_number(YYMMDD) 推导售卖日期；兜底用 match_date"""
+    mn = str(match.get("match_number") or "").strip()
+    if len(mn) >= 6 and mn[:6].isdigit():
+        yy, mm, dd = mn[:2], mn[2:4], mn[4:6]
+        # 校验合法日期
+        try:
+            datetime.strptime(f"20{yy}-{mm}-{dd}", "%Y-%m-%d")
+            return f"20{yy}-{mm}-{dd}"
+        except ValueError:
+            pass
+    return match.get("match_date")
 
 
 def parse_decimal(value: Optional[str]) -> Optional[float]:
@@ -55,12 +73,49 @@ class SportterySyncService:
         return response.json()
 
     def run_once(self) -> Dict[str, int]:
-        self.stats = {"matches": 0, "odds": 0}
+        self.stats = {"matches": 0, "odds": 0, "scores": 0}
         for pool_name, pool_code in settings.POOL_CODES.items():
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
+        # 回填已完赛但缺比分的比赛(最近3天，从500.com抓取)
+        try:
+            self.stats["scores"] = self.backfill_scores(days=3)
+        except Exception as e:
+            logger.warning(f"比分回填失败: {e}")
         self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
         return self.stats
+
+    def backfill_scores(self, days: int = 3) -> int:
+        """回填已完赛但缺比分的比赛比分(数据源: 500.com)
+
+        Args:
+            days: 仅处理最近N天的比赛，避免每次扫全表
+
+        Returns:
+            成功回填的场次数
+        """
+        pending = self.repository.get_finished_without_score(days=days)
+        if not pending:
+            return 0
+
+        logger.info(f"待回填比分: {len(pending)} 场")
+        clear_score_cache()  # 每轮重新抓，确保拿到最新结果
+        updated = 0
+        for m in pending:
+            sale_date = derive_sale_date(m)
+            match_code = m.get("match_code")
+            if not sale_date or not match_code:
+                continue
+            try:
+                score = fetch_match_score(sale_date, match_code)
+            except Exception as e:
+                logger.warning(f"抓取比分异常 {m.get('match_id')}: {e}")
+                continue
+            if score:
+                self.repository.update_match_score(m["match_id"], score[0], score[1])
+                logger.info(f"  回填 {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
+                updated += 1
+        return updated
 
     # Parsing helpers -----------------------------------------------------
     def parse_pool(self, pool_name: str, data: Dict) -> None:

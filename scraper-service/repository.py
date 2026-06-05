@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from database import get_db, update_sync_status
@@ -183,6 +183,37 @@ class OddsRepository:
     def finalize_sync(self, total_matches: int, total_odds: int) -> None:
         with get_db() as conn:
             update_sync_status(conn, total_matches, total_odds)
+
+    def get_finished_without_score(self, days: Optional[int] = None) -> List[Dict[str, Any]]:
+        """查询已开赛(match_timestamp<now)但缺比分的比赛"""
+        now_ts = int(datetime.now().timestamp())
+        ph = PLACEHOLDER
+        sql = (
+            "SELECT match_id, match_code, match_number, match_date, "
+            "home_team_name, away_team_name FROM matches "
+            f"WHERE match_timestamp IS NOT NULL AND match_timestamp < {ph} "
+            "AND home_score IS NULL "
+            "AND (match_status IS NULL OR match_status != 'cancelled')"
+        )
+        params: List[Any] = [now_ts]
+        if days:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            sql += f" AND match_date >= {ph}"
+            params.append(cutoff)
+        sql += " ORDER BY match_date DESC"
+        with get_db() as conn:
+            cur = _execute(conn, sql, params)
+            return list(cur.fetchall())
+
+    def update_match_score(self, match_id: str, home_score: int, away_score: int) -> None:
+        """回填比赛最终比分并标记完赛"""
+        ph = PLACEHOLDER
+        sql = (
+            "UPDATE matches SET home_score=%s, away_score=%s, match_status='finished', "
+            "updated_at=CURRENT_TIMESTAMP WHERE match_id=%s"
+        )
+        with get_db() as conn:
+            _execute(conn, sql, (home_score, away_score, match_id))
 
     def get_latest_issue(self) -> Optional[str]:
         with get_db() as conn:
