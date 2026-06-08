@@ -173,28 +173,63 @@ def _parse_score(text: str) -> Optional[tuple]:
 
 
 def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
-    """通过竞彩列表页获取 500.com fixture ID"""
+    """通过竞彩列表页获取 500.com fixture ID
+
+    竞彩期号日期和比赛开赛日期可能差1天（凌晨场次），
+    找不到时自动尝试前后一天。
+    """
     cache_key = f"{match_date}:{match_number}"
     if cache_key in _fid_cache:
         return _fid_cache[cache_key]
 
     try:
         _load_jczq_list(match_date)
-        return _fid_cache.get(cache_key)
+        if cache_key in _fid_cache:
+            return _fid_cache[cache_key]
+
+        from datetime import datetime, timedelta
+        base = datetime.strptime(match_date, "%Y-%m-%d")
+        for delta in [1, -1]:
+            alt_date = (base + timedelta(days=delta)).strftime("%Y-%m-%d")
+            alt_key = f"{alt_date}:{match_number}"
+            if alt_key in _fid_cache:
+                return _fid_cache[alt_key]
+            _load_jczq_list(alt_date)
+            if alt_key in _fid_cache:
+                return _fid_cache[alt_key]
+
+        return None
     except Exception as e:
         logger.error(f"获取FID失败: {e}")
         return None
 
 
 def fetch_match_score(match_date: str, match_number: str) -> Optional[tuple]:
-    """获取比赛最终比分 (home_score, away_score)，未结束或无数据返回 None"""
+    """获取比赛最终比分 (home_score, away_score)，未结束或无数据返回 None
+
+    竞彩期号日期和比赛开赛日期可能差1天，找不到时自动尝试前后一天。
+    """
     cache_key = f"{match_date}:{match_number}"
     if cache_key in _score_cache:
         return _score_cache[cache_key]
 
     try:
         _load_jczq_list(match_date)
-        return _score_cache.get(cache_key)
+        if cache_key in _score_cache:
+            return _score_cache[cache_key]
+
+        from datetime import datetime, timedelta
+        base = datetime.strptime(match_date, "%Y-%m-%d")
+        for delta in [1, -1]:
+            alt_date = (base + timedelta(days=delta)).strftime("%Y-%m-%d")
+            alt_key = f"{alt_date}:{match_number}"
+            if alt_key in _score_cache:
+                return _score_cache[alt_key]
+            _load_jczq_list(alt_date)
+            if alt_key in _score_cache:
+                return _score_cache[alt_key]
+
+        return None
     except Exception as e:
         logger.error(f"获取比分失败: {e}")
         return None
@@ -612,12 +647,14 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
     def _parse_h2h(soup: BeautifulSoup) -> List[Dict[str, Any]]:
         """解析交锋历史表格
         列结构: [赛事, 日期, 对阵, 半场, 结果, 欧赔, 亚盘信息, 亚指结果, 大小结果, ?]
+        支持两种来源: 页面内div#team_jiaozhan 或 POST接口直接返回的table
         """
         records = []
         div = soup.find("div", id="team_jiaozhan")
-        if not div:
-            return records
-        table = div.find("table")
+        if div:
+            table = div.find("table")
+        else:
+            table = soup.find("table")
         if not table:
             return records
         rows = table.find_all("tr")
@@ -742,16 +779,32 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
 
         return home_future, away_future
 
-    # 并发请求：页面 HTML + 主队近期 + 客队近期
+    def _fetch_h2h_post() -> str:
+        """POST 获取完整交锋历史"""
+        url = f"{BASE_URL}/fenxi1/inc/shuju_jiaozhan.php"
+        data = {"id": fid, "limit": "30", "bhbc": "0", "r": "1"}
+        h = {
+            **HEADERS,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{BASE_URL}/fenxi/shuju-{fid}.shtml",
+        }
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(url, data=data, headers=h)
+        return resp.content.decode("gbk", errors="replace")
+
+    # 并发请求：页面 HTML + 主队近期 + 客队近期 + 交锋历史
     try:
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             page_future = executor.submit(_fetch_shuju_page)
             home_recent_future = executor.submit(_fetch_recent, 1)
             away_recent_future = executor.submit(_fetch_recent, 0)
+            h2h_future = executor.submit(_fetch_h2h_post)
 
             page_html = page_future.result()
             home_recent_html = home_recent_future.result()
             away_recent_html = away_recent_future.result()
+            h2h_html = h2h_future.result()
     except Exception as e:
         logger.error(f"获取基本面数据失败 fid={fid}: {e}")
         return {
@@ -764,10 +817,37 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
 
     # 解析页面
     soup = BeautifulSoup(page_html, "html.parser")
-    h2h = _parse_h2h(soup)
+    # 优先使用POST接口的完整交锋(最多30条)，回退到页面内嵌的6条
+    h2h_soup = BeautifulSoup(h2h_html, "html.parser") if h2h_html else None
+    h2h = _parse_h2h(h2h_soup) if h2h_soup else []
+    if not h2h:
+        h2h = _parse_h2h(soup)
     home_future, away_future = _parse_future(soup)
     home_recent = _parse_recent(home_recent_html)
     away_recent = _parse_recent(away_recent_html)
+
+    # 抓取排名信息
+    home_rank = None
+    away_rank = None
+    # 方式1: <div class="team_name">曼城[英超2]</div> (联赛)
+    # 方式2: <h3 class="lslayout1_stit">西班牙[世2]</h3> (国际赛)
+    team_name_divs = soup.find_all("div", class_="team_name")
+    if len(team_name_divs) >= 2:
+        m1 = re.search(r'\[.+?(\d+)\]', team_name_divs[0].get_text(strip=True))
+        m2 = re.search(r'\[.+?(\d+)\]', team_name_divs[1].get_text(strip=True))
+        if m1:
+            home_rank = int(m1.group(1))
+        if m2:
+            away_rank = int(m2.group(1))
+    if home_rank is None or away_rank is None:
+        h3_tags = soup.find_all("h3", class_="lslayout1_stit")
+        if len(h3_tags) >= 2:
+            m1 = re.search(r'\[.+?(\d+)\]', h3_tags[0].get_text(strip=True))
+            m2 = re.search(r'\[.+?(\d+)\]', h3_tags[1].get_text(strip=True))
+            if m1 and home_rank is None:
+                home_rank = int(m1.group(1))
+            if m2 and away_rank is None:
+                away_rank = int(m2.group(1))
 
     return {
         "h2h": h2h,
@@ -775,4 +855,6 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
         "awayRecent": away_recent,
         "homeFuture": home_future,
         "awayFuture": away_future,
+        "homeRank": home_rank,
+        "awayRank": away_rank,
     }

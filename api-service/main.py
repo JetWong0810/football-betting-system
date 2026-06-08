@@ -1121,6 +1121,33 @@ def list_predict_matches(
     return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
 
+@app.get("/api/predict/dates")
+def list_predict_dates(
+    status: str = Query(default="finished", description="not_started 或 finished"),
+):
+    """获取预测页可选日期列表"""
+    import time as _time
+    now_ts = int(_time.time())
+
+    if status == "finished":
+        where = "WHERE match_timestamp IS NOT NULL AND match_timestamp < %s"
+        params = [now_ts]
+    else:
+        where = "WHERE (match_timestamp IS NULL OR match_timestamp >= %s)"
+        params = [now_ts]
+
+    from database import get_db
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT DISTINCT match_date FROM matches {where} ORDER BY match_date DESC",
+            params,
+        )
+        dates = [row["match_date"] for row in cur.fetchall()]
+
+    return {"dates": dates}
+
+
 @app.post("/api/predict/{match_id}")
 def predict_match_direction(match_id: str, req: PredictRequest = None):
     """对指定比赛进行亚盘方向预测"""
@@ -1161,9 +1188,10 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     if req and req.market_heat:
         match_info["market_heat_desc"] = req.market_heat
 
-    # 获取500.com的fid，用于拉取基本面和亚盘数据
+    # 获取500.com的fid，用于拉取基本面和亚盘/欧赔数据
     match_data = None
     asian_data = None
+    euro_data = None
     fid = None
 
     # 优先使用数据库已存储的 fid_500
@@ -1191,30 +1219,39 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     if fid:
         try:
             match_data = fetch_match_data(fid)
+            # 用500.com页面抓取的实时排名补充/覆盖DB排名
+            if match_data.get("homeRank"):
+                match_info["home_rank"] = match_data["homeRank"]
+            if match_data.get("awayRank"):
+                match_info["away_rank"] = match_data["awayRank"]
         except Exception as e:
             logger.warning(f"获取基本面数据失败: {e}")
         try:
-            from odds500_service import fetch_asian_handicap
+            from odds500_service import fetch_asian_handicap, fetch_european_odds
             asian_data = fetch_asian_handicap(fid)
         except Exception as e:
             logger.warning(f"获取亚盘数据失败: {e}")
+        try:
+            euro_data = fetch_european_odds(fid)
+        except Exception as e:
+            logger.warning(f"获取欧赔数据失败: {e}")
 
     # 优先使用500.com亚盘的真实盘口值（比竞彩hhad的整数盘口更精确）
     # 500.com: 正值=主队让球, 负值=客队让球(受让)
     # 系统内统一: 负值=主队让球(与竞彩hhad一致)
-    # 取多家主流公司初盘的中位数作为基准盘口
+    # 取多家主流公司即时盘口的中位数（即时盘比初盘更反映当前市场判断）
     if asian_data:
         mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
-        init_handicaps = []
+        curr_handicaps = []
         for c in asian_data:
             if c.get("bookmaker") in mainstream:
-                h = c.get("initial", {}).get("handicap")
+                h = c.get("current", {}).get("handicap")
                 if h is not None:
-                    init_handicaps.append(float(h))
-        if init_handicaps:
-            init_handicaps.sort()
-            mid = len(init_handicaps) // 2
-            median_hcap = init_handicaps[mid]
+                    curr_handicaps.append(float(h))
+        if curr_handicaps:
+            curr_handicaps.sort()
+            mid = len(curr_handicaps) // 2
+            median_hcap = curr_handicaps[mid]
             match_info["handicap"] = -median_hcap
 
     # 比分回填：已结束但DB无比分时，从500.com竞彩列表页抓取并落库
@@ -1240,7 +1277,7 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
             logger.warning(f"比分回填失败: {e}")
 
     try:
-        result = predict_match(match_info, match_data=match_data, asian_data=asian_data)
+        result = predict_match(match_info, match_data=match_data, asian_data=asian_data, euro_data=euro_data)
         match_formatted = format_match(match)
         # 返回实际使用的亚盘盘口值
         if match_info.get("handicap") is not None:

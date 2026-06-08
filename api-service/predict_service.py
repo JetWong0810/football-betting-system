@@ -1,11 +1,11 @@
 """预测服务模块 - 6因子亚盘方向预测
 
 因子体系:
-  F1 近期状态 (权重1.5) - DeepSeek分析双方近10场
-  F2 交锋历史 (权重1.0) - DeepSeek分析近期交锋
-  F3 实力定位 (权重2.0) - DeepSeek分析排名+形象认知
-  F4 赔率变动 (权重3.0) - 纯量化：亚盘水位升降
-  F5 市场热度 (权重2.0) - DeepSeek综合判断/用户手动输入
+  F1 近期状态 (权重1.5) - 量化子因素投票(场均分/赢盘率/主客场) + AI辅助1票
+  F2 交锋历史 (权重1.0) - 量化子因素(有效性/赢盘率/盘口变化) + AI辅助
+  F3 实力定位 (权重1.0) - 量化子因素(排名匹配) + AI底蕴判断(3次投票)
+  F4 市场信号 (权重2.0) - 初盘分析 + 亚盘变动 + 欧赔变动 + 亚欧一致性验证
+  F5 市场热度 (权重2.0) - 纯量化：多公司水位一致性/用户手动输入
   F6 单关修正 (权重1.5) - 结合F5的单关逆向规则
 """
 import json
@@ -24,8 +24,8 @@ DEEPSEEK_MODEL = "deepseek-v4-flash"
 FACTOR_WEIGHTS = {
     "近期状态": 1.5,
     "交锋历史": 1.0,
-    "实力定位": 2.0,
-    "赔率变动": 1.5,   # 原3.0，回测显示F4命中率仅52-54%(接近随机)，下调权重
+    "实力定位": 1.0,
+    "市场信号": 2.0,   # 升级：初盘+亚盘变动+欧赔变动+亚欧一致性
     "市场热度": 2.0,
     "单关修正": 1.5,
 }
@@ -96,97 +96,404 @@ def _get_client() -> OpenAI:
 
 
 # ============================================================
-# F4 赔率变动 - 纯量化计算
+# F4 市场信号 - 初盘分析 + 亚盘变动 + 欧赔变动 + 亚欧一致性
 # ============================================================
 
-def calc_factor4(asian_data: List[Dict], is_home_let: bool) -> Dict[str, Any]:
-    """F4: 亚盘水位变动
+# 主流公司(高权重)
+_SHARP_BOOKS = ["Pinnacle"]
+_MAINSTREAM_BOOKS = ["Bet365", "皇冠", "澳门", "威廉希尔", "立博"]
 
-    上盘升水=不看好上盘, 降水=看好上盘
+UP, DOWN, NEU = "upper", "lower", "neutral"
+
+
+def _get_asian_companies(asian_data: List[Dict], priority_books: List[str] = None) -> List[Dict]:
+    """按优先级获取亚盘公司数据"""
+    if not priority_books:
+        priority_books = _SHARP_BOOKS + _MAINSTREAM_BOOKS
+    result = []
+    for book in priority_books:
+        c = next((x for x in asian_data if x.get("bookmaker") == book), None)
+        if c:
+            result.append(c)
+    if not result and asian_data:
+        result.append(asian_data[0])
+    return result
+
+
+def _calc_sub_opening(asian_data: List[Dict], is_home_let: bool) -> Dict[str, Any]:
+    """子因素1: 初盘信号 - 多公司一致性 + 初盘水位位置"""
+    companies = _get_asian_companies(asian_data)
+    if not companies:
+        return {"direction": NEU, "score": 5, "desc": "无初盘数据", "consistency": "unknown"}
+
+    init_handicaps = []
+    init_waters = []
+    for c in companies:
+        ini = c.get("initial", {})
+        h = ini.get("handicap")
+        if h is not None:
+            init_handicaps.append(abs(float(h)))
+        w = ini.get("home") if is_home_let else ini.get("away")
+        if w is not None:
+            init_waters.append(float(w))
+
+    # 初盘一致性：多公司盘口差异
+    consistency = "unknown"
+    if len(init_handicaps) >= 2:
+        spread = max(init_handicaps) - min(init_handicaps)
+        if spread <= 0.125:
+            consistency = "high"
+        elif spread <= 0.25:
+            consistency = "medium"
+        else:
+            consistency = "low"
+
+    # 初盘水位位置(取主流公司均值)
+    direction = NEU
+    score = 5
+    desc_parts = []
+
+    if init_waters:
+        avg_water = sum(init_waters) / len(init_waters)
+        if avg_water <= 0.85:
+            direction = UP
+            score = 7
+            desc_parts.append(f"初盘上盘低水{avg_water:.2f}(庄家看好上盘)")
+        elif avg_water >= 1.00:
+            direction = DOWN
+            score = 7
+            desc_parts.append(f"初盘上盘高水{avg_water:.2f}(庄家看淡上盘)")
+        elif avg_water >= 0.95:
+            direction = DOWN
+            score = 6
+            desc_parts.append(f"初盘上盘偏高水{avg_water:.2f}(略看淡上盘)")
+        elif avg_water <= 0.88:
+            direction = UP
+            score = 6
+            desc_parts.append(f"初盘上盘偏低水{avg_water:.2f}(略看好上盘)")
+        else:
+            desc_parts.append(f"初盘上盘中水{avg_water:.2f}(均衡)")
+
+    if consistency == "high":
+        desc_parts.append("多公司初盘高度一致")
+    elif consistency == "low":
+        desc_parts.append("各公司初盘分歧大")
+        score = max(5, score - 1)
+
+    desc = "，".join(desc_parts) if desc_parts else "初盘数据不足"
+    return {"direction": direction, "score": score, "desc": desc, "consistency": consistency,
+            "avg_water": sum(init_waters) / len(init_waters) if init_waters else None}
+
+
+def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str, Any]:
+    """子因素2: 亚盘变动 - 多公司水位一致性(阈值0.08)+盘口升降
+
+    回测验证: ≥4家wc>=0.08同向=57.2%, ≥5家wc>=0.10=63%
+    关键: 需要足够多公司同向+足够大变动幅度才有信号价值
     """
-    if not asian_data:
-        return {"name": "赔率变动", "score": 5, "direction": "neutral", "reason": "无亚盘数据"}
+    companies = _get_asian_companies(asian_data)
+    if not companies:
+        return {"direction": NEU, "score": 5, "desc": "无亚盘变动数据"}
 
-    pinnacle = next((c for c in asian_data if c.get("bookmaker") == "Pinnacle"), None)
-    if not pinnacle:
-        pinnacle = next((c for c in asian_data if c.get("bookmaker") in ("Bet365", "皇冠", "澳门")), None)
-    if not pinnacle:
-        pinnacle = asian_data[0] if asian_data else None
+    # 收集每家公司的水位变动和盘口变动
+    water_changes = {}  # book -> water_change
+    hcap_dirs = {}      # book -> 'upper'/'lower'
+    desc_list = []
+    pinnacle_signal = None
 
-    if not pinnacle:
-        return {"name": "赔率变动", "score": 5, "direction": "neutral", "reason": "无有效公司数据"}
+    for c in companies:
+        ini = c.get("initial", {})
+        cur = c.get("current", {})
+        book = c.get("bookmaker", "unknown")
 
-    initial = pinnacle.get("initial", {})
-    current = pinnacle.get("current", {})
+        if is_home_let:
+            init_w = ini.get("home")
+            curr_w = cur.get("home")
+        else:
+            init_w = ini.get("away")
+            curr_w = cur.get("away")
 
-    init_home = initial.get("home")
-    curr_home = current.get("home")
-    init_away = initial.get("away")
-    curr_away = current.get("away")
+        if init_w is None or curr_w is None:
+            continue
 
-    if init_home is None or curr_home is None:
-        return {"name": "赔率变动", "score": 5, "direction": "neutral", "reason": "水位数据缺失"}
+        water_change = curr_w - init_w
+        water_changes[book] = water_change
 
-    # 上盘水位变化(>0升水, <0降水)
-    if is_home_let:
-        water_change = curr_home - init_home
+        # 盘口变动
+        init_h = ini.get("handicap")
+        curr_h = cur.get("handicap")
+        if init_h is not None and curr_h is not None:
+            init_depth = abs(float(init_h))
+            curr_depth = abs(float(curr_h))
+            if curr_depth > init_depth + 1e-9:
+                hcap_dirs[book] = UP
+            elif curr_depth < init_depth - 1e-9:
+                hcap_dirs[book] = DOWN
+
+        if book in _SHARP_BOOKS:
+            if book in hcap_dirs:
+                pinnacle_signal = hcap_dirs[book]
+            elif water_change <= -0.08:
+                pinnacle_signal = UP
+            elif water_change >= 0.08:
+                pinnacle_signal = DOWN
+
+    if not water_changes:
+        return {"direction": NEU, "score": 5, "desc": "水位数据缺失"}
+
+    # 核心判断: 多公司水位一致性(阈值0.08)
+    upper_cnt_08 = sum(1 for wc in water_changes.values() if wc <= -0.08)
+    lower_cnt_08 = sum(1 for wc in water_changes.values() if wc >= 0.08)
+    upper_cnt_05 = sum(1 for wc in water_changes.values() if wc <= -0.05)
+    lower_cnt_05 = sum(1 for wc in water_changes.values() if wc >= 0.05)
+    total_companies = len(water_changes)
+
+    # 盘口升降统计
+    hcap_up_cnt = sum(1 for d in hcap_dirs.values() if d == UP)
+    hcap_down_cnt = sum(1 for d in hcap_dirs.values() if d == DOWN)
+
+    direction = NEU
+    score = 5
+
+    # 层级判断: 回测验证score=8命中率63.9%, score<8接近随机
+    # 只有≥4家wc≥0.08同向(或≥5家wc≥0.08)才给有效方向
+    if upper_cnt_08 >= 5:
+        direction, score = UP, 8
+    elif lower_cnt_08 >= 5:
+        direction, score = DOWN, 8
+    elif upper_cnt_08 >= 4:
+        direction, score = UP, 8
+    elif lower_cnt_08 >= 4:
+        direction, score = DOWN, 8
+    elif upper_cnt_08 >= 3 and hcap_up_cnt >= 2:
+        direction, score = UP, 7
+    elif lower_cnt_08 >= 3 and hcap_down_cnt >= 2:
+        direction, score = DOWN, 7
+
+    # 构建描述
+    if direction == UP:
+        descs = [f"{b}降水{wc:+.2f}" for b, wc in sorted(water_changes.items(), key=lambda x: x[1])[:3]
+                 if wc <= -0.08]
+        descs += [f"{b}升盘" for b, d in hcap_dirs.items() if d == UP]
+        desc_list = descs[:3]
+    elif direction == DOWN:
+        descs = [f"{b}升水{wc:+.2f}" for b, wc in sorted(water_changes.items(), key=lambda x: -x[1])[:3]
+                 if wc >= 0.08]
+        descs += [f"{b}降盘" for b, d in hcap_dirs.items() if d == DOWN]
+        desc_list = descs[:3]
+
+    # 即时水位绝对位置修正
+    ref = companies[0]
+    curr_ref = ref.get("current", {})
+    curr_upper_w = curr_ref.get("home") if is_home_let else curr_ref.get("away")
+    if curr_upper_w is not None and direction != NEU:
+        if curr_upper_w >= 1.00 and direction == UP:
+            score = min(score + 1, 9)
+            desc_list.append(f"终盘高水{curr_upper_w:.2f}(强化)")
+        elif curr_upper_w <= 0.82 and direction == DOWN:
+            score = min(score + 1, 9)
+            desc_list.append(f"终盘低水{curr_upper_w:.2f}(强化)")
+
+    if not desc_list:
+        desc_list = [f"变动不足(上{upper_cnt_05}/下{lower_cnt_05}家超0.05)"]
+
+    desc = "，".join(desc_list)
+    return {"direction": direction, "score": score, "desc": desc,
+            "pinnacle_dir": pinnacle_signal}
+
+
+def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
+    """子因素3: 欧赔变动 - 胜平负赔率趋势"""
+    companies = euro_data.get("companies", []) if euro_data else []
+    if not companies:
+        return {"direction": NEU, "score": 5, "desc": "无欧赔数据"}
+
+    # 选取主流公司
+    priority = _SHARP_BOOKS + _MAINSTREAM_BOOKS
+    selected = []
+    for book in priority:
+        c = next((x for x in companies if x.get("bookmaker") == book), None)
+        if c:
+            selected.append(c)
+    if not selected:
+        selected = companies[:5]
+
+    # 分析每家公司的胜赔/负赔变动
+    upper_signals = 0
+    lower_signals = 0
+    descs = []
+
+    for c in selected:
+        ini = c.get("initial", {})
+        cur = c.get("current", {})
+        book = c.get("bookmaker", "")
+
+        # is_home_let: 上盘=主队, 主胜赔降→看好上盘
+        # not is_home_let: 上盘=客队, 客胜(=负赔)降→看好上盘
+        if is_home_let:
+            init_upper_odds = ini.get("win")
+            curr_upper_odds = cur.get("win")
+            init_lower_odds = ini.get("lose")
+            curr_lower_odds = cur.get("lose")
+        else:
+            init_upper_odds = ini.get("lose")
+            curr_upper_odds = cur.get("lose")
+            init_lower_odds = ini.get("win")
+            curr_lower_odds = cur.get("win")
+
+        if not all([init_upper_odds, curr_upper_odds, init_lower_odds, curr_lower_odds]):
+            continue
+
+        upper_change = curr_upper_odds - init_upper_odds
+        lower_change = curr_lower_odds - init_lower_odds
+
+        # 上盘胜赔下降(看好上盘) 且 下盘胜赔上升
+        if upper_change <= -0.05:
+            upper_signals += 1
+        elif upper_change >= 0.05:
+            lower_signals += 1
+
+        # 平赔变化也有参考价值
+        init_draw = ini.get("draw")
+        curr_draw = cur.get("draw")
+        if init_draw and curr_draw:
+            draw_change = curr_draw - init_draw
+            if draw_change >= 0.10:
+                descs.append(f"{book}平赔升{draw_change:+.2f}(不看好平)")
+
+    if not selected:
+        return {"direction": NEU, "score": 5, "desc": "无有效欧赔公司"}
+
+    total = upper_signals + lower_signals
+    if total == 0:
+        return {"direction": NEU, "score": 5, "desc": "欧赔整体稳定"}
+
+    if upper_signals > lower_signals:
+        direction = UP
+        ratio = upper_signals / len(selected)
+        desc = f"{upper_signals}/{len(selected)}家欧赔看好上盘"
+    elif lower_signals > upper_signals:
+        direction = DOWN
+        ratio = lower_signals / len(selected)
+        desc = f"{lower_signals}/{len(selected)}家欧赔看好下盘"
     else:
-        water_change = curr_away - init_away if init_away and curr_away else 0
+        direction = NEU
+        ratio = 0
+        desc = "欧赔方向分歧"
 
-    # 盘口变化: 500.com正值=主队让球, 绝对值变大=升盘(让球加深)
-    init_hcap = initial.get("handicap")
-    curr_hcap = current.get("handicap")
-    handicap_up = handicap_down = False
-    if init_hcap is not None and curr_hcap is not None and init_hcap != curr_hcap:
-        # 上盘方让球深度: is_home_let时看主队盘口(500.com正值), 否则客队受让(取反)
-        init_depth = abs(init_hcap)
-        curr_depth = abs(curr_hcap)
-        if curr_depth > init_depth + 1e-9:
-            handicap_up = True       # 升盘=让球加深=庄家看好上盘
-        elif curr_depth < init_depth - 1e-9:
-            handicap_down = True     # 降盘=让球变浅=庄家看淡上盘
-
-    # ===== 综合判断: 盘口变化优先级高于水位 =====
-    # 盘口是庄家对实力的真实定价，水位可被用作诱盘
-    UP, DOWN, NEU = "upper", "lower", "neutral"
-
-    if handicap_up:
-        # 升盘=庄家加深让球, 强烈看好上盘
-        if water_change >= 0.05:
-            # 升盘+升水: 经典诱盘形态——加深盘口表明真实看好上盘, 升水制造"上盘没人看好"假象诱散户买下盘
-            score, direction = 8, UP
-            reason = f"升盘(让球加深)+上盘升水{water_change:+.2f}，疑似诱盘，偏看好上盘"
-        else:
-            score, direction = 8, UP
-            reason = f"升盘(让球加深){'＋降水' if water_change<=-0.05 else ''}，庄家看好上盘"
-    elif handicap_down:
-        # 降盘=庄家减让球, 看淡上盘
-        if water_change <= -0.05:
-            # 降盘+降水: 反向诱盘——盘口变浅看淡上盘, 降水制造"上盘热"假象
-            score, direction = 8, DOWN
-            reason = f"降盘(让球变浅)+上盘降水{water_change:+.2f}，疑似诱盘，偏看好下盘"
-        else:
-            score, direction = 8, DOWN
-            reason = f"降盘(让球变浅){'＋升水' if water_change>=0.05 else ''}，庄家看淡上盘"
+    if ratio >= 0.6:
+        score = 7
+    elif ratio >= 0.4:
+        score = 6
     else:
-        # 盘口未变, 看水位(信号较弱, 单一水位最高7分)
-        if water_change <= -0.10:
-            score, direction = 7, UP
-            reason = f"盘口稳定，上盘大幅降水{water_change:+.2f}，资金流入上盘"
-        elif water_change <= -0.05:
-            score, direction = 6, UP
-            reason = f"盘口稳定，上盘小幅降水{water_change:+.2f}，略偏上盘"
-        elif water_change >= 0.10:
-            score, direction = 7, DOWN
-            reason = f"盘口稳定，上盘大幅升水{water_change:+.2f}，资金流出上盘"
-        elif water_change >= 0.05:
-            score, direction = 6, DOWN
-            reason = f"盘口稳定，上盘小幅升水{water_change:+.2f}，略偏下盘"
-        else:
-            score, direction = 5, NEU
-            reason = f"盘口与水位均稳定({water_change:+.2f})"
+        score = 5
+        direction = NEU
+        desc = "欧赔信号弱"
 
-    return {"name": "赔率变动", "score": score, "direction": direction, "reason": reason}
+    if descs:
+        desc += "，" + descs[0]
+    return {"direction": direction, "score": score, "desc": desc}
+
+
+def calc_factor4(asian_data: List[Dict], is_home_let: bool,
+                 euro_data: Optional[Dict] = None) -> Dict[str, Any]:
+    """F4 市场信号: 初盘分析 + 亚盘变动 + 欧赔变动 + 亚欧一致性验证
+
+    三个子因素各给方向，通过一致性验证决定最终得分。
+    """
+    if not asian_data and not euro_data:
+        return {"name": "市场信号", "score": 5, "direction": "neutral",
+                "reason": "无市场数据", "details": []}
+
+    # 三个子因素
+    sub_opening = _calc_sub_opening(asian_data or [], is_home_let)
+    sub_asian = _calc_sub_asian_move(asian_data or [], is_home_let)
+    sub_euro = _calc_sub_euro_move(euro_data, is_home_let)
+
+    details = [
+        {"name": "初盘信号", "direction": sub_opening["direction"],
+         "score": sub_opening["score"], "desc": sub_opening["desc"]},
+        {"name": "亚盘变动", "direction": sub_asian["direction"],
+         "score": sub_asian["score"], "desc": sub_asian["desc"]},
+        {"name": "欧赔变动", "direction": sub_euro["direction"],
+         "score": sub_euro["score"], "desc": sub_euro["desc"]},
+    ]
+
+    # 综合: 加权投票
+    dir_votes = {UP: 0.0, DOWN: 0.0, NEU: 0.0}
+    sub_weights = [1.5, 2.0, 1.5]  # 初盘/亚盘变动/欧赔
+    subs = [sub_opening, sub_asian, sub_euro]
+
+    for sub, w in zip(subs, sub_weights):
+        d = sub["direction"]
+        if d in dir_votes:
+            dir_votes[d] += w
+
+    # 亚欧一致性验证
+    asian_dir = sub_asian["direction"]
+    euro_dir = sub_euro["direction"]
+    consistency_bonus = 0
+    consistency_desc = ""
+
+    if asian_dir != NEU and euro_dir != NEU:
+        if asian_dir == euro_dir:
+            consistency_bonus = 1
+            consistency_desc = "亚欧一致(信号增强)"
+        else:
+            consistency_bonus = -2
+            consistency_desc = "亚欧矛盾(信号减弱，信欧赔)"
+            # 亚欧矛盾时信欧赔
+            dir_votes[euro_dir] += 1.0
+            dir_votes[asian_dir] -= 1.0
+
+    # 初盘与变动一致性
+    opening_dir = sub_opening["direction"]
+    if opening_dir != NEU and asian_dir != NEU:
+        if opening_dir == asian_dir:
+            consistency_bonus += 1
+            consistency_desc += "，初盘态度与变动一致" if consistency_desc else "初盘态度与变动一致"
+        else:
+            consistency_desc += "，初盘与变动矛盾(可能有新信息)" if consistency_desc else "初盘与变动矛盾(可能有新信息)"
+
+    # 最终方向: 只比较UP和DOWN(neutral不参与方向争夺)
+    if dir_votes[UP] > dir_votes[DOWN] and dir_votes[UP] > 0:
+        direction = UP
+    elif dir_votes[DOWN] > dir_votes[UP] and dir_votes[DOWN] > 0:
+        direction = DOWN
+    elif dir_votes[UP] == dir_votes[DOWN] and dir_votes[UP] > 0:
+        direction = NEU  # 方向持平=无共识
+    else:
+        direction = NEU
+
+    # 最终得分: 子因素平均 + 一致性修正
+    active_scores = [s["score"] for s in subs if s["direction"] != NEU]
+    if active_scores:
+        base_score = sum(active_scores) / len(active_scores)
+    else:
+        base_score = 5.0
+    score = max(3, min(9, round(base_score + consistency_bonus)))
+
+    if direction == NEU:
+        score = 5
+
+    # 初盘一致性影响stability字段(后续用于全局置信度)
+    stability = sub_opening.get("consistency", "unknown")
+
+    # 构建reason
+    reason_parts = []
+    for sub in subs:
+        if sub["direction"] != NEU:
+            reason_parts.append(sub["desc"])
+    if consistency_desc:
+        reason_parts.append(consistency_desc)
+    reason = "；".join(reason_parts) if reason_parts else "市场信号平稳无明确方向"
+
+    if consistency_desc:
+        details.append({"name": "一致性验证", "direction": direction,
+                        "score": consistency_bonus, "desc": consistency_desc})
+
+    return {"name": "市场信号", "score": score, "direction": direction,
+            "reason": reason, "details": details, "stability": stability}
 
 
 # ============================================================
@@ -296,7 +603,734 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
 
 
 # ============================================================
-# 近期状态量化指标 - 代码算客观数据，喂给 AI 推理(F1/F3)
+# F1 近期状态 - 量化子因素投票 + AI辅助
+# ============================================================
+
+# 时间衰减权重: 近3场×1.5, 4-6场×1.0, 7-10场×0.6, 11-15场×0.4
+_TIME_DECAY = [1.5, 1.5, 1.5, 1.0, 1.0, 1.0, 0.6, 0.6, 0.6, 0.6, 0.4, 0.4, 0.4, 0.4, 0.4]
+
+
+def _build_role_cover_metrics(records: List[Dict], team: str) -> Dict[str, Any]:
+    """按让球/受让角色分统赢盘率（带时间衰减）
+
+    通过handicap字段判断该队在每场比赛中是让球方还是受让方：
+    - 主队队名出现在match前半且handicap为负值 → 主队让球
+    - 以此推断本队在每场中的角色
+    """
+    as_upper_win = as_upper_lose = 0.0  # 作为让球方的加权赢/输
+    as_lower_win = as_lower_lose = 0.0  # 作为受让方的加权赢/输
+
+    for i, r in enumerate(records):
+        decay = _TIME_DECAY[i] if i < len(_TIME_DECAY) else 0.5
+        ar = (r.get("asianResult") or "").strip()
+        if ar not in ("赢", "赢半", "输", "输半"):
+            continue
+
+        is_win = ar in ("赢", "赢半")
+        hcap_str = r.get("handicap", "")
+        if not hcap_str:
+            continue
+        try:
+            hcap_val = float(hcap_str)
+        except (ValueError, TypeError):
+            continue
+
+        is_home = _team_in_match(team, r.get("match", ""))
+        if is_home is None:
+            continue
+
+        # 500.com近期战绩的handicap: 负值=该行主队让球, 正值=该行客队让球
+        # 本队是主队且handicap<0 → 本队让球(上盘)
+        # 本队是主队且handicap>0 → 客队让球, 本队受让(下盘)
+        # 本队是客队且handicap>0 → 本队让球(上盘)
+        # 本队是客队且handicap<0 → 主队让球, 本队受让(下盘)
+        if is_home:
+            team_is_upper = hcap_val < 0
+        else:
+            team_is_upper = hcap_val > 0
+
+        if team_is_upper:
+            if is_win:
+                as_upper_win += decay
+            else:
+                as_upper_lose += decay
+        else:
+            if is_win:
+                as_lower_win += decay
+            else:
+                as_lower_lose += decay
+
+    as_upper_total = as_upper_win + as_upper_lose
+    as_lower_total = as_lower_win + as_lower_lose
+
+    return {
+        "as_upper_cover_rate": as_upper_win / as_upper_total if as_upper_total > 0.5 else None,
+        "as_upper_sample": as_upper_total,
+        "as_lower_cover_rate": as_lower_win / as_lower_total if as_lower_total > 0.5 else None,
+        "as_lower_sample": as_lower_total,
+    }
+
+
+def _weighted_ppg(records: List[Dict], team: str, home_only: Optional[bool] = None) -> Optional[float]:
+    """带时间衰减的场均积分
+
+    Args:
+        home_only: None=全部, True=仅主场, False=仅客场
+    """
+    total_pts = 0.0
+    total_weight = 0.0
+
+    for i, r in enumerate(records):
+        if home_only is not None:
+            is_home = _team_in_match(team, r.get("match", ""))
+            if is_home is None:
+                continue
+            if home_only and not is_home:
+                continue
+            if not home_only and is_home:
+                continue
+
+        decay = _TIME_DECAY[i] if i < len(_TIME_DECAY) else 0.5
+        res = (r.get("result") or "").strip()
+        pts = 3 if res == "胜" else 1 if res == "平" else 0
+        total_pts += pts * decay
+        total_weight += decay
+
+    return total_pts / total_weight if total_weight > 0.5 else None
+
+
+def calc_factor1(match_data: Optional[Dict], match_info: Dict,
+                 ai_f1_list: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    """F1 近期状态：3个量化子因素 + 1个AI子因素(3次投票取多数)
+
+    子因素:
+      1. 加权场均分对比（带时间衰减）
+      2. 角色匹配赢盘率（让球方/受让方分统）
+      3. 主客场身份匹配场均分
+      4. AI综合判断（3次调用取多数，不一致则舍弃）
+
+    方向由多数决定，score由一致性程度决定。
+    返回包含details字段展示各子因素细节。
+    """
+    handicap = match_info.get("handicap")
+    is_home_let = handicap is not None and float(handicap) < 0
+    home = match_info.get("home_team", "主队")
+    away = match_info.get("away_team", "客队")
+
+    if not match_data:
+        return {"name": "近期状态", "score": 5, "direction": "neutral",
+                "reason": "无基本面数据", "details": []}
+
+    home_recent = match_data.get("homeRecent", [])[:15]
+    away_recent = match_data.get("awayRecent", [])[:15]
+
+    if not home_recent and not away_recent:
+        return {"name": "近期状态", "score": 5, "direction": "neutral",
+                "reason": "无近期战绩数据", "details": []}
+
+    upper_team = home if is_home_let else away
+    lower_team = away if is_home_let else home
+    upper_recent = home_recent if is_home_let else away_recent
+    lower_recent = away_recent if is_home_let else home_recent
+
+    details = []
+
+    # --- 子因素1: 加权场均分对比 ---
+    sub1_dir = "neutral"
+    upper_ppg = _weighted_ppg(upper_recent, upper_team)
+    lower_ppg = _weighted_ppg(lower_recent, lower_team)
+    sub1_desc = ""
+    if upper_ppg is not None and lower_ppg is not None:
+        diff = upper_ppg - lower_ppg
+        sub1_desc = f"上盘方{upper_ppg:.2f} vs 下盘方{lower_ppg:.2f}"
+        if diff >= 0.3:
+            sub1_dir = "upper"
+        elif diff <= -0.3:
+            sub1_dir = "lower"
+    else:
+        sub1_desc = "数据不足"
+    details.append({"name": "加权场均分", "direction": sub1_dir, "desc": sub1_desc})
+
+    # --- 子因素2: 角色匹配赢盘率 ---
+    sub2_dir = "neutral"
+    upper_role = _build_role_cover_metrics(upper_recent, upper_team)
+    lower_role = _build_role_cover_metrics(lower_recent, lower_team)
+    upper_cover = upper_role["as_upper_cover_rate"]
+    lower_cover = lower_role["as_lower_cover_rate"]
+    if upper_role["as_upper_sample"] < 2.0:
+        upper_cover = None
+    if lower_role["as_lower_sample"] < 2.0:
+        lower_cover = None
+
+    sub2_desc_parts = []
+    if upper_cover is not None:
+        sub2_desc_parts.append(f"上盘让球赢盘率{upper_cover:.0%}")
+    if lower_cover is not None:
+        sub2_desc_parts.append(f"下盘受让赢盘率{lower_cover:.0%}")
+    sub2_desc = "，".join(sub2_desc_parts) if sub2_desc_parts else "样本不足"
+
+    if upper_cover is not None and lower_cover is not None:
+        cover_diff = upper_cover - lower_cover
+        if cover_diff >= 0.15:
+            sub2_dir = "upper"
+        elif cover_diff <= -0.15:
+            sub2_dir = "lower"
+        elif upper_cover >= 0.55:
+            sub2_dir = "upper"
+        elif lower_cover >= 0.55:
+            sub2_dir = "lower"
+        elif upper_cover <= 0.35:
+            sub2_dir = "lower"
+        elif lower_cover <= 0.35:
+            sub2_dir = "upper"
+    elif upper_cover is not None:
+        if upper_cover >= 0.55:
+            sub2_dir = "upper"
+        elif upper_cover <= 0.4:
+            sub2_dir = "lower"
+    elif lower_cover is not None:
+        if lower_cover >= 0.55:
+            sub2_dir = "lower"
+        elif lower_cover <= 0.4:
+            sub2_dir = "upper"
+    details.append({"name": "角色赢盘率", "direction": sub2_dir, "desc": sub2_desc})
+
+    # --- 子因素3: 主客场身份匹配 ---
+    sub3_dir = "neutral"
+    upper_is_home = is_home_let
+    upper_matched_ppg = _weighted_ppg(upper_recent, upper_team, home_only=upper_is_home)
+    lower_matched_ppg = _weighted_ppg(lower_recent, lower_team, home_only=not upper_is_home)
+    sub3_desc = ""
+    if upper_matched_ppg is not None and lower_matched_ppg is not None:
+        diff = upper_matched_ppg - lower_matched_ppg
+        u_label = "主场" if upper_is_home else "客场"
+        l_label = "客场" if upper_is_home else "主场"
+        sub3_desc = f"上盘{u_label}{upper_matched_ppg:.2f} vs 下盘{l_label}{lower_matched_ppg:.2f}"
+        if diff >= 0.3:
+            sub3_dir = "upper"
+        elif diff <= -0.3:
+            sub3_dir = "lower"
+    else:
+        sub3_desc = "主客场样本不足"
+    details.append({"name": "主客场匹配", "direction": sub3_dir, "desc": sub3_desc})
+
+    # --- 子因素4: AI判断（3次取多数） ---
+    sub4_dir = "neutral"
+    sub4_desc = ""
+    if ai_f1_list:
+        ai_dirs = [f.get("direction", "neutral") for f in ai_f1_list if f]
+        ai_upper = ai_dirs.count("upper")
+        ai_lower = ai_dirs.count("lower")
+        ai_reasons = [f.get("reason", "") for f in ai_f1_list if f]
+
+        if ai_upper >= 2:
+            sub4_dir = "upper"
+            sub4_desc = f"3次AI: {ai_upper}次上盘/{ai_lower}次下盘"
+        elif ai_lower >= 2:
+            sub4_dir = "lower"
+            sub4_desc = f"3次AI: {ai_upper}次上盘/{ai_lower}次下盘"
+        else:
+            sub4_dir = "neutral"
+            sub4_desc = f"AI不稳定({ai_upper}上/{ai_lower}下/{3-ai_upper-ai_lower}中性)，舍弃"
+
+        if ai_reasons:
+            sub4_desc += f"（{ai_reasons[0]}）"
+    else:
+        sub4_desc = "AI未调用"
+    details.append({"name": "AI综合", "direction": sub4_dir, "desc": sub4_desc})
+
+    # --- 投票汇总 ---
+    votes = [sub1_dir, sub2_dir, sub3_dir, sub4_dir]
+    upper_votes = votes.count("upper")
+    lower_votes = votes.count("lower")
+
+    if upper_votes > lower_votes:
+        direction = "upper"
+        majority = upper_votes
+    elif lower_votes > upper_votes:
+        direction = "lower"
+        majority = lower_votes
+    else:
+        direction = "neutral"
+        majority = 0
+
+    if majority >= 4:
+        score = 8
+    elif majority == 3:
+        score = 7
+    else:
+        score = 5
+
+    # 构建reason(简短版)
+    if direction == "neutral":
+        upper_parts = []
+        lower_parts = []
+        for label, d in [("场均分", sub1_dir), ("赢盘率", sub2_dir), ("场地", sub3_dir), ("AI", sub4_dir)]:
+            if d == "upper":
+                upper_parts.append(label)
+            elif d == "lower":
+                lower_parts.append(label)
+        if upper_parts and lower_parts:
+            reason = f"方向分歧({'+'.join(upper_parts)}↑ vs {'+'.join(lower_parts)}↓)"
+        else:
+            reason = "近期状态无明确信号"
+    else:
+        reasons = []
+        if sub1_dir != "neutral":
+            reasons.append(f"场均分{'优' if sub1_dir == direction else '劣'}")
+        if sub2_dir != "neutral":
+            reasons.append(f"赢盘率{'优' if sub2_dir == direction else '劣'}")
+        if sub3_dir != "neutral":
+            tag = "主场" if (direction == "upper") == upper_is_home else "客场"
+            reasons.append(f"{tag}{'强' if sub3_dir == direction else '弱'}")
+        if sub4_dir != "neutral":
+            reasons.append(f"AI{'同向' if sub4_dir == direction else '反向'}")
+        reason = "，".join(reasons[:3]) if reasons else "近期状态偏向明确"
+
+    return {"name": "近期状态", "score": score, "direction": direction,
+            "reason": reason, "details": details}
+
+
+# ============================================================
+# F2 交锋历史 - 量化子因素：有效性/加权赢盘/盘口变化/AI辅助
+# ============================================================
+
+HOME_ADVANTAGE = 0.4
+
+_H2H_TIME_WEIGHTS = [
+    (180, 1.0),
+    (365, 0.7),
+    (730, 0.4),
+]
+_H2H_TIME_DEFAULT = 0.15
+
+
+def _h2h_time_weight(date_str: str, today: str) -> float:
+    """根据交锋日期距今天数返回时间衰减权重"""
+    from datetime import datetime
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        t = datetime.strptime(today, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return _H2H_TIME_DEFAULT
+    days = (t - d).days
+    if days < 0:
+        days = 0
+    for threshold, weight in _H2H_TIME_WEIGHTS:
+        if days <= threshold:
+            return weight
+    return _H2H_TIME_DEFAULT
+
+
+def _parse_h2h_record(record: Dict, upper_team: str, lower_team: str,
+                      current_handicap: float, today: str,
+                      focus_is_upper: bool = False) -> Optional[Dict]:
+    """解析单条H2H记录，提取标准化信息
+
+    Args:
+        focus_is_upper: 500.com页面主队(focus team)是否为上盘方。
+            asianResult始终从focus team视角报告。
+
+    Returns:
+        {time_weight, is_win_upper, is_win_lower, is_push, ...}
+        or None if record unusable
+    """
+    match_text = record.get("match", "")
+    date = record.get("date", "")
+    handicap_str = record.get("handicap", "")
+    asian_result = (record.get("asianResult") or "").strip()
+
+    if not match_text or not date:
+        return None
+
+    time_weight = _h2h_time_weight(date, today)
+
+    # 判断当前上盘队在这条记录中的主客身份(用于盘口换算)
+    upper_is_home = _team_in_match(upper_team, match_text)
+    if upper_is_home is None:
+        lower_is_home = _team_in_match(lower_team, match_text)
+        if lower_is_home is None:
+            return None
+        upper_is_home = not lower_is_home
+
+    # 赢盘结果：500.com的asianResult是从"当前比赛页面主队(focus team)"视角
+    # 不是该条记录各自主队的视角
+    is_focus_win = asian_result in ("赢", "赢半")
+    is_focus_lose = asian_result in ("输", "输半")
+    is_push = asian_result in ("走", "走盘", "走水")
+
+    if focus_is_upper:
+        is_win_upper = is_focus_win
+        is_win_lower = is_focus_lose
+    else:
+        is_win_upper = is_focus_lose
+        is_win_lower = is_focus_win
+
+    # 盘口统一换算到上盘队视角的"纯实力差"（去除主场优势）
+    # 目标：diff > 0 表示历史盘口反映出上盘更强于当前评估 → 当前盘口给少了 → 上盘实力下降
+    # 500.com h2h的handicap: 正值=该条记录主队让球, 负值=主队受让(客队让)
+    normalized_handicap_diff = None
+    if handicap_str:
+        try:
+            h_val = float(handicap_str)
+        except (ValueError, TypeError):
+            h_val = None
+        if h_val is not None:
+            # 历史：h_val正=记录主队让球, 盘口 = 主队纯实力 + 主场优势
+            # 上盘队纯实力差 = 上盘队让球数 - 主场优势(如果上盘是主) 或 + 主场优势(如果上盘是客)
+            if upper_is_home:
+                # 上盘是该记录主队 → 让球=h_val → 纯实力 = h_val - HOME_ADVANTAGE
+                hist_upper_strength = h_val - HOME_ADVANTAGE
+            else:
+                # 上盘是该记录客队 → 主队让h_val意味着主队比客强
+                # 上盘(客)纯实力 = -h_val + HOME_ADVANTAGE (客场补偿)
+                # 即: 盘口反映主队让h_val,包含了上盘队的客场劣势
+                hist_upper_strength = -h_val + HOME_ADVANTAGE
+
+            # 当前上盘队纯实力差：上盘让|current_handicap|球
+            # current_handicap < 0 → 主队让球=主队是上盘, 让球数=|current_handicap|
+            # 上盘是主场时: 纯实力 = 让球数 - HOME_ADVANTAGE
+            # 上盘是客场时: 纯实力 = 让球数 + HOME_ADVANTAGE
+            is_upper_home_now = current_handicap < 0
+            let_amount = abs(current_handicap)
+            if is_upper_home_now:
+                current_upper_strength = let_amount - HOME_ADVANTAGE
+            else:
+                current_upper_strength = let_amount + HOME_ADVANTAGE
+
+            normalized_handicap_diff = hist_upper_strength - current_upper_strength
+
+    return {
+        "time_weight": time_weight,
+        "is_win_upper": is_win_upper,
+        "is_win_lower": is_win_lower,
+        "is_push": is_push,
+        "has_result": asian_result in ("赢", "赢半", "输", "输半", "走", "走盘", "走水"),
+        "handicap_diff": normalized_handicap_diff,
+    }
+
+
+def calc_factor2(match_data: Optional[Dict], match_info: Dict,
+                 ai_f2_list: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    """F2 交锋历史：量化子因素投票 + AI辅助
+
+    子因素:
+      1. 有效性评估（场次×时间权重 → 决定score上限）
+      2. 加权赢盘率（时间衰减加权的交锋盘路）
+      3. 盘口变化分析（历史盘口vs当前盘口的实力差变化）
+      4. AI辅助判断（3次调用取多数，不一致则舍弃）
+
+    Returns:
+        {"name": "交锋历史", "score": int, "direction": str, "reason": str, "details": [...]}
+    """
+    from datetime import date as date_type
+
+    handicap = match_info.get("handicap")
+    if handicap is None:
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": "无盘口数据", "details": []}
+
+    current_handicap = float(handicap)
+    is_home_let = current_handicap < 0
+    home = match_info.get("home_team", "主队")
+    away = match_info.get("away_team", "客队")
+    upper_team = home if is_home_let else away
+    lower_team = away if is_home_let else home
+
+    if not match_data:
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": "无基本面数据", "details": []}
+
+    h2h = match_data.get("h2h", [])
+    if not h2h:
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": "无交锋记录", "details": []}
+
+    today = date_type.today().strftime("%Y-%m-%d")
+    match_date = match_info.get("match_date", "")
+
+    # 过滤掉当前比赛本身(500.com h2h会包含本场,日期可能差1天)
+    if match_date:
+        from datetime import datetime, timedelta
+        try:
+            md = datetime.strptime(match_date, "%Y-%m-%d")
+            exclude_start = (md - timedelta(days=1)).strftime("%Y-%m-%d")
+            exclude_end = (md + timedelta(days=1)).strftime("%Y-%m-%d")
+            h2h = [r for r in h2h if not (exclude_start <= r.get("date", "") <= exclude_end)]
+        except (ValueError, TypeError):
+            h2h = [r for r in h2h if r.get("date", "") != match_date]
+    elif h2h:
+        first_date = h2h[0].get("date", "")
+        if first_date >= today:
+            h2h = h2h[1:]
+
+    if not h2h:
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": "无历史交锋记录", "details": []}
+
+    # 解析所有H2H记录
+    # 500.com h2h的asianResult始终从页面主队(home_team)视角报告
+    focus_is_upper = is_home_let  # 主队让球=主队是上盘
+    parsed = []
+    for r in h2h:
+        p = _parse_h2h_record(r, upper_team, lower_team, current_handicap, today, focus_is_upper)
+        if p:
+            parsed.append(p)
+
+    if not parsed:
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": "交锋记录无法解析", "details": []}
+
+    details = []
+
+    # --- 子因素1: 有效性评估 ---
+    effective_weight = sum(p["time_weight"] for p in parsed)
+    total_count = len(parsed)
+    recent_count = sum(1 for p in parsed if p["time_weight"] >= 0.7)
+
+    if effective_weight < 0.5:
+        sub1_level = "invalid"
+        sub1_desc = f"{total_count}场交锋但加权有效值{effective_weight:.1f}(过低)"
+    elif effective_weight < 1.0:
+        sub1_level = "low"
+        sub1_desc = f"{total_count}场(近期{recent_count}场)，有效值{effective_weight:.1f}"
+    elif effective_weight < 2.0:
+        sub1_level = "medium"
+        sub1_desc = f"{total_count}场(近期{recent_count}场)，有效值{effective_weight:.1f}"
+    else:
+        sub1_level = "high"
+        sub1_desc = f"{total_count}场(近期{recent_count}场)，有效值{effective_weight:.1f}"
+    details.append({"name": "有效性", "direction": "neutral", "desc": sub1_desc})
+
+    if sub1_level == "invalid":
+        return {"name": "交锋历史", "score": 5, "direction": "neutral",
+                "reason": f"交锋{total_count}场但时间久远，无参考价值", "details": details}
+
+    score_cap = {"low": 6, "medium": 8, "high": 10}[sub1_level]
+
+    # --- 子因素2: 加权赢盘率 ---
+    sub2_dir = "neutral"
+    upper_cover_w = 0.0
+    lower_cover_w = 0.0
+    total_cover_w = 0.0
+
+    for p in parsed:
+        if not p["has_result"]:
+            continue
+        if p["is_push"]:
+            continue
+        w = p["time_weight"]
+        if p["is_win_upper"]:
+            upper_cover_w += w
+        elif p["is_win_lower"]:
+            lower_cover_w += w
+        total_cover_w += w
+
+    if total_cover_w > 0.5:
+        upper_rate = upper_cover_w / total_cover_w
+        lower_rate = lower_cover_w / total_cover_w
+        sub2_desc = f"上盘赢盘{upper_rate:.0%} vs 下盘赢盘{lower_rate:.0%}(加权)"
+        if upper_rate >= 0.65:
+            sub2_dir = "upper"
+        elif lower_rate >= 0.65:
+            sub2_dir = "lower"
+        elif upper_rate >= 0.55:
+            sub2_dir = "upper"
+        elif lower_rate >= 0.55:
+            sub2_dir = "lower"
+    else:
+        sub2_desc = "有结果的交锋样本不足"
+    details.append({"name": "加权赢盘率", "direction": sub2_dir, "desc": sub2_desc})
+
+    # --- 子因素3: 盘口变化分析 ---
+    sub3_dir = "neutral"
+    diffs_with_weight = [(p["handicap_diff"], p["time_weight"])
+                         for p in parsed if p["handicap_diff"] is not None]
+
+    if diffs_with_weight:
+        total_w = sum(w for _, w in diffs_with_weight)
+        avg_diff = sum(d * w for d, w in diffs_with_weight) / total_w if total_w > 0 else 0
+
+        # avg_diff > 0: 历史上上盘队实力差比现在大 → 上盘队实力在下降 → 偏下盘
+        # avg_diff < 0: 历史上上盘队实力差比现在小 → 上盘队实力在上升 → 偏上盘
+        if avg_diff >= 0.5:
+            sub3_dir = "lower"
+            sub3_desc = f"盘口缩小{avg_diff:.2f}球(上盘实力下降趋势)"
+        elif avg_diff >= 0.25:
+            sub3_dir = "lower"
+            sub3_desc = f"盘口略缩{avg_diff:.2f}球(上盘略弱于历史)"
+        elif avg_diff <= -0.5:
+            sub3_dir = "upper"
+            sub3_desc = f"盘口加深{-avg_diff:.2f}球(上盘实力上升趋势)"
+        elif avg_diff <= -0.25:
+            sub3_dir = "upper"
+            sub3_desc = f"盘口略深{-avg_diff:.2f}球(上盘略强于历史)"
+        else:
+            sub3_desc = f"盘口变化{avg_diff:+.2f}球(格局稳定)"
+    else:
+        sub3_desc = "历史盘口数据不足"
+    details.append({"name": "盘口变化", "direction": sub3_dir, "desc": sub3_desc})
+
+    # --- 子因素4: AI辅助（3次取多数） ---
+    sub4_dir = "neutral"
+    if ai_f2_list:
+        ai_dirs = [f.get("direction", "neutral") for f in ai_f2_list if f]
+        ai_upper = ai_dirs.count("upper")
+        ai_lower = ai_dirs.count("lower")
+        ai_reasons = [f.get("reason", "") for f in ai_f2_list if f]
+
+        if ai_upper >= 2:
+            sub4_dir = "upper"
+            sub4_desc = f"3次AI: {ai_upper}次上盘/{ai_lower}次下盘"
+        elif ai_lower >= 2:
+            sub4_dir = "lower"
+            sub4_desc = f"3次AI: {ai_upper}次上盘/{ai_lower}次下盘"
+        else:
+            sub4_desc = f"AI不一致({ai_upper}上/{ai_lower}下/{len(ai_dirs)-ai_upper-ai_lower}中)，舍弃"
+
+        if ai_reasons:
+            sub4_desc += f"（{ai_reasons[0]}）"
+    else:
+        sub4_desc = "AI未调用"
+    details.append({"name": "AI辅助", "direction": sub4_dir, "desc": sub4_desc})
+
+    # --- 投票汇总 ---
+    votes = [sub2_dir, sub3_dir, sub4_dir]
+    upper_votes = votes.count("upper")
+    lower_votes = votes.count("lower")
+
+    if upper_votes > lower_votes:
+        direction = "upper"
+        majority = upper_votes
+    elif lower_votes > upper_votes:
+        direction = "lower"
+        majority = lower_votes
+    else:
+        direction = "neutral"
+        majority = 0
+
+    if majority >= 3:
+        score = 8
+    elif majority == 2:
+        score = 7
+    else:
+        score = 5
+
+    score = min(score, score_cap)
+
+    # 构建reason
+    if direction == "neutral":
+        parts_u = [n for n, d in [("赢盘", sub2_dir), ("盘口", sub3_dir), ("AI", sub4_dir)] if d == "upper"]
+        parts_l = [n for n, d in [("赢盘", sub2_dir), ("盘口", sub3_dir), ("AI", sub4_dir)] if d == "lower"]
+        if parts_u and parts_l:
+            reason = f"方向分歧({'+'.join(parts_u)}↑ vs {'+'.join(parts_l)}↓)"
+        else:
+            reason = "交锋历史无明确信号"
+    else:
+        reasons = []
+        if sub2_dir == direction:
+            reasons.append(f"赢盘率偏{'上' if direction == 'upper' else '下'}")
+        if sub3_dir == direction:
+            reasons.append("盘口趋势支撑")
+        if sub4_dir == direction:
+            reasons.append("AI同向")
+        reason = "，".join(reasons[:3]) if reasons else "交锋历史偏向明确"
+
+    return {"name": "交锋历史", "score": score, "direction": direction,
+            "reason": reason, "details": details}
+
+
+# ============================================================
+# F3 实力定位 - 排名对比(量化) + AI底蕴判断(3次投票)
+# ============================================================
+
+
+def calc_factor3(match_info: Dict, ai_f3_list: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    """F3 实力定位: 排名对比(量化) + AI底蕴判断(3次投票)
+
+    核心逻辑：大众第一印象谁更强（不考虑盘口深浅）
+    子因素:
+      1. 排名对比: 上盘方排名是否明显优于下盘方
+      2. AI底蕴判断: 3次调用取多数投票
+    """
+    details = []
+    handicap = match_info.get("handicap")
+    is_home_let = handicap is not None and float(handicap) < 0
+
+    home_rank = match_info.get("home_rank")
+    away_rank = match_info.get("away_rank")
+
+    # --- 子因素1: 排名对比 ---
+    sub1_dir = "neutral"
+    sub1_desc = "无排名数据"
+
+    if home_rank and away_rank:
+        try:
+            hr = int(home_rank)
+            ar = int(away_rank)
+            upper_rank = hr if is_home_let else ar
+            lower_rank = ar if is_home_let else hr
+            rank_diff = lower_rank - upper_rank  # 正值=上盘方排名靠前(数字小)
+
+            if rank_diff >= 10:
+                sub1_dir = "upper"
+                sub1_desc = f"上盘方排名第{upper_rank}，下盘方第{lower_rank}，实力差距大"
+            elif rank_diff >= 5:
+                sub1_dir = "upper"
+                sub1_desc = f"上盘方排名第{upper_rank}，下盘方第{lower_rank}，上盘方实力占优"
+            elif rank_diff >= 2:
+                sub1_desc = f"上盘方排名第{upper_rank}，下盘方第{lower_rank}，实力接近"
+            elif rank_diff >= 0:
+                sub1_desc = f"双方排名接近(第{upper_rank} vs 第{lower_rank})"
+            else:
+                sub1_dir = "lower"
+                sub1_desc = f"下盘方排名({lower_rank})反而高于上盘方({upper_rank})，下盘实力更强"
+        except (ValueError, TypeError):
+            sub1_desc = "排名数据异常"
+    details.append({"name": "排名对比", "direction": sub1_dir, "desc": sub1_desc})
+
+    # --- 子因素2: AI底蕴判断（3次投票取多数） ---
+    sub2_dir = "neutral"
+    sub2_desc = "AI未返回结果"
+
+    if ai_f3_list:
+        ai_dirs = [f.get("direction", "neutral") for f in ai_f3_list if f]
+        ai_upper = ai_dirs.count("upper")
+        ai_lower = ai_dirs.count("lower")
+        ai_reasons = [f.get("reason", "") for f in ai_f3_list if f]
+
+        if ai_upper >= 2:
+            sub2_dir = "upper"
+            reason_text = next((r for r in ai_reasons if r), "上盘底蕴占优")
+            sub2_desc = f"3次AI判断{ai_upper}次看上盘: {reason_text}"
+        elif ai_lower >= 2:
+            sub2_dir = "lower"
+            reason_text = next((r for r in ai_reasons if r), "盘口高估上盘")
+            sub2_desc = f"3次AI判断{ai_lower}次看下盘: {reason_text}"
+        else:
+            ai_neutral = ai_dirs.count("neutral")
+            sub2_desc = f"AI判断无共识(上{ai_upper}/下{ai_lower}/中{ai_neutral})，无明确底蕴偏向"
+    details.append({"name": "AI底蕴判断", "direction": sub2_dir, "desc": sub2_desc})
+
+    # --- 综合结论（当前仅展示，不参与方向加权） ---
+    # F3暂固定neutral：避免"上盘总是更强"产生系统性偏移
+    # 后续实现逆向信号机制后再激活方向输出
+    upper_signals = sum(1 for d in details if d["direction"] == "upper")
+    lower_signals = sum(1 for d in details if d["direction"] == "lower")
+
+    if upper_signals > lower_signals:
+        reason = "上盘方实力底蕴占优(仅供参考)"
+    elif lower_signals > upper_signals:
+        reason = "下盘方实力底蕴占优(仅供参考)"
+    else:
+        reason = "双方实力定位接近"
+
+    return {"name": "实力定位", "score": 5, "direction": "neutral",
+            "reason": reason, "details": details}
+
+
+# ============================================================
+# 近期状态量化指标 - 代码算客观数据，喂给 AI 推理(F1/F2)
 # ============================================================
 
 def _team_in_match(team: str, match_text: str) -> Optional[bool]:
@@ -452,8 +1486,8 @@ def calc_factor6(is_single: bool, f5_direction: str, f5_score: int) -> Dict[str,
 
 
 # ============================================================
-# F1 近期状态 / F2 交锋历史 / F3 实力定位 - DeepSeek 推理
-# (代码喂量化指标; F4赔率变动、F5市场热度、F6单关 已纯量化计算)
+# F1/F2/F3 AI辅助 - DeepSeek 推理(代码喂量化指标)
+# (F4市场信号、F5市场热度、F6单关 已纯量化计算)
 # ============================================================
 
 AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据提供的比赛数据，从以下3个维度分析让球盘方向（上盘=让球方赢盘，下盘=受让方赢盘）。
@@ -475,9 +1509,10 @@ AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据
 2. **交锋历史**：分析双方近期交锋，**重点看亚盘赢盘记录(asianResult)而非单纯胜负**，并关注类似盘口下的表现。
    - 上盘方历史多次赢盘 → 偏上盘；上盘方历史常赢球但输盘，或交锋胶着 → 偏下盘。
 
-3. **实力定位**：判断当前盘口与实力差距是否匹配。衡量"盘口开得合不合理"，不是"谁更强"。
-   - 我提供了上盘方近期"被开出的平均盘口深度"作参考。本场盘口明显深于其历史均值→市场高估上盘方→偏下盘；明显浅于→上盘方被低估→偏上盘；基本匹配→neutral。
-   - 关键：实力强 ≠ 上盘，盘口合理时给 neutral。
+3. **实力定位**：从大众第一印象判断哪支球队整体实力更强（不考虑盘口深浅，盘口由其他因子分析）。
+   - 评估维度：历史底蕴(豪门/劲旅/中游/保级队/升班马)、联赛地位、欧战经历、阵容配置档次、教练水平。
+   - 上盘方(让球方)综合实力底蕴明显强于下盘方 → upper；下盘方底蕴反而更强或双方接近 → lower或neutral。
+   - 这是纯粹的"大众认为谁更强"，不需要考虑盘口是否合理。
 
 请严格按以下JSON格式输出(必须包含全部3个因子)：
 
@@ -551,12 +1586,6 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
                 label = f"{away}(客队{'，本场下盘' if is_home_let else '，本场上盘'})"
                 parts.append(_format_form_metrics(am, label))
 
-        # 上盘方近期平均盘口深度(供F3实力定位参考)
-        upper_recent = home_recent if is_home_let else away_recent
-        avg_h = _avg_abs_handicap(upper_recent)
-        if avg_h is not None and handicap is not None:
-            parts.append(f"\n【实力定位参考】{upper_team}近期被开出的平均让球深度约{avg_h:.2f}球，"
-                         f"本场让{abs(float(handicap)):.2f}球")
 
         # 近期比赛明细(供AI核对)
         if home_recent:
@@ -569,11 +1598,33 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
                 parts.append(f"  {r.get('date','')} {r.get('match','')} {r.get('result','')} 盘口:{r.get('handicap','-')} 亚盘:{r.get('asianResult','-')}")
 
         if h2h:
-            parts.append(f"\n双方近{len(h2h)}次交锋:")
-            for r in h2h[:6]:
-                import re
-                match_text = re.sub(r'\[\d+\]', '', r.get('match', ''))
-                parts.append(f"  {r.get('date','')} {match_text} {r.get('result','')} 盘口:{r.get('handicap','?')} 亚盘:{r.get('asianResult','')}")
+            import re
+            from datetime import datetime, timedelta
+            # 过滤当前比赛(日期±1天)
+            match_date = match_info.get("match_date", "")
+            filtered_h2h = h2h
+            if match_date:
+                try:
+                    md = datetime.strptime(match_date, "%Y-%m-%d")
+                    ex_start = (md - timedelta(days=1)).strftime("%Y-%m-%d")
+                    ex_end = (md + timedelta(days=1)).strftime("%Y-%m-%d")
+                    filtered_h2h = [r for r in h2h if not (ex_start <= r.get("date", "") <= ex_end)]
+                except (ValueError, TypeError):
+                    pass
+
+            if filtered_h2h:
+                parts.append(f"\n{upper_team}与{lower_team}近{len(filtered_h2h)}次交锋(亚盘结果从{upper_team}上盘视角):")
+                for r in filtered_h2h[:6]:
+                    match_text = re.sub(r'\[\d+\]', '', r.get('match', ''))
+                    # 转换asianResult为上盘方视角
+                    raw_ar = (r.get('asianResult') or '').strip()
+                    if is_home_let:
+                        upper_ar = raw_ar  # 页面主队=上盘方，视角一致
+                    else:
+                        # 页面主队=下盘方，需要翻转
+                        flip = {"赢": "输", "赢半": "输半", "输": "赢", "输半": "赢半", "走": "走"}
+                        upper_ar = flip.get(raw_ar, raw_ar)
+                    parts.append(f"  {r.get('date','')} {match_text} {r.get('result','')} 盘口:{r.get('handicap','?')} {upper_team}{'赢盘' if upper_ar in ('赢','赢半') else '输盘' if upper_ar in ('输','输半') else '走盘'}")
 
     # 市场热度相关补充
     if match_info.get("market_heat_desc"):
@@ -804,13 +1855,15 @@ def generate_analysis(factors: List[Dict], prediction: Dict, match_info: Dict) -
 
 
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
-                  asian_data: Optional[List] = None) -> Dict[str, Any]:
+                  asian_data: Optional[List] = None,
+                  euro_data: Optional[Dict] = None) -> Dict[str, Any]:
     """完整预测流程
 
     Args:
         match_info: 比赛基本信息 (league, home_team, away_team, handicap, is_single, etc.)
         match_data: 500.com基本面数据 (h2h, homeRecent, awayRecent)
         asian_data: 500.com亚盘数据列表
+        euro_data: 500.com欧赔数据 {"companies": [...], "summary": {...}}
 
     Returns:
         {"factors": [...], "prediction": {...}}
@@ -819,19 +1872,44 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     is_home_let = handicap is not None and float(handicap) < 0
     is_single = bool(match_info.get("is_single"))
 
-    # F4 赔率变动：纯量化（盘口+水位综合）
-    f4 = calc_factor4(asian_data or [], is_home_let)
+    # F4 市场信号：初盘+亚盘变动+欧赔变动+亚欧一致性
+    f4 = calc_factor4(asian_data or [], is_home_let, euro_data)
     # F5 市场热度：纯量化（多公司水位一致性）+ 用户手动输入优先
     f5 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"))
 
-    # F1近期状态/F2交锋历史/F3实力定位：DeepSeek 推理
-    # (代码已在 prompt 中提供近期积分、主客场、不败、赢盘率、平均盘口深度等客观指标)
+    # F1/F2/F3: DeepSeek推理(3次调用取多数，并行加速)
     prompt = build_ai_prompt(match_info, match_data)
-    ai_factors = call_deepseek_factors(prompt)
 
-    f1 = next((f for f in ai_factors if f["name"] == "近期状态"), {"name": "近期状态", "score": 5, "direction": "neutral", "reason": "数据不足"})
-    f2 = next((f for f in ai_factors if f["name"] == "交锋历史"), {"name": "交锋历史", "score": 5, "direction": "neutral", "reason": "数据不足"})
-    f3 = next((f for f in ai_factors if f["name"] == "实力定位"), {"name": "实力定位", "score": 5, "direction": "neutral", "reason": "数据不足"})
+    ai_f1_list = []
+    ai_f2_list = []
+    ai_f3_list = []
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _safe_call(_prompt):
+        try:
+            return call_deepseek_factors(_prompt)
+        except Exception as e:
+            logger.warning(f"[predict] AI调用异常: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(_safe_call, prompt) for _ in range(3)]
+        for future in futures:
+            ai_factors = future.result()
+            ai_f1 = next((f for f in ai_factors if f["name"] == "近期状态"), None)
+            if ai_f1:
+                ai_f1_list.append(ai_f1)
+            ai_f2 = next((f for f in ai_factors if f["name"] == "交锋历史"), None)
+            if ai_f2:
+                ai_f2_list.append(ai_f2)
+            ai_f3 = next((f for f in ai_factors if f["name"] == "实力定位"), None)
+            if ai_f3:
+                ai_f3_list.append(ai_f3)
+
+    f1 = calc_factor1(match_data, match_info, ai_f1_list or None)
+    f2 = calc_factor2(match_data, match_info, ai_f2_list or None)
+    f3 = calc_factor3(match_info, ai_f3_list or None)
 
     # F6: 单关修正（基于F5结果）
     f6 = calc_factor6(is_single, f5["direction"], f5["score"])

@@ -337,6 +337,114 @@ def sync_initial_odds(sqlite_conn, mysql_conn):
     return inserted
 
 
+def ensure_asian_table(mysql_conn):
+    """确保亚盘数据表存在"""
+    with mysql_conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS okooo_asian_odds (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                match_id VARCHAR(100) NOT NULL,
+                company VARCHAR(50) NOT NULL,
+                initial_home_odds DECIMAL(6,3),
+                initial_handicap DECIMAL(6,3) COMMENT '正=主让,负=客让(与500.com一致)',
+                initial_away_odds DECIMAL(6,3),
+                latest_home_odds DECIMAL(6,3),
+                latest_handicap DECIMAL(6,3),
+                latest_away_odds DECIMAL(6,3),
+                UNIQUE KEY uk_match_company (match_id, company),
+                INDEX idx_match (match_id),
+                FOREIGN KEY (match_id) REFERENCES matches(match_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+    mysql_conn.commit()
+
+
+def sync_okooo_asian(sqlite_conn, mysql_conn):
+    """同步okooo亚盘数据(初盘+终盘)到MySQL"""
+    cursor = sqlite_conn.cursor()
+    cursor.execute("""
+        SELECT m.id as jczq_id, o.company,
+               o.initial_home_odds, o.initial_handicap_value, o.initial_away_odds,
+               o.latest_home_odds, o.latest_handicap_value, o.latest_away_odds
+        FROM okooo_asian_handicap o
+        JOIN jczq_matches m ON o.match_num = m.match_num AND o.scrape_date = m.match_date
+        WHERE m.match_date >= '2026-01-01'
+          AND o.initial_home_odds IS NOT NULL
+          AND o.latest_home_odds IS NOT NULL
+          AND o.initial_handicap_value IS NOT NULL
+        ORDER BY m.id, o.company
+    """)
+    rows = cursor.fetchall()
+    print(f"从 jczq.db 读取到 {len(rows)} 条 okooo 亚盘数据")
+
+    inserted = 0
+    skipped = 0
+    batch = []
+
+    with mysql_conn.cursor() as cur:
+        for row in rows:
+            match_id = f"jczq_{row['jczq_id']}"
+            company = _normalize_company(row["company"])
+
+            batch.append((
+                match_id, company,
+                row["initial_home_odds"], row["initial_handicap_value"], row["initial_away_odds"],
+                row["latest_home_odds"], row["latest_handicap_value"], row["latest_away_odds"],
+            ))
+
+            if len(batch) >= 1000:
+                ins, skip = _insert_asian_batch(cur, batch)
+                inserted += ins
+                skipped += skip
+                batch = []
+
+        if batch:
+            ins, skip = _insert_asian_batch(cur, batch)
+            inserted += ins
+            skipped += skip
+
+    mysql_conn.commit()
+    print(f"  同步亚盘: 新增 {inserted} 条, 跳过 {skipped} 条")
+    return inserted
+
+
+def _normalize_company(name: str) -> str:
+    """统一公司名(与500.com抓取的名称对齐)"""
+    mapping = {
+        "澳门彩票": "澳门",
+        "威廉.希尔": "威廉希尔",
+        "伟德国际": "伟德",
+        "利记菲律宾": "利记",
+        "12bet.com": "12Bet",
+        "12bet.com菲律宾": "12Bet",
+    }
+    return mapping.get(name, name)
+
+
+def _insert_asian_batch(cur, batch):
+    inserted = 0
+    skipped = 0
+    for row in batch:
+        try:
+            cur.execute("""
+                INSERT INTO okooo_asian_odds
+                (match_id, company, initial_home_odds, initial_handicap,
+                 initial_away_odds, latest_home_odds, latest_handicap, latest_away_odds)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    initial_home_odds = VALUES(initial_home_odds),
+                    initial_handicap = VALUES(initial_handicap),
+                    initial_away_odds = VALUES(initial_away_odds),
+                    latest_home_odds = VALUES(latest_home_odds),
+                    latest_handicap = VALUES(latest_handicap),
+                    latest_away_odds = VALUES(latest_away_odds)
+            """, row)
+            inserted += cur.rowcount
+        except Exception:
+            skipped += 1
+    return inserted, skipped
+
+
 def run():
     print("=" * 60)
     print("开始同步 2026 年竞彩历史数据")
@@ -349,10 +457,12 @@ def run():
 
     try:
         ensure_history_tables(mysql_conn)
+        ensure_asian_table(mysql_conn)
         sync_matches(sqlite_conn, mysql_conn)
         sync_initial_odds(sqlite_conn, mysql_conn)
         sync_odds_movement(sqlite_conn, mysql_conn)
         sync_final_odds(sqlite_conn, mysql_conn)
+        sync_okooo_asian(sqlite_conn, mysql_conn)
 
         # 统计最终结果
         with mysql_conn.cursor() as cur:
@@ -362,12 +472,15 @@ def run():
             o_count = cur.fetchone()["cnt"]
             cur.execute("SELECT COUNT(*) as cnt FROM jczq_odds_history")
             h_count = cur.fetchone()["cnt"]
+            cur.execute("SELECT COUNT(*) as cnt FROM okooo_asian_odds")
+            a_count = cur.fetchone()["cnt"]
 
         print("\n" + "=" * 60)
         print("同步完成!")
         print(f"  历史比赛: {m_count} 条")
-        print(f"  赔率记录: {o_count} 条")
-        print(f"  赔率变动历史: {h_count} 条")
+        print(f"  竞彩赔率记录: {o_count} 条")
+        print(f"  竞彩赔率变动: {h_count} 条")
+        print(f"  亚盘数据: {a_count} 条")
         print("=" * 60)
 
     finally:

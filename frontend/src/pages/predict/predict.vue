@@ -26,7 +26,7 @@
     <view class="match-info-bar" v-if="selectedMatch">
       <text class="info-league" :style="{ backgroundColor: pickLeagueColor(selectedMatch.league) }">{{ selectedMatch.league }}</text>
       <text class="info-time">{{ selectedMatch.matchDate.slice(5) }} {{ selectedMatch.matchTime.slice(0, 5) }}</text>
-      <text class="info-handicap" v-if="selectedMatch.handicap">{{ formatHandicap(selectedMatch.handicap) }}</text>
+      <text class="info-handicap" v-if="selectedMatch.handicap != null">{{ formatHandicap(selectedMatch.handicap) }}</text>
       <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
     </view>
 
@@ -69,6 +69,14 @@
               <view class="bar-fill" :style="{ width: step.score * 10 + '%' }"></view>
             </view>
             <text class="step-reason" v-if="step.status === 'done'">{{ step.reason }}</text>
+            <!-- F1子因素详情 -->
+            <view class="sub-factors" v-if="step.status === 'done' && step.details && step.details.length > 0">
+              <view class="sub-factor-item" v-for="(sub, si) in step.details" :key="si">
+                <text class="sub-dir-dot" :class="sub.direction">●</text>
+                <text class="sub-name">{{ sub.name }}</text>
+                <text class="sub-desc">{{ sub.desc }}</text>
+              </view>
+            </view>
           </view>
         </view>
       </view>
@@ -155,21 +163,36 @@
           <view class="sheet-close" @tap="showPicker = false"><text>✕</text></view>
         </view>
 
-        <view class="sheet-search">
-          <input class="search-input" v-model="searchKey" placeholder="搜索队伍名称" placeholder-style="color:#b0b7c0" />
-        </view>
-
-        <scroll-view class="date-tabs" scroll-x>
-          <view
-            class="date-tab"
-            v-for="d in availableDates"
-            :key="d.value"
-            :class="{ active: filterDate === d.value }"
-            @tap="filterDate = d.value"
-          >
-            <text>{{ d.label }}</text>
+        <view class="sheet-filters">
+          <view class="filter-row">
+            <view class="date-picker-wrap" @tap="openDatePicker">
+              <view class="date-picker-btn">
+                <text class="date-picker-text">{{ filterDateLabel }}</text>
+                <text class="date-picker-icon">▼</text>
+              </view>
+            </view>
+            <input class="search-input" v-model="searchKey" placeholder="搜索队伍" placeholder-style="color:#b0b7c0" />
           </view>
-        </scroll-view>
+
+          <scroll-view class="league-tabs" scroll-x>
+            <view
+              class="league-tab"
+              :class="{ active: filterLeague === 'all' }"
+              @tap="filterLeague = 'all'"
+            >
+              <text>全部</text>
+            </view>
+            <view
+              class="league-tab"
+              v-for="lg in availableLeagues"
+              :key="lg"
+              :class="{ active: filterLeague === lg }"
+              @tap="filterLeague = lg"
+            >
+              <text>{{ lg }}</text>
+            </view>
+          </scroll-view>
+        </view>
 
         <scroll-view class="match-list" scroll-y>
           <view
@@ -205,6 +228,7 @@ const selectedMatch = ref(null)
 const showPicker = ref(false)
 const searchKey = ref('')
 const filterDate = ref('all')
+const filterLeague = ref('all')
 const analyzing = ref(false)
 const analysisComplete = ref(false)
 const analysisSteps = ref([])
@@ -213,6 +237,20 @@ const aiAnalysis = ref('')
 
 const allMatches = ref([])
 const loadingMatches = ref(false)
+const finishedDates = ref([])
+
+async function fetchDates() {
+  if (matchStatus.value !== 'finished') return
+  try {
+    const data = await request({ url: '/api/predict/dates', data: { status: 'finished' } })
+    finishedDates.value = data?.dates || []
+    if (finishedDates.value.length > 0 && (filterDate.value === 'all' || !filterDate.value)) {
+      filterDate.value = finishedDates.value[0]
+    }
+  } catch (e) {
+    finishedDates.value = []
+  }
+}
 
 async function fetchMatches() {
   loadingMatches.value = true
@@ -246,20 +284,66 @@ async function fetchMatches() {
 
 const pickerMatches = computed(() => allMatches.value)
 
-const availableDates = computed(() => {
-  const dates = [...new Set(pickerMatches.value.map(m => m.matchDate))].sort()
+const filterDateLabel = computed(() => {
+  if (!filterDate.value || filterDate.value === 'all') return '选择日期'
+  return filterDate.value.slice(5)
+})
+
+const pickerDateValue = computed(() => {
+  if (filterDate.value && filterDate.value !== 'all') return filterDate.value
+  return new Date().toISOString().slice(0, 10)
+})
+
+const dateRange = computed(() => {
   if (matchStatus.value === 'finished') {
-    return dates.sort((a, b) => b.localeCompare(a)).map(d => ({ value: d, label: d.slice(5) }))
+    const end = finishedDates.value[0] || new Date().toISOString().slice(0, 10)
+    const start = finishedDates.value[finishedDates.value.length - 1] || '2026-01-01'
+    return { start, end }
   }
-  const items = [{ value: 'all', label: '全部' }]
-  dates.forEach(d => items.push({ value: d, label: d.slice(5) }))
-  return items
+  const today = new Date().toISOString().slice(0, 10)
+  return { start: today, end: '2026-12-31' }
+})
+
+function openDatePicker() {
+  // #ifdef H5
+  const input = document.createElement('input')
+  input.type = 'date'
+  input.value = pickerDateValue.value
+  if (dateRange.value.start) input.min = dateRange.value.start
+  if (dateRange.value.end) input.max = dateRange.value.end
+  input.style.cssText = 'position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:99999;opacity:0;pointer-events:none;'
+  document.body.appendChild(input)
+  input.showPicker ? input.showPicker() : input.click()
+  input.addEventListener('change', () => {
+    if (input.value) filterDate.value = input.value
+    document.body.removeChild(input)
+  })
+  input.addEventListener('blur', () => {
+    setTimeout(() => { if (document.body.contains(input)) document.body.removeChild(input) }, 200)
+  })
+  // #endif
+  // #ifndef H5
+  uni.showActionSheet({
+    itemList: finishedDates.value.slice(0, 20).map(d => d.slice(5)),
+    success: (res) => {
+      filterDate.value = finishedDates.value[res.tapIndex]
+    }
+  })
+  // #endif
+}
+
+const availableLeagues = computed(() => {
+  const leagues = [...new Set(pickerMatches.value.map(m => m.league))].sort()
+  return leagues
 })
 
 const filteredPickerMatches = computed(() => {
   let list = pickerMatches.value
-  if (filterDate.value !== 'all') {
+  if (filterDate.value && filterDate.value !== 'all') {
     list = list.filter(m => m.matchDate === filterDate.value)
+  }
+  if (filterLeague.value && filterLeague.value !== 'all') {
+    list = list.filter(m => m.league === filterLeague.value)
   }
   if (searchKey.value) {
     const key = searchKey.value.toLowerCase()
@@ -312,7 +396,7 @@ const predictionHit = computed(() => {
   return actualDirection.value === prediction.value.direction
 })
 
-const factorNames = ['近期状态', '交锋历史', '实力定位', '赔率变动', '市场热度', '单关修正']
+const factorNames = ['近期状态', '交锋历史', '实力定位', '市场信号', '市场热度', '单关修正']
 
 function selectMatch(match) {
   selectedMatch.value = match
@@ -339,6 +423,7 @@ async function startAnalysis() {
     reason: '',
     dirLabel: '中性',
     dirClass: 'neutral',
+    details: [],
     status: 'pending'
   }))
 
@@ -356,7 +441,7 @@ async function startAnalysis() {
       url: `/api/predict/${selectedMatch.value.matchId}`,
       method: 'POST',
       data: {},
-      timeout: 30000,
+      timeout: 90000,
     })
 
     clearInterval(animateInterval)
@@ -372,12 +457,21 @@ async function startAnalysis() {
       analysisSteps.value[i].reason = factor.reason || ''
       analysisSteps.value[i].dirLabel = factor.direction === 'upper' ? '上盘' : factor.direction === 'lower' ? '下盘' : '中性'
       analysisSteps.value[i].dirClass = factor.direction || 'neutral'
+      analysisSteps.value[i].details = factor.details || []
       analysisSteps.value[i].status = 'done'
     }
 
-    // 用API返回的真实盘口更新显示
-    if (data.match && data.match.handicap != null) {
-      selectedMatch.value.handicap = data.match.handicap
+    // 用API返回的真实盘口和比分更新显示
+    if (data.match) {
+      if (data.match.handicap != null) {
+        selectedMatch.value.handicap = data.match.handicap
+      }
+      if (data.match.homeScore != null) {
+        selectedMatch.value.homeScore = data.match.homeScore
+      }
+      if (data.match.awayScore != null) {
+        selectedMatch.value.awayScore = data.match.awayScore
+      }
     }
 
     // 设置预测结果
@@ -414,13 +508,31 @@ watch(matchStatus, () => {
   analysisSteps.value = []
   analysisComplete.value = false
   searchKey.value = ''
-  filterDate.value = 'all'
-  fetchMatches()
+  filterLeague.value = 'all'
+  if (matchStatus.value === 'finished') {
+    filterDate.value = ''
+    fetchDates()
+  } else {
+    filterDate.value = 'all'
+    fetchMatches()
+  }
+})
+
+watch(filterDate, (val) => {
+  if (val && val !== 'all') {
+    fetchMatches()
+  } else if (val === 'all' && matchStatus.value !== 'finished') {
+    fetchMatches()
+  }
 })
 
 onShow(() => {
   uni.$emit('tab-active', 'predict')
-  fetchMatches()
+  if (matchStatus.value === 'finished') {
+    fetchDates()
+  } else {
+    fetchMatches()
+  }
 })
 </script>
 
@@ -727,6 +839,48 @@ onShow(() => {
   word-break: break-all;
 }
 
+.sub-factors {
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  background: #f8fafb;
+  border-radius: 8rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+
+  .sub-factor-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8rpx;
+    line-height: 1.4;
+
+    .sub-dir-dot {
+      font-size: 16rpx;
+      flex-shrink: 0;
+      margin-top: 2rpx;
+
+      &.upper { color: #dc2626; }
+      &.lower { color: #059669; }
+      &.neutral { color: #94a3b8; }
+    }
+
+    .sub-name {
+      font-size: 20rpx;
+      color: #475569;
+      font-weight: 600;
+      flex-shrink: 0;
+      min-width: 100rpx;
+    }
+
+    .sub-desc {
+      font-size: 20rpx;
+      color: #64748b;
+      flex: 1;
+      word-break: break-all;
+    }
+  }
+}
+
 /* ===== 分析结果 ===== */
 .analysis-result {
   margin-top: 24rpx;
@@ -922,6 +1076,7 @@ onShow(() => {
   display: flex;
   flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom);
+  overflow: visible;
 }
 
 .sheet-handle {
@@ -946,11 +1101,44 @@ onShow(() => {
   }
 }
 
-.sheet-search {
+.sheet-filters {
   padding: 0 28rpx 12rpx;
 
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 16rpx;
+    margin-bottom: 12rpx;
+  }
+
+  .date-picker-wrap {
+    position: relative;
+  }
+
+  .date-picker-btn {
+    display: flex;
+    align-items: center;
+    height: 64rpx;
+    padding: 0 20rpx;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8rpx;
+    white-space: nowrap;
+
+    .date-picker-text {
+      font-size: 26rpx;
+      color: #1e293b;
+    }
+    .date-picker-icon {
+      font-size: 20rpx;
+      color: #94a3b8;
+      margin-left: 8rpx;
+    }
+  }
+
+
   .search-input {
-    width: 100%;
+    flex: 1;
     height: 64rpx;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
@@ -961,11 +1149,11 @@ onShow(() => {
   }
 }
 
-.date-tabs {
-  padding: 4rpx 28rpx 12rpx;
+.league-tabs {
+  padding: 0 28rpx 12rpx;
   white-space: nowrap;
 
-  .date-tab {
+  .league-tab {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1059,3 +1247,4 @@ onShow(() => {
   50% { opacity: 0.4; }
 }
 </style>
+
