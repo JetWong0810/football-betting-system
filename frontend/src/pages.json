@@ -27,6 +27,16 @@
       }
     },
     {
+      "path": "pages/worldcup/predict",
+      "style": {
+        "navigationBarTitleText": "世界杯预测",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
       "path": "pages/record/record",
       "style": {
         "navigationBarTitleText": "投注记录",
@@ -122,6 +132,16 @@
         "navigationBarTextStyle": "white",
         "backgroundColorTop": "#e8f8f5",
         "backgroundColorBottom": "#f2fbf9"
+      }
+    },
+    {
+      "path": "pages/matches/results",
+      "style": {
+        "navigationBarTitleText": "赛果查询",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
       }
     },
     {

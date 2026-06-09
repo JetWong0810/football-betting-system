@@ -130,6 +130,10 @@
                       <text class="link-index" @tap="goIndices(match.matchId)">指数</text>
                       <text class="link-more" :class="{ active: hasMatchSelection(match.matchId) }" @tap="goPlays(match.matchId, match)"> 更多玩法 </text>
                     </view>
+
+                    <view class="predict-icon" @tap="goPredict(match)">
+                      <text class="predict-icon-text">⚡</text>
+                    </view>
                   </view>
                 </view>
               </view>
@@ -141,6 +145,11 @@
 
     <!-- 投注车组件 -->
     <BetCart />
+
+    <!-- 赛果入口 -->
+    <view class="results-entry" @tap="goResults">
+      <text class="results-entry-text">赛果</text>
+    </view>
   </view>
 </template>
 
@@ -294,6 +303,18 @@ function goIndices(matchId) {
   uni.navigateTo({
     url: `/pages/matches/indices?matchId=${matchId}`,
   });
+}
+
+function goPredict(match) {
+  const isWorldCup = match.league && match.league.includes("世界杯");
+  const url = isWorldCup
+    ? `/pages/worldcup/predict?matchId=${match.matchId}`
+    : `/pages/predict/predict?matchId=${match.matchId}`;
+  uni.navigateTo({ url });
+}
+
+function goResults() {
+  uni.navigateTo({ url: "/pages/matches/results" });
 }
 
 function toggleGroup(date) {
@@ -836,6 +857,25 @@ function hasMatchSelection(matchId) {
   }
 }
 
+.predict-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 8rpx;
+  box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
+}
+
+.predict-icon-text {
+  font-size: 24rpx;
+  line-height: 1;
+}
+
 .state {
   text-align: center;
   color: #999;
@@ -845,5 +885,25 @@ function hasMatchSelection(matchId) {
 
 .state.empty {
   color: #666;
+}
+
+.results-entry {
+  position: fixed;
+  top: 12rpx;
+  right: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8rpx 18rpx;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 20rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+  z-index: 999;
+}
+
+.results-entry-text {
+  font-size: 22rpx;
+  color: #0d9488;
+  font-weight: 500;
 }
 </style>

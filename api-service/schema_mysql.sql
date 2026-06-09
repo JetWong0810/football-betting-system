@@ -92,3 +92,18 @@ CREATE TABLE IF NOT EXISTS sync_status (
     total_matches INT DEFAULT 0,
     total_odds INT DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS prediction_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    match_id VARCHAR(100) NOT NULL,
+    predict_type VARCHAR(20) NOT NULL DEFAULT 'worldcup' COMMENT 'worldcup or normal',
+    direction VARCHAR(10) NOT NULL COMMENT 'upper/lower/neutral',
+    confidence INT NOT NULL DEFAULT 50,
+    overall_reverse TINYINT(1) NOT NULL DEFAULT 0,
+    handicap DECIMAL(5,2) COMMENT '预测时的盘口',
+    factors_json JSON COMMENT '完整因子快照',
+    analysis TEXT COMMENT 'AI分析文本',
+    predicted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_match_type (match_id, predict_type),
+    INDEX idx_pred_match (match_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

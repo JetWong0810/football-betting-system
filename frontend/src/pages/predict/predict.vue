@@ -165,7 +165,7 @@
 
         <view class="sheet-filters">
           <view class="filter-row">
-            <view class="date-picker-wrap" @tap="openDatePicker">
+            <view class="date-picker-wrap" @tap="showCalendar = true">
               <view class="date-picker-btn">
                 <text class="date-picker-text">{{ filterDateLabel }}</text>
                 <text class="date-picker-icon">▼</text>
@@ -215,12 +215,41 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- 日期选择弹窗 -->
+    <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
+    <view class="cal-panel" :class="{ visible: showCalendar }">
+      <view class="cal-header">
+        <text class="cal-cancel" @tap="showCalendar = false">取消</text>
+        <text class="cal-title">选择日期</text>
+        <text class="cal-confirm" @tap="confirmCalendar">确定</text>
+      </view>
+      <view class="cal-body">
+        <view class="cal-nav">
+          <text class="cal-arrow" @tap="calPrevMonth">&lt;</text>
+          <text class="cal-month">{{ calYear }}年{{ calMonth }}月</text>
+          <text class="cal-arrow" @tap="calNextMonth">&gt;</text>
+        </view>
+        <view class="cal-weekdays">
+          <text class="cal-wd" v-for="w in ['日','一','二','三','四','五','六']" :key="w">{{ w }}</text>
+        </view>
+        <view class="cal-days">
+          <text
+            v-for="(d, i) in calDays"
+            :key="i"
+            class="cal-day"
+            :class="{ 'cal-other': d.other, 'cal-today': d.isToday, 'cal-selected': d.dateStr === calSelected }"
+            @tap="!d.other && (calSelected = d.dateStr)"
+          >{{ d.day }}</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 
 const matchStatus = ref('not_started')
@@ -238,6 +267,13 @@ const aiAnalysis = ref('')
 const allMatches = ref([])
 const loadingMatches = ref(false)
 const finishedDates = ref([])
+const pendingMatchId = ref(null)
+
+onLoad((query) => {
+  if (query?.matchId) {
+    pendingMatchId.value = query.matchId
+  }
+})
 
 async function fetchDates() {
   if (matchStatus.value !== 'finished') return
@@ -274,6 +310,13 @@ async function fetchMatches() {
       handicap: item.handicap,
       isSingle: item.isSingle,
     }))
+    if (pendingMatchId.value) {
+      const found = allMatches.value.find(m => m.matchId === pendingMatchId.value)
+      if (found) {
+        selectedMatch.value = found
+        pendingMatchId.value = null
+      }
+    }
   } catch (e) {
     console.error('获取赛事列表失败:', e)
     allMatches.value = []
@@ -289,47 +332,49 @@ const filterDateLabel = computed(() => {
   return filterDate.value.slice(5)
 })
 
-const pickerDateValue = computed(() => {
-  if (filterDate.value && filterDate.value !== 'all') return filterDate.value
-  return new Date().toISOString().slice(0, 10)
-})
 
-const dateRange = computed(() => {
-  if (matchStatus.value === 'finished') {
-    const end = finishedDates.value[0] || new Date().toISOString().slice(0, 10)
-    const start = finishedDates.value[finishedDates.value.length - 1] || '2026-01-01'
-    return { start, end }
-  }
+const showCalendar = ref(false)
+const calYear = ref(2026)
+const calMonth = ref(6)
+const calSelected = ref('')
+
+const calDays = computed(() => {
+  const y = calYear.value, m = calMonth.value
+  const firstDay = new Date(y, m - 1, 1).getDay()
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const daysInPrev = new Date(y, m - 1, 0).getDate()
   const today = new Date().toISOString().slice(0, 10)
-  return { start: today, end: '2026-12-31' }
+  const cells = []
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const day = daysInPrev - i
+    const pm = m - 1 < 1 ? 12 : m - 1, py = m - 1 < 1 ? y - 1 : y
+    cells.push({ day, other: true, dateStr: `${py}-${String(pm).padStart(2,'0')}-${String(day).padStart(2,'0')}`, isToday: false })
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+    cells.push({ day: d, other: false, dateStr, isToday: dateStr === today })
+  }
+  const remaining = 42 - cells.length
+  for (let d = 1; d <= remaining; d++) {
+    const nm = m + 1 > 12 ? 1 : m + 1, ny = m + 1 > 12 ? y + 1 : y
+    cells.push({ day: d, other: true, dateStr: `${ny}-${String(nm).padStart(2,'0')}-${String(d).padStart(2,'0')}`, isToday: false })
+  }
+  return cells
 })
 
-function openDatePicker() {
-  // #ifdef H5
-  const input = document.createElement('input')
-  input.type = 'date'
-  input.value = pickerDateValue.value
-  if (dateRange.value.start) input.min = dateRange.value.start
-  if (dateRange.value.end) input.max = dateRange.value.end
-  input.style.cssText = 'position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:99999;opacity:0;pointer-events:none;'
-  document.body.appendChild(input)
-  input.showPicker ? input.showPicker() : input.click()
-  input.addEventListener('change', () => {
-    if (input.value) filterDate.value = input.value
-    document.body.removeChild(input)
-  })
-  input.addEventListener('blur', () => {
-    setTimeout(() => { if (document.body.contains(input)) document.body.removeChild(input) }, 200)
-  })
-  // #endif
-  // #ifndef H5
-  uni.showActionSheet({
-    itemList: finishedDates.value.slice(0, 20).map(d => d.slice(5)),
-    success: (res) => {
-      filterDate.value = finishedDates.value[res.tapIndex]
-    }
-  })
-  // #endif
+function calPrevMonth() {
+  if (calMonth.value === 1) { calMonth.value = 12; calYear.value-- }
+  else calMonth.value--
+}
+
+function calNextMonth() {
+  if (calMonth.value === 12) { calMonth.value = 1; calYear.value++ }
+  else calMonth.value++
+}
+
+function confirmCalendar() {
+  if (calSelected.value) filterDate.value = calSelected.value
+  showCalendar.value = false
 }
 
 const availableLeagues = computed(() => {
@@ -1245,6 +1290,75 @@ onShow(() => {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* ===== 日历弹窗 ===== */
+.cal-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+}
+
+.cal-panel {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  z-index: 2001;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  &.visible { transform: translateY(0); }
+}
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 32rpx;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.cal-cancel { font-size: 26rpx; color: #999; }
+.cal-title { font-size: 28rpx; color: #333; font-weight: 600; }
+.cal-confirm { font-size: 26rpx; color: #0d9488; font-weight: 600; }
+
+.cal-body { padding: 20rpx 24rpx 48rpx; }
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40rpx;
+  margin-bottom: 20rpx;
+}
+
+.cal-arrow { font-size: 28rpx; color: #666; padding: 8rpx 16rpx; }
+.cal-month { font-size: 26rpx; color: #333; font-weight: 500; }
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 12rpx;
+}
+
+.cal-wd { text-align: center; font-size: 22rpx; color: #aaa; line-height: 2; }
+
+.cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4rpx 0;
+}
+
+.cal-day {
+  text-align: center;
+  font-size: 26rpx;
+  color: #333;
+  line-height: 2.4;
+  border-radius: 8rpx;
+  &.cal-other { color: #ddd; }
+  &.cal-today { color: #0d9488; font-weight: 600; }
+  &.cal-selected { background: #0d9488; color: #fff; font-weight: 600; }
 }
 </style>
 

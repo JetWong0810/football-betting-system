@@ -175,8 +175,8 @@ def _parse_score(text: str) -> Optional[tuple]:
 def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
     """通过竞彩列表页获取 500.com fixture ID
 
-    竞彩期号日期和比赛开赛日期可能差1天（凌晨场次），
-    找不到时自动尝试前后一天。
+    500.com 按售卖窗口起始日期组织列表页，一个窗口可能包含未来数天的比赛，
+    因此售卖日期和比赛实际日期可能差数天。找不到时向前搜索最多5天。
     """
     cache_key = f"{match_date}:{match_number}"
     if cache_key in _fid_cache:
@@ -189,7 +189,7 @@ def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
 
         from datetime import datetime, timedelta
         base = datetime.strptime(match_date, "%Y-%m-%d")
-        for delta in [1, -1]:
+        for delta in [-1, -2, -3, -4, -5, 1, 2]:
             alt_date = (base + timedelta(days=delta)).strftime("%Y-%m-%d")
             alt_key = f"{alt_date}:{match_number}"
             if alt_key in _fid_cache:

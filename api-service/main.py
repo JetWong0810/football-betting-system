@@ -1290,3 +1290,294 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     except Exception as e:
         logger.error(f"预测失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"预测分析失败：{str(e)}")
+
+
+# ========== 世界杯专属预测模块 ==========
+
+@app.get("/api/worldcup/matches")
+def worldcup_matches():
+    """获取世界杯在售比赛（仅未开赛）"""
+    import time as _t
+    now_ts = int(_t.time())
+    from database import get_db
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.*, o.handicap, o.win_odds, o.draw_odds, o.lose_odds, o.is_single
+            FROM matches m
+            LEFT JOIN odds_win_draw_lose o ON o.match_id = m.match_id AND o.odds_type = 'hhad'
+            WHERE m.league_name = '世界杯'
+              AND m.match_timestamp > %s
+            ORDER BY m.match_timestamp ASC
+        """, (now_ts,))
+        rows = cur.fetchall()
+    return [format_match(r) for r in rows]
+
+
+@app.post("/api/worldcup/predict/{match_id}")
+def worldcup_predict(match_id: str, req: PredictRequest = None):
+    """世界杯比赛6因子预测"""
+    from wc_predict_service import predict_wc_match
+
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+
+    is_single = bool(match.get("is_single"))
+    if not is_single:
+        from database import get_db as _get_db
+        with _get_db() as _conn:
+            _cur = _conn.cursor()
+            _cur.execute("SELECT MAX(is_single) as s FROM odds_win_draw_lose WHERE match_id=%s", (match_id,))
+            row = _cur.fetchone()
+            if row and row["s"]:
+                is_single = True
+
+    match_info = {
+        "league": match.get("league_name"),
+        "home_team": match.get("home_team_name"),
+        "away_team": match.get("away_team_name"),
+        "home_rank": match.get("home_team_rank"),
+        "away_rank": match.get("away_team_rank"),
+        "match_date": match.get("match_date"),
+        "is_single": is_single,
+    }
+
+    odds_data = repo.get_wdl_odds(match_id)
+    if odds_data and odds_data.get("hhad"):
+        handicap_val = odds_data["hhad"].get("handicap")
+        if handicap_val is not None:
+            match_info["handicap"] = float(handicap_val)
+
+    if req and req.market_heat:
+        match_info["market_heat_desc"] = req.market_heat
+
+    match_data = None
+    asian_data = None
+    euro_data = None
+    fid = None
+
+    stored_fid = match.get("fid_500")
+    if stored_fid:
+        fid = str(stored_fid)
+    else:
+        match_code = match.get("match_code")
+        if match_code:
+            from repository import derive_sale_date
+            sale_date = derive_sale_date(match) or match.get("match_date")
+            if sale_date:
+                fid = get_fid_for_match(sale_date, match_code)
+                if fid:
+                    try:
+                        from database import get_db as _get_db2
+                        with _get_db2() as _conn2:
+                            _conn2.cursor().execute(
+                                "UPDATE matches SET fid_500 = %s WHERE match_id = %s",
+                                (fid, match_id))
+                    except Exception:
+                        pass
+
+    if fid:
+        try:
+            match_data = fetch_match_data(fid)
+            if match_data.get("homeRank"):
+                match_info["home_rank"] = match_data["homeRank"]
+            if match_data.get("awayRank"):
+                match_info["away_rank"] = match_data["awayRank"]
+        except Exception as e:
+            logger.warning(f"[worldcup] 获取基本面数据失败: {e}")
+        try:
+            from odds500_service import fetch_asian_handicap, fetch_european_odds
+            asian_data = fetch_asian_handicap(fid)
+        except Exception as e:
+            logger.warning(f"[worldcup] 获取亚盘数据失败: {e}")
+        try:
+            euro_data = fetch_european_odds(fid)
+        except Exception as e:
+            logger.warning(f"[worldcup] 获取欧赔数据失败: {e}")
+
+    if asian_data:
+        mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
+        curr_handicaps = []
+        for c in asian_data:
+            if c.get("bookmaker") in mainstream:
+                h = c.get("current", {}).get("handicap")
+                if h is not None:
+                    curr_handicaps.append(float(h))
+        if curr_handicaps:
+            curr_handicaps.sort()
+            mid = len(curr_handicaps) // 2
+            match_info["handicap"] = -curr_handicaps[mid]
+
+    try:
+        result = predict_wc_match(match_info, match_data=match_data, asian_data=asian_data, euro_data=euro_data)
+        match_formatted = format_match(match)
+        if match_info.get("handicap") is not None:
+            match_formatted["handicap"] = match_info["handicap"]
+
+        # 保存预测记录(覆盖上次)
+        prediction = result["prediction"]
+        try:
+            import json as _json
+            from database import get_db as _get_db3
+            with _get_db3() as _conn3:
+                _conn3.cursor().execute("""
+                    INSERT INTO prediction_history
+                        (match_id, predict_type, direction, confidence, overall_reverse, handicap, factors_json, analysis)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        direction=VALUES(direction), confidence=VALUES(confidence),
+                        overall_reverse=VALUES(overall_reverse), handicap=VALUES(handicap),
+                        factors_json=VALUES(factors_json), analysis=VALUES(analysis),
+                        predicted_at=CURRENT_TIMESTAMP
+                """, (
+                    match_id, "worldcup", prediction.get("direction", "neutral"),
+                    prediction.get("confidence", 50),
+                    1 if prediction.get("overall_reverse") else 0,
+                    match_info.get("handicap"),
+                    _json.dumps(result["factors"], ensure_ascii=False),
+                    prediction.get("analysis", ""),
+                ))
+        except Exception as save_err:
+            logger.warning(f"[worldcup] 保存预测记录失败: {save_err}")
+
+        return {
+            "match": match_formatted,
+            "factors": result["factors"],
+            "prediction": result["prediction"],
+        }
+    except Exception as e:
+        logger.error(f"[worldcup] 预测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"世界杯预测分析失败：{str(e)}")
+
+
+@app.get("/api/worldcup/prediction-history/{match_id}")
+def worldcup_prediction_history(match_id: str):
+    """获取某场比赛的上次预测记录"""
+    from database import get_db as _get_db
+    with _get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT direction, confidence, overall_reverse, handicap,
+                   factors_json, analysis, predicted_at
+            FROM prediction_history
+            WHERE match_id = %s AND predict_type = 'worldcup'
+        """, (match_id,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    import json as _json
+    return {
+        "direction": row["direction"],
+        "confidence": row["confidence"],
+        "overallReverse": bool(row["overall_reverse"]),
+        "handicap": float(row["handicap"]) if row["handicap"] else None,
+        "factors": _json.loads(row["factors_json"]) if row["factors_json"] else [],
+        "analysis": row["analysis"],
+        "predictedAt": str(row["predicted_at"]),
+    }
+
+
+@app.get("/api/worldcup/similar-odds")
+def worldcup_similar_odds(
+    open_win: float = None, open_draw: float = None, open_loss: float = None,
+    close_win: float = None, close_draw: float = None, close_loss: float = None,
+):
+    """历史同赔独立查询接口"""
+    from wc_similar_odds import find_similar
+
+    if None in (open_win, open_draw, open_loss, close_win, close_draw, close_loss):
+        raise HTTPException(status_code=400, detail="请填写完整的初盘和终盘赔率")
+
+    result = find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
+    return result
+
+
+@app.get("/api/match-results")
+def list_match_results(
+    date: str = Query(..., description="日期 YYYY-MM-DD"),
+):
+    """赛果查询：返回指定日期已完赛比赛及预测记录"""
+    import time as _time
+    from database import get_db as _get_db
+
+    with _get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT * FROM matches
+               WHERE match_date = %s
+                 AND match_timestamp IS NOT NULL
+                 AND match_timestamp < %s
+               ORDER BY match_time ASC""",
+            (date, int(_time.time())),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return {"items": [], "date": date}
+
+    match_ids = [r["match_id"] for r in rows]
+    odds_map = repo.fetch_wdl_for_matches(match_ids)
+
+    # 查预测记录
+    from database import get_db as _get_db2
+    pred_map = {}
+    with _get_db2() as conn:
+        cur = conn.cursor()
+        placeholders = ",".join(["%s"] * len(match_ids))
+        cur.execute(
+            f"""SELECT match_id, predict_type, direction, confidence, overall_reverse,
+                       handicap, predicted_at
+                FROM prediction_history
+                WHERE match_id IN ({placeholders})""",
+            match_ids,
+        )
+        for p in cur.fetchall():
+            pred_map[p["match_id"]] = p
+
+    items = []
+    for row in rows:
+        mid = row["match_id"]
+        item = format_match(row)
+        wdl = odds_map.get(mid, {})
+        item["wdl"] = wdl
+        if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
+            item["handicap"] = float(wdl["hhad"]["handicap"])
+
+        pred = pred_map.get(mid)
+        if pred:
+            item["prediction"] = {
+                "direction": pred["direction"],
+                "confidence": pred["confidence"],
+                "overallReverse": bool(pred["overall_reverse"]),
+                "handicap": float(pred["handicap"]) if pred["handicap"] else None,
+                "predictedAt": str(pred["predicted_at"]),
+            }
+        else:
+            item["prediction"] = None
+
+        items.append(item)
+
+    return {"items": items, "date": date}
+
+
+@app.get("/api/match-results/dates")
+def list_result_dates():
+    """返回有赛果的日期列表（降序，最近30个）"""
+    import time as _time
+    from database import get_db as _get_db
+
+    with _get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT match_date, COUNT(*) as cnt FROM matches
+               WHERE match_timestamp IS NOT NULL AND match_timestamp < %s
+                 AND home_score IS NOT NULL
+               GROUP BY match_date
+               ORDER BY match_date DESC
+               LIMIT 30""",
+            (int(_time.time()),),
+        )
+        dates = [{"date": r["match_date"], "count": r["cnt"]} for r in cur.fetchall()]
+
+    return {"dates": dates}

@@ -440,11 +440,11 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
             consistency_bonus = 1
             consistency_desc = "亚欧一致(信号增强)"
         else:
-            consistency_bonus = -2
+            consistency_bonus = -1
             consistency_desc = "亚欧矛盾(信号减弱，信欧赔)"
-            # 亚欧矛盾时信欧赔
-            dir_votes[euro_dir] += 1.0
-            dir_votes[asian_dir] -= 1.0
+            # 亚欧矛盾时信欧赔：将亚盘权重转移给欧赔方向
+            dir_votes[euro_dir] += 2.0
+            dir_votes[asian_dir] -= 1.5
 
     # 初盘与变动一致性
     opening_dir = sub_opening["direction"]
@@ -526,80 +526,117 @@ def _parse_manual_heat(desc: str, is_home_let: bool) -> Optional[Dict[str, Any]]
             upper_hot = True
 
     if upper_hot and not lower_hot:
-        return {"name": "市场热度", "score": 7, "direction": "lower",
-                "reason": f"手动:上盘过热，逆向偏下盘"}
-    if lower_hot and not upper_hot:
         return {"name": "市场热度", "score": 7, "direction": "upper",
-                "reason": f"手动:下盘过热，逆向偏上盘"}
+                "reason": "手动输入：上盘热"}
+    if lower_hot and not upper_hot:
+        return {"name": "市场热度", "score": 7, "direction": "lower",
+                "reason": "手动输入：下盘热"}
     return None
 
 
 def calc_factor5(asian_data: List[Dict], is_home_let: bool,
                  market_heat_desc: Optional[str] = None) -> Dict[str, Any]:
-    """F5 市场热度: 多公司上盘水位一致性(资金流向) + 用户手动输入
+    """F5 市场热度: 盘口变动 + 同盘口水位一致性(资金流向) + 用户手动输入
 
-    逻辑(逆向): 多数公司上盘方降水 = 资金涌入上盘 = 上盘过热 = 逆向偏下盘。
-    多数公司上盘方升水 = 上盘遇冷 = 偏上盘。
-    用户手动输入优先级最高。
+    核心逻辑:
+    1. 先看盘口变动: 升盘=庄家看好上盘(热), 降盘=庄家看淡上盘(冷)
+    2. 再看同盘口下的水位变动: 降水=资金追上盘(热), 升水=上盘遇冷
+    3. 盘口变深后的水位升高是自然补偿，不算遇冷
+
+    逆向解读: 上盘热→偏下盘, 上盘冷→偏上盘
     """
     # 1. 用户手动输入优先
     manual = _parse_manual_heat(market_heat_desc, is_home_let)
     if manual:
         return manual
 
-    # 2. 多公司水位一致性
+    # 2. 需要亚盘数据
     if not asian_data:
         return {"name": "市场热度", "score": 5, "direction": "neutral", "reason": "无亚盘数据，热度不明"}
 
-    mainstream = {"Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博", "Crown",
-                  "明陞", "iBC", "12bet", "易胜博", "Interwetten", "10BET", "manbetx"}
-    drops = rises = 0  # 上盘方降水/升水公司数
+    # 3. 统计盘口变动和同盘口水位变动
+    upgrade = 0   # 升盘(盘口变深)公司数
+    downgrade = 0  # 降盘(盘口变浅)公司数
+    same_drops = 0  # 同盘口下上盘降水
+    same_rises = 0  # 同盘口下上盘升水
     total = 0
+
     for c in asian_data:
         i = c.get("initial", {})
         cur = c.get("current", {})
+        ih = i.get("handicap")
+        ch = cur.get("handicap")
         if is_home_let:
             iv, cv = i.get("home"), cur.get("home")
         else:
             iv, cv = i.get("away"), cur.get("away")
-        if iv is None or cv is None:
+        if iv is None or cv is None or ih is None or ch is None:
             continue
-        # 优先统计主流公司，但全部纳入计数
-        wc = cv - iv
+
         total += 1
-        if wc <= -0.03:
-            drops += 1
-        elif wc >= 0.03:
-            rises += 1
+        handicap_diff = float(ch) - float(ih)
+
+        if handicap_diff > 0.01:
+            upgrade += 1
+        elif handicap_diff < -0.01:
+            downgrade += 1
+        else:
+            # 同盘口，水位变动才反映资金流向
+            wc = cv - iv
+            if wc <= -0.03:
+                same_drops += 1
+            elif wc >= 0.03:
+                same_rises += 1
 
     if total < 4:
         return {"name": "市场热度", "score": 5, "direction": "neutral", "reason": "公司样本不足，热度不明"}
 
-    moved = drops + rises
-    if moved < 3:
-        return {"name": "市场热度", "score": 5, "direction": "neutral",
-                "reason": f"仅{moved}家水位变动，热度不明"}
+    # 4. 综合判断
+    # 升盘占多数 = 庄家主动加深盘口 = 看好上盘 = 上盘热 = 逆向偏下盘
+    upgrade_ratio = upgrade / total if total else 0
+    downgrade_ratio = downgrade / total if total else 0
 
-    # 在"发生变动的公司"中看方向占比(未变动的不代表态度)
-    drop_ratio = drops / moved
-    rise_ratio = rises / moved
+    if upgrade_ratio >= 0.6:
+        score = 7 if upgrade_ratio >= 0.75 else 6
+        return {"name": "市场热度", "score": score, "direction": "upper",
+                "reason": f"{upgrade}/{total}家升盘(盘口加深)，庄家看好上盘，上盘热"}
 
-    # 降水占多数 = 资金追上盘 = 上盘热 = 逆向看下盘
-    if drop_ratio >= 0.75:
-        return {"name": "市场热度", "score": 7, "direction": "lower",
-                "reason": f"{drops}/{moved}家上盘降水，资金追上盘，逆向偏下盘"}
-    elif drop_ratio >= 0.6:
-        return {"name": "市场热度", "score": 6, "direction": "lower",
-                "reason": f"{drops}/{moved}家上盘降水，上盘略热，偏下盘"}
-    elif rise_ratio >= 0.75:
-        return {"name": "市场热度", "score": 7, "direction": "upper",
-                "reason": f"{rises}/{moved}家上盘升水，上盘遇冷，偏上盘"}
-    elif rise_ratio >= 0.6:
-        return {"name": "市场热度", "score": 6, "direction": "upper",
-                "reason": f"{rises}/{moved}家上盘升水，上盘略冷，偏上盘"}
-    else:
-        return {"name": "市场热度", "score": 5, "direction": "neutral",
-                "reason": f"水位分歧({drops}降/{rises}升)，热度不明"}
+    if downgrade_ratio >= 0.6:
+        score = 7 if downgrade_ratio >= 0.75 else 6
+        return {"name": "市场热度", "score": score, "direction": "lower",
+                "reason": f"{downgrade}/{total}家降盘(盘口变浅)，庄家看淡上盘，下盘热"}
+
+    # 盘口无明显方向时，看同盘口下的水位变动
+    same_moved = same_drops + same_rises
+    if same_moved >= 3:
+        drop_ratio = same_drops / same_moved
+        rise_ratio = same_rises / same_moved
+
+        if drop_ratio >= 0.75:
+            return {"name": "市场热度", "score": 7, "direction": "upper",
+                    "reason": f"同盘口{same_drops}/{same_moved}家上盘降水，资金追上盘，上盘热"}
+        elif drop_ratio >= 0.6:
+            return {"name": "市场热度", "score": 6, "direction": "upper",
+                    "reason": f"同盘口{same_drops}/{same_moved}家上盘降水，上盘略热"}
+        elif rise_ratio >= 0.75:
+            return {"name": "市场热度", "score": 7, "direction": "lower",
+                    "reason": f"同盘口{same_rises}/{same_moved}家上盘升水，下盘热"}
+        elif rise_ratio >= 0.6:
+            return {"name": "市场热度", "score": 6, "direction": "lower",
+                    "reason": f"同盘口{same_rises}/{same_moved}家上盘升水，下盘略热"}
+
+    # 混合信号
+    parts = []
+    if upgrade:
+        parts.append(f"{upgrade}家升盘")
+    if downgrade:
+        parts.append(f"{downgrade}家降盘")
+    if same_drops:
+        parts.append(f"{same_drops}家同盘降水")
+    if same_rises:
+        parts.append(f"{same_rises}家同盘升水")
+    return {"name": "市场热度", "score": 5, "direction": "neutral",
+            "reason": f"信号分歧({'，'.join(parts)})，热度不明"}
 
 
 # ============================================================
@@ -1312,21 +1349,32 @@ def calc_factor3(match_info: Dict, ai_f3_list: Optional[List[Dict]] = None) -> D
             sub2_desc = f"AI判断无共识(上{ai_upper}/下{ai_lower}/中{ai_neutral})，无明确底蕴偏向"
     details.append({"name": "AI底蕴判断", "direction": sub2_dir, "desc": sub2_desc})
 
-    # --- 综合结论（当前仅展示，不参与方向加权） ---
-    # F3暂固定neutral：避免"上盘总是更强"产生系统性偏移
-    # 后续实现逆向信号机制后再激活方向输出
+    # --- 综合结论 ---
     upper_signals = sum(1 for d in details if d["direction"] == "upper")
     lower_signals = sum(1 for d in details if d["direction"] == "lower")
 
-    if upper_signals > lower_signals:
-        reason = "上盘方实力底蕴占优(仅供参考)"
-    elif lower_signals > upper_signals:
-        reason = "下盘方实力底蕴占优(仅供参考)"
-    else:
-        reason = "双方实力定位接近"
+    # 排名+AI两个子因素都一致时才输出方向，避免单一AI判断产生系统性偏移
+    both_agree = (upper_signals == 2 or lower_signals == 2)
 
-    return {"name": "实力定位", "score": 5, "direction": "neutral",
-            "reason": reason, "details": details}
+    if upper_signals > lower_signals:
+        reason = "上盘方实力底蕴占优"
+        if both_agree:
+            return {"name": "实力定位", "score": 7, "direction": "upper",
+                    "reason": reason, "details": details}
+        else:
+            return {"name": "实力定位", "score": 6, "direction": "upper",
+                    "reason": reason + "(仅AI判断)", "details": details}
+    elif lower_signals > upper_signals:
+        reason = "下盘方实力底蕴占优"
+        if both_agree:
+            return {"name": "实力定位", "score": 7, "direction": "lower",
+                    "reason": reason, "details": details}
+        else:
+            return {"name": "实力定位", "score": 6, "direction": "lower",
+                    "reason": reason + "(仅AI判断)", "details": details}
+    else:
+        return {"name": "实力定位", "score": 5, "direction": "neutral",
+                "reason": "双方实力定位接近", "details": details}
 
 
 # ============================================================
@@ -1460,26 +1508,24 @@ def _format_form_metrics(metrics: Dict[str, Any], team_label: str) -> str:
 def calc_factor6(is_single: bool, f5_direction: str, f5_score: int) -> Dict[str, Any]:
     """F6: 单关放大修正
 
-    F5的direction已经是逆向后的建议（上盘热→F5看lower，下盘热→F5看upper）。
-    单关场次热门方被更多追捧，F6应放大F5的逆向信号。
+    市场热度direction表示哪边热(upper=上盘热)，单关场次放大该热度信号。
+    direction跟随市场热度(表示哪边热)，calc_prediction中统一逆向处理。
     """
     if not is_single:
         return {"name": "单关修正", "score": 5, "direction": "neutral", "reason": "非单关，不触发"}
 
-    # F5 direction="lower" 意味着上盘过热，单关放大此信号
-    # F5 direction="upper" 意味着下盘过热，单关放大此信号
-    if f5_direction == "lower" and f5_score >= 7:
-        return {"name": "单关修正", "score": 8, "direction": "lower",
-                "reason": "单关+上盘过热，加强逆向看下"}
-    elif f5_direction == "upper" and f5_score >= 7:
+    if f5_direction == "upper" and f5_score >= 7:
         return {"name": "单关修正", "score": 8, "direction": "upper",
-                "reason": "单关+下盘过热，加强逆向看上"}
-    elif f5_direction == "lower" and f5_score >= 6:
-        return {"name": "单关修正", "score": 6, "direction": "lower",
-                "reason": "单关+上盘略热，偏看下"}
+                "reason": "单关+上盘过热"}
+    elif f5_direction == "lower" and f5_score >= 7:
+        return {"name": "单关修正", "score": 8, "direction": "lower",
+                "reason": "单关+下盘过热"}
     elif f5_direction == "upper" and f5_score >= 6:
         return {"name": "单关修正", "score": 6, "direction": "upper",
-                "reason": "单关+下盘略热，偏看上"}
+                "reason": "单关+上盘略热"}
+    elif f5_direction == "lower" and f5_score >= 6:
+        return {"name": "单关修正", "score": 6, "direction": "lower",
+                "reason": "单关+下盘略热"}
     else:
         return {"name": "单关修正", "score": 5, "direction": "neutral",
                 "reason": "单关但热度中性，不触发"}
@@ -1718,7 +1764,15 @@ def _is_missing_neutral(factor: Dict[str, Any]) -> bool:
     return any(kw in reason for kw in _MISSING_KEYWORDS)
 
 
-def calc_prediction(factors: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _effective_dir(factor: Dict[str, Any], reverse_set: set) -> str:
+    """获取因子在预测计算中的有效方向(考虑逆向翻转)"""
+    d = factor.get("direction", "neutral")
+    if factor["name"] in reverse_set and d in ("upper", "lower"):
+        return "lower" if d == "upper" else "upper"
+    return d
+
+
+def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """综合计算最终预测方向和置信度 - 净方向占比模型
 
     置信度拆为两个独立维度：
@@ -1730,8 +1784,10 @@ def calc_prediction(factors: List[Dict[str, Any]]) -> Dict[str, Any]:
     置信度 = base(一致性主导, 50~85) + 强度加成(0~12) - 数据缺失惩罚
 
     Args:
-        factors: 6因子列表
+        factors: 因子列表
+        custom_weights: 自定义权重字典(可选，默认用全局FACTOR_WEIGHTS)
     """
+    weights = custom_weights or FACTOR_WEIGHTS
     upper_w = 0.0               # 上盘方向加权强度和
     lower_w = 0.0               # 下盘方向加权强度和
     upper_weight = 0.0          # 上盘因子权重和(不乘强度)
@@ -1741,16 +1797,46 @@ def calc_prediction(factors: List[Dict[str, Any]]) -> Dict[str, Any]:
     neutral_count = 0
     missing_count = 0
 
+    # 市场热度/单关修正的direction表示"哪边热"(事实)，在预测中需逆向解读：热的一边反向
+    REVERSE_FACTORS = {"市场热度", "单关修正"}
+
+    # 先统计原始方向(界面展示的方向)，用于整体逆向判断
+    raw_upper = 0
+    raw_lower = 0
+    raw_neutral = 0
+    for f in factors:
+        d = f.get("direction", "neutral")
+        if d == "upper":
+            raw_upper += 1
+        elif d == "lower":
+            raw_lower += 1
+        else:
+            raw_neutral += 1
+
+    # 整体逆向触发：当因子展示方向几乎全部一致(≥6个同向，反向≤1)
+    # 说明市场共识太一致，触发逆向翻转
+    overall_reverse = False
+    total_factors = len(factors)
+    if total_factors >= 6:
+        raw_dom = max(raw_upper, raw_lower)
+        raw_opp = min(raw_upper, raw_lower)
+        if raw_dom >= (total_factors - 2) and raw_opp <= 1:
+            overall_reverse = True
+
     for f in factors:
         name = f["name"]
-        w = FACTOR_WEIGHTS.get(name, 1.0)
+        w = weights.get(name, 1.0)
         fscore = f.get("score", 5)
         direction = f["direction"]
 
-        # 修复F5/F6重复计权：F6同向于F5时打5折，避免市场热度信号被计两次
+        # 逆向因子：direction翻转后参与预测计算
+        if name in REVERSE_FACTORS and direction in ("upper", "lower"):
+            direction = "lower" if direction == "upper" else "upper"
+
+        # 修复重复计权：单关修正同向于市场热度时打5折，避免热度信号被计两次
         if name == "单关修正" and direction != "neutral":
             f5 = next((x for x in factors if x["name"] == "市场热度"), None)
-            if f5 and f5.get("direction") == direction:
+            if f5 and f5.get("direction") == f["direction"]:
                 w = w * 0.5
 
         if direction in ("upper", "lower"):
@@ -1788,37 +1874,61 @@ def calc_prediction(factors: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {"direction": "neutral", "confidence": 38, "score": 0.0,
                 "neutral_count": neutral_count}
 
-    # 维度1 一致性：主导方向权重占有方向因子总权重的比例(0.5~1.0)
-    consistency = dom_weight / total_dir_weight
+    # 如果触发了整体逆向，翻转最终预测方向
+    if overall_reverse:
+        direction = "lower" if direction == "upper" else "upper"
+        dom_weight, dom_intensity_sum = (lower_weight, lower_w) if direction == "lower" else (upper_weight, upper_w)
+
+    # 统计主导方向中score>5的强因子数(真正有信号强度的因子)
+    dom_dir = direction
+    opp_dir = "lower" if dom_dir == "upper" else "upper"
+    # 注意：这里的direction是翻转后的，需要用内部direction来判断
+    dom_strong = sum(1 for f in factors
+                     if _effective_dir(f, REVERSE_FACTORS) == dom_dir and f.get("score", 5) > 5)
+    opp_strong = sum(1 for f in factors
+                     if _effective_dir(f, REVERSE_FACTORS) == opp_dir and f.get("score", 5) > 5)
+    total_strong = dom_strong + opp_strong
+
+    # 维度1 方向优势：强因子中主导方向的占比
+    if total_strong > 0:
+        dir_advantage = dom_strong / total_strong
+    else:
+        dir_advantage = 0.5
 
     # 维度2 强度：主导方向因子的加权平均强度(0~1)
-    avg_intensity = dom_intensity_sum / dom_weight if dom_weight else 0
+    avg_score = dom_intensity_sum / dom_weight if dom_weight else 0
 
-    # 维度3 参与度：有方向因子权重占全部因子总权重的比例(防止少数因子定高分)
-    all_weight = sum(FACTOR_WEIGHTS.values())
-    participation = min(1.0, total_dir_weight / all_weight)  # 0~1
+    # 维度3 覆盖度：有强信号的因子数占总因子数
+    strong_ratio = total_strong / total_factors if total_factors > 0 else 0
 
-    # base: 一致性映射到 50~85 (一致性0.5→50, 1.0→85)
-    base = 50 + (consistency - 0.5) * 70
-    # 强度加成: 0~12
-    strength = avg_intensity * 12
-    # 参与度惩罚: 参与判断的因子越少越降分。
-    # participation>=0.6(约4因子)不罚；越少罚越多，最多-15
-    participation_penalty = max(0.0, (0.6 - participation)) / 0.6 * 15
-    # 数据缺失惩罚: 仅对拿不到数据的中性因子(每个-4，最多-10)
-    missing_penalty = min(10, missing_count * 4)
+    if overall_reverse:
+        dir_advantage = 0.65
 
-    confidence = int(base + strength - participation_penalty - missing_penalty)
-    confidence = max(35, min(95, confidence))
+    # 置信度计算:
+    # base: 方向优势 (0.5→40, 0.75→52, 1.0→65)
+    base = 40 + (dir_advantage - 0.5) * 50
+    # 强度加成: (0→0, 0.4→5, 0.6→8, 1.0→13)
+    strength_bonus = avg_score * 13
+    # 覆盖度加成: 强因子越多越确定，这是区分度的核心
+    # 2/7→0, 3/7→+3, 4/7→+6, 5/7→+10, 6/7→+14
+    coverage_bonus = max(0, (strong_ratio - 0.28)) * 24
+    # 数据缺失惩罚: 仅对拿不到数据的中性因子(每个-3，最多-9)
+    missing_penalty = min(9, missing_count * 3)
+    # 逆向触发时置信度适度降低(逆向本身有不确定性)
+    reverse_penalty = 8 if overall_reverse else 0
+
+    confidence = int(base + strength_bonus + coverage_bonus - missing_penalty - reverse_penalty)
+    confidence = max(35, min(92, confidence))
 
     return {
         "direction": direction,
         "confidence": confidence,
         "score": round((upper_w - lower_w) / total_dir_weight, 3),
         "neutral_count": neutral_count,
-        "consistency": round(consistency, 3),
-        "avg_intensity": round(avg_intensity, 3),
-        "participation": round(participation, 3),
+        "dir_advantage": round(dir_advantage, 3),
+        "avg_intensity": round(avg_score, 3),
+        "strong_ratio": round(strong_ratio, 3),
+        "overall_reverse": overall_reverse,
     }
 
 
@@ -1847,6 +1957,10 @@ def generate_analysis(factors: List[Dict], prediction: Dict, match_info: Dict) -
 
     if direction == "neutral":
         parts.append(f"综合{len(factors)}项因子，多数因子中性或方向冲突，无明显倾向，不建议下注，置信度{conf}%。")
+    elif prediction.get("overall_reverse"):
+        dir_text = "上盘" if direction == "upper" else "下盘"
+        opp_text = "下盘" if direction == "upper" else "上盘"
+        parts.append(f"综合{len(factors)}项因子几乎全部指向{opp_text}，市场共识过于一致，触发整体逆向，建议方向: {dir_text}，置信度{conf}%。")
     else:
         dir_text = "上盘" if direction == "upper" else "下盘"
         parts.append(f"综合{len(factors)}项因子，建议方向: {dir_text}（{upper_team}{'赢盘' if direction == 'upper' else '输盘'}），置信度{conf}%。")
