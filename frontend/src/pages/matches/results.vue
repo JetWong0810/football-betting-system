@@ -373,15 +373,15 @@ async function fetchAsian(matchId) {
     if (preferred && preferred.current) {
       const hc = preferred.current.handicap;
       const match = matches.value.find((m) => m.id === matchId);
-      // 亚盘handicap是正数=主让，显示为负号；0不加符号
-      const displayHc = hc === 0 ? "0" : `-${hc}`;
-      // 用亚盘盘口计算上下盘结果: 主队净胜 - 让球数
+      // 500.com: 正数=主让(显示-), 负数=客让(显示+), 0=平手
+      const displayHc = hc === 0 ? "0" : hc > 0 ? `-${hc}` : `+${Math.abs(hc)}`;
+      // 上盘结果: hc>0主让(主是上盘), hc<0客让(客是上盘)
       let result = null;
       if (match && match.homeScore !== null && match.awayScore !== null && hc !== null) {
         const adjusted = (match.homeScore - match.awayScore) - hc;
         if (Math.abs(adjusted) < 0.01) result = "push";
-        else if (adjusted > 0) result = "upper";
-        else result = "lower";
+        else if (hc >= 0) result = adjusted > 0 ? "upper" : "lower";
+        else result = adjusted < 0 ? "upper" : "lower";
       }
       asianCache.value[matchId] = {
         handicap: displayHc,
