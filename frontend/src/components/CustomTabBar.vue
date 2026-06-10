@@ -24,7 +24,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const tabs = [
   { id: 'home', path: '/pages/home/home', icon: '/static/tabbar/home.png', activeIcon: '/static/tabbar/home-active.png', text: '首页' },
   { id: 'matches', path: '/pages/matches/list', icon: '/static/tabbar/matches.png', activeIcon: '/static/tabbar/matches-active.png', text: '赛事' },
-  { id: 'predict', path: '/pages/predict/predict', icon: '/static/tabbar/predict.png', activeIcon: '/static/tabbar/predict-active.png', text: '预测', isCenter: true },
   { id: 'record', path: '/pages/record/record', icon: '/static/tabbar/strategy.png', activeIcon: '/static/tabbar/strategy-active.png', text: '记录' },
   { id: 'profile', path: '/pages/profile/profile', icon: '/static/tabbar/settings.png', activeIcon: '/static/tabbar/settings-active.png', text: '我的' },
 ]

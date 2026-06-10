@@ -65,12 +65,11 @@
           <!-- 亚盘 -->
           <view class="detail-row">
             <text class="detail-label">亚盘</text>
-            <view v-if="asianCache[match.id]" class="asian-info">
-              <text class="asian-val">{{ asianCache[match.id].handicap }}</text>
-              <text class="asian-water">{{ (Number(asianCache[match.id].homeOdds) + 1).toFixed(2) }}/{{ (Number(asianCache[match.id].awayOdds) + 1).toFixed(2) }}</text>
-              <text class="asian-res" :class="'ah-' + asianCache[match.id].result" v-if="asianCache[match.id].result">{{ handicapLabel(asianCache[match.id].result) }}</text>
+            <view v-if="match.asian" class="asian-info">
+              <text class="asian-val">{{ match.asian.handicap }}</text>
+              <text class="asian-water">{{ (Number(match.asian.homeOdds) + 1).toFixed(2) }}/{{ (Number(match.asian.awayOdds) + 1).toFixed(2) }}</text>
+              <text class="asian-res" :class="'ah-' + match.asian.result" v-if="match.asian.result">{{ handicapLabel(match.asian.result) }}</text>
             </view>
-            <text class="detail-val" v-else-if="asianLoading[match.id]">加载中...</text>
             <text class="detail-val" v-else>无数据</text>
           </view>
           <!-- 竞彩赔率 -->
@@ -210,6 +209,8 @@ watch(selectedDate, () => { fetchResults(); }, { immediate: false });
 onLoad(() => { fetchResults(); });
 
 async function fetchResults() {
+  matches.value = [];
+  expandedId.value = null;
   loading.value = true;
   try {
     const data = await request({ url: "/api/match-results", method: "GET", data: { date: selectedDate.value } });
@@ -270,6 +271,26 @@ function transformMatch(item) {
     };
   }
 
+  // 亚盘终盘（从接口直接返回，无需单独请求）
+  let asian = null;
+  if (item.asian && item.asian.handicap !== null) {
+    const ahc = item.asian.handicap;
+    const displayHc = ahc === 0 ? "0" : ahc > 0 ? `-${ahc}` : `+${Math.abs(ahc)}`;
+    let ahResult = null;
+    if (hs !== null && as !== null) {
+      const adjusted = (hs - as) - ahc;
+      if (Math.abs(adjusted) < 0.01) ahResult = "push";
+      else if (ahc >= 0) ahResult = adjusted > 0 ? "upper" : "lower";
+      else ahResult = adjusted < 0 ? "upper" : "lower";
+    }
+    asian = {
+      handicap: displayHc,
+      homeOdds: item.asian.homeOdds,
+      awayOdds: item.asian.awayOdds,
+      result: ahResult,
+    };
+  }
+
   return {
     id: item.matchId,
     league: item.league || "",
@@ -285,6 +306,7 @@ function transformMatch(item) {
     spfResult,
     spfOdds,
     prediction,
+    asian,
   };
 }
 
@@ -350,51 +372,12 @@ function confirmPicker() {
   showDatePicker.value = false;
 }
 
-const asianCache = ref({});
-const asianLoading = ref({});
-
 function toggleExpand(id) {
   if (expandedId.value === id) {
     expandedId.value = null;
     return;
   }
   expandedId.value = id;
-  if (!asianCache.value[id] && !asianLoading.value[id]) {
-    fetchAsian(id);
-  }
-}
-
-async function fetchAsian(matchId) {
-  asianLoading.value[matchId] = true;
-  try {
-    const data = await request({ url: `/api/matches/${matchId}/indices`, method: "GET" });
-    const asianList = data?.indices?.asian || [];
-    const preferred = asianList.find((a) => a.bookmaker === "澳门") || asianList[0];
-    if (preferred && preferred.current) {
-      const hc = preferred.current.handicap;
-      const match = matches.value.find((m) => m.id === matchId);
-      // 500.com: 正数=主让(显示-), 负数=客让(显示+), 0=平手
-      const displayHc = hc === 0 ? "0" : hc > 0 ? `-${hc}` : `+${Math.abs(hc)}`;
-      // 上盘结果: hc>0主让(主是上盘), hc<0客让(客是上盘)
-      let result = null;
-      if (match && match.homeScore !== null && match.awayScore !== null && hc !== null) {
-        const adjusted = (match.homeScore - match.awayScore) - hc;
-        if (Math.abs(adjusted) < 0.01) result = "push";
-        else if (hc >= 0) result = adjusted > 0 ? "upper" : "lower";
-        else result = adjusted < 0 ? "upper" : "lower";
-      }
-      asianCache.value[matchId] = {
-        handicap: displayHc,
-        homeOdds: preferred.current.home,
-        awayOdds: preferred.current.away,
-        result,
-      };
-    }
-  } catch (e) {
-    // 无亚盘数据
-  } finally {
-    asianLoading.value[matchId] = false;
-  }
 }
 
 function resultType(match) {

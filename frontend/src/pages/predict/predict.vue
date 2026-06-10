@@ -165,31 +165,40 @@
 
         <view class="sheet-filters">
           <view class="filter-row">
-            <view class="date-picker-wrap" @tap="showCalendar = true">
-              <view class="date-picker-btn">
-                <text class="date-picker-text">{{ filterDateLabel }}</text>
-                <text class="date-picker-icon">▼</text>
-              </view>
-            </view>
             <input class="search-input" v-model="searchKey" placeholder="搜索队伍" placeholder-style="color:#b0b7c0" />
           </view>
 
-          <scroll-view class="league-tabs" scroll-x>
+          <scroll-view class="filter-tabs" scroll-x v-if="matchStatus === 'not_started'">
             <view
               class="league-tab"
-              :class="{ active: filterLeague === 'all' }"
-              @tap="filterLeague = 'all'"
+              :class="{ active: filterDate === 'all' }"
+              @tap="filterDate = 'all'"
             >
               <text>全部</text>
             </view>
             <view
               class="league-tab"
-              v-for="lg in availableLeagues"
-              :key="lg"
-              :class="{ active: filterLeague === lg }"
-              @tap="filterLeague = lg"
+              v-for="d in availableDates"
+              :key="d"
+              :class="{ active: filterDate === d }"
+              @tap="filterDate = d"
             >
-              <text>{{ lg }}</text>
+              <text>{{ d.slice(5) }}</text>
+            </view>
+          </scroll-view>
+
+          <scroll-view class="filter-tabs" scroll-x v-if="matchStatus === 'finished'">
+            <view
+              class="league-tab"
+              v-for="d in recentFinishedDates"
+              :key="d"
+              :class="{ active: filterDate === d }"
+              @tap="filterDate = d"
+            >
+              <text>{{ d.slice(5) }}</text>
+            </view>
+            <view class="league-tab" @tap="showCalendar = true">
+              <text>选择日期</text>
             </view>
           </scroll-view>
         </view>
@@ -293,7 +302,7 @@ async function fetchMatches() {
   try {
     const statusParam = matchStatus.value === 'finished' ? 'finished' : 'not_started'
     const params = { status: statusParam, page_size: 50 }
-    if (filterDate.value && filterDate.value !== 'all') {
+    if (matchStatus.value === 'finished' && filterDate.value && filterDate.value !== 'all') {
       params.date = filterDate.value
     }
     const data = await request({ url: '/api/predict/matches', data: params })
@@ -377,6 +386,15 @@ function confirmCalendar() {
   showCalendar.value = false
 }
 
+const availableDates = computed(() => {
+  const dates = [...new Set(allMatches.value.map(m => m.matchDate))].sort()
+  return dates
+})
+
+const recentFinishedDates = computed(() => {
+  return finishedDates.value.slice(0, 5)
+})
+
 const availableLeagues = computed(() => {
   const leagues = [...new Set(pickerMatches.value.map(m => m.league))].sort()
   return leagues
@@ -384,7 +402,7 @@ const availableLeagues = computed(() => {
 
 const filteredPickerMatches = computed(() => {
   let list = pickerMatches.value
-  if (filterDate.value && filterDate.value !== 'all') {
+  if (matchStatus.value === 'not_started' && filterDate.value && filterDate.value !== 'all') {
     list = list.filter(m => m.matchDate === filterDate.value)
   }
   if (filterLeague.value && filterLeague.value !== 'all') {
@@ -564,15 +582,12 @@ watch(matchStatus, () => {
 })
 
 watch(filterDate, (val) => {
-  if (val && val !== 'all') {
-    fetchMatches()
-  } else if (val === 'all' && matchStatus.value !== 'finished') {
+  if (matchStatus.value === 'finished' && val && val !== 'all') {
     fetchMatches()
   }
 })
 
 onShow(() => {
-  uni.$emit('tab-active', 'predict')
   if (matchStatus.value === 'finished') {
     fetchDates()
   } else {
@@ -1194,8 +1209,8 @@ onShow(() => {
   }
 }
 
-.league-tabs {
-  padding: 0 28rpx 12rpx;
+.filter-tabs, .league-tabs {
+  padding: 0 0 12rpx 0;
   white-space: nowrap;
 
   .league-tab {
@@ -1204,7 +1219,7 @@ onShow(() => {
     justify-content: center;
     padding: 8rpx 20rpx;
     margin-right: 12rpx;
-    border-radius: 20rpx;
+    border-radius: 6rpx;
     background: #f1f5f9;
     transition: all 0.2s;
 

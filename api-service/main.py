@@ -1086,8 +1086,9 @@ def list_predict_matches(
         params.append(now_ts)
 
     if date:
-        where.append("match_date = %s")
-        params.append(date)
+        date_prefix = date[2:].replace("-", "")
+        where.append("match_number LIKE %s")
+        params.append(f"{date_prefix}%")
 
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
     order = "ORDER BY match_date DESC, match_time DESC" if status == "finished" else "ORDER BY match_date ASC, match_time ASC"
@@ -1125,25 +1126,37 @@ def list_predict_matches(
 def list_predict_dates(
     status: str = Query(default="finished", description="not_started 或 finished"),
 ):
-    """获取预测页可选日期列表"""
+    """获取预测页可选日期列表——按售卖期号(match_number前6位)分组，与赛果查询一致"""
     import time as _time
     now_ts = int(_time.time())
-
-    if status == "finished":
-        where = "WHERE match_timestamp IS NOT NULL AND match_timestamp < %s"
-        params = [now_ts]
-    else:
-        where = "WHERE (match_timestamp IS NULL OR match_timestamp >= %s)"
-        params = [now_ts]
 
     from database import get_db
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            f"SELECT DISTINCT match_date FROM matches {where} ORDER BY match_date DESC",
-            params,
-        )
-        dates = [row["match_date"] for row in cur.fetchall()]
+        if status == "finished":
+            cur.execute(
+                """SELECT LEFT(match_number, 6) as sale_prefix FROM matches
+                   WHERE match_timestamp IS NOT NULL AND match_timestamp < %s
+                     AND match_number IS NOT NULL AND LENGTH(match_number) >= 6
+                   GROUP BY sale_prefix
+                   ORDER BY sale_prefix DESC
+                   LIMIT 30""",
+                (now_ts,),
+            )
+        else:
+            cur.execute(
+                """SELECT LEFT(match_number, 6) as sale_prefix FROM matches
+                   WHERE (match_timestamp IS NULL OR match_timestamp >= %s)
+                     AND match_number IS NOT NULL AND LENGTH(match_number) >= 6
+                   GROUP BY sale_prefix
+                   ORDER BY sale_prefix ASC""",
+                (now_ts,),
+            )
+        dates = []
+        for r in cur.fetchall():
+            prefix = r["sale_prefix"]
+            sale_date = f"20{prefix[:2]}-{prefix[2:4]}-{prefix[4:6]}"
+            dates.append(sale_date)
 
     return {"dates": dates}
 
@@ -1497,27 +1510,85 @@ def worldcup_similar_odds(
 def list_match_results(
     date: str = Query(..., description="日期 YYYY-MM-DD"),
 ):
-    """赛果查询：返回指定日期已完赛比赛及预测记录"""
+    """赛果查询：返回指定售卖期日期已完赛比赛及预测记录"""
     import time as _time
     from database import get_db as _get_db
+
+    # 按售卖期号日期查询（同一期的比赛统一归属同一天，即使跨日凌晨场）
+    date_prefix = date[2:].replace("-", "")  # "2026-06-09" -> "260609"
 
     with _get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             """SELECT * FROM matches
-               WHERE match_date = %s
+               WHERE match_number LIKE %s
                  AND match_timestamp IS NOT NULL
                  AND match_timestamp < %s
-               ORDER BY match_time ASC""",
-            (date, int(_time.time())),
+               ORDER BY match_date ASC, match_time ASC""",
+            (f"{date_prefix}%", int(_time.time())),
         )
         rows = cur.fetchall()
 
     if not rows:
         return {"items": [], "date": date}
 
+    # 按需回填缺比分的比赛（从500.com抓取）
+    pending = [r for r in rows if r.get("home_score") is None]
+    if pending:
+        try:
+            from odds500_service import fetch_match_score as _fetch_score
+            from repository import derive_sale_date as _derive_sale
+            for m in pending:
+                sale_date = _derive_sale(m) or m.get("match_date")
+                mcode = m.get("match_code")
+                if not sale_date or not mcode:
+                    continue
+                score = _fetch_score(sale_date, mcode)
+                if score:
+                    m["home_score"], m["away_score"] = score[0], score[1]
+                    with _get_db() as _conn:
+                        _conn.cursor().execute(
+                            "UPDATE matches SET home_score=%s, away_score=%s, match_status='finished' "
+                            "WHERE match_id=%s", (score[0], score[1], m["match_id"]))
+        except Exception as e:
+            logger.warning(f"赛果页比分回填失败: {e}")
+
     match_ids = [r["match_id"] for r in rows]
     odds_map = repo.fetch_wdl_for_matches(match_ids)
+
+    # 亚盘缓存：对DB中缺亚盘数据的已完赛比赛，从500.com抓取并落库
+    need_asian = [r for r in rows if r.get("asian_handicap") is None and r.get("home_score") is not None]
+    if need_asian:
+        try:
+            from repository import derive_sale_date as _derive_sale2
+            from odds500_service import get_fid_for_match, fetch_asian_handicap
+            for m in need_asian:
+                sale_date = _derive_sale2(m) or m.get("match_date")
+                mcode = m.get("match_code")
+                if not sale_date or not mcode:
+                    continue
+                fid = get_fid_for_match(sale_date, mcode)
+                if not fid:
+                    continue
+                asian_list = fetch_asian_handicap(fid)
+                preferred = next((a for a in asian_list if a.get("bookmaker") == "澳门"), None) or (asian_list[0] if asian_list else None)
+                if preferred and preferred.get("current"):
+                    hc = preferred["current"].get("handicap")
+                    home_odds = preferred["current"].get("home")
+                    away_odds = preferred["current"].get("away")
+                    company = preferred.get("bookmaker", "")
+                    if hc is not None:
+                        m["asian_handicap"] = hc
+                        m["asian_home_odds"] = home_odds
+                        m["asian_away_odds"] = away_odds
+                        m["asian_company"] = company
+                        with _get_db() as _conn2:
+                            _conn2.cursor().execute(
+                                "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, asian_away_odds=%s, asian_company=%s "
+                                "WHERE match_id=%s",
+                                (hc, home_odds, away_odds, company, m["match_id"]))
+        except Exception as e:
+            logger.warning(f"亚盘缓存回填失败: {e}")
 
     # 查预测记录
     from database import get_db as _get_db2
@@ -1544,6 +1615,17 @@ def list_match_results(
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
 
+        # 附带亚盘终盘数据
+        if row.get("asian_handicap") is not None:
+            item["asian"] = {
+                "handicap": float(row["asian_handicap"]),
+                "homeOdds": float(row["asian_home_odds"]) if row.get("asian_home_odds") else None,
+                "awayOdds": float(row["asian_away_odds"]) if row.get("asian_away_odds") else None,
+                "company": row.get("asian_company"),
+            }
+        else:
+            item["asian"] = None
+
         pred = pred_map.get(mid)
         if pred:
             item["prediction"] = {
@@ -1563,21 +1645,30 @@ def list_match_results(
 
 @app.get("/api/match-results/dates")
 def list_result_dates():
-    """返回有赛果的日期列表（降序，最近30个）"""
+    """返回有赛果的日期列表（降序，最近30个）——按售卖期号日期分组"""
     import time as _time
     from database import get_db as _get_db
 
     with _get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            """SELECT match_date, COUNT(*) as cnt FROM matches
+            """SELECT LEFT(match_number, 6) as sale_prefix, COUNT(*) as cnt FROM matches
                WHERE match_timestamp IS NOT NULL AND match_timestamp < %s
-                 AND home_score IS NOT NULL
-               GROUP BY match_date
-               ORDER BY match_date DESC
+                 AND match_number IS NOT NULL AND LENGTH(match_number) >= 6
+               GROUP BY sale_prefix
+               ORDER BY sale_prefix DESC
                LIMIT 30""",
             (int(_time.time()),),
         )
-        dates = [{"date": r["match_date"], "count": r["cnt"]} for r in cur.fetchall()]
+        dates = []
+        for r in cur.fetchall():
+            prefix = r["sale_prefix"]
+            sale_date = f"20{prefix[:2]}-{prefix[2:4]}-{prefix[4:6]}"
+            dates.append({"date": sale_date, "count": r["cnt"]})
 
     return {"dates": dates}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7001)

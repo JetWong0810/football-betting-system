@@ -248,6 +248,11 @@ class OddsRepository:
         latest_issue = self.get_latest_issue()
         # 默认只展示在售或未开赛的赛事
         where.append("(match_status IS NULL OR match_status NOT IN ('finished', 'cancelled'))")
+        # 已开赛超过3小时的比赛视为已结束，不再展示
+        import time as _time
+        finished_cutoff = int(_time.time()) - 3 * 3600
+        where.append(f"(match_timestamp IS NULL OR match_timestamp > {ph})")
+        params.append(finished_cutoff)
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         
         base_sql = (
