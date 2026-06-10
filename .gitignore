@@ -41,6 +41,7 @@ logs/
 # 数据库
 *.sqlite
 *.db
+!api-service/data/worldcup_odds.db
 
 # 操作系统
 .DS_Store
