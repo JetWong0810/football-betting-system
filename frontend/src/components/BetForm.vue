@@ -30,51 +30,29 @@
           </view>
           <view class="inline-item">
             <text class="label">比赛时间</text>
-            <picker class="picker-wrapper" mode="date" :value="leg.matchDate || currentDate" @change="(e) => onLegDateChange(leg.id, e.detail.value)" :start="currentDate" :disabled="ocrLoading">
-              <view class="picker-value" :class="{ disabled: ocrLoading }">{{ leg.matchDate || "选择日期" }}</view>
-            </picker>
+            <view class="picker-value" :class="{ disabled: ocrLoading }" @tap="() => openLegDatePicker(leg)">{{ leg.matchDate || "选择日期" }}</view>
           </view>
         </view>
 
         <view class="field inline">
           <view class="inline-item">
             <text class="label">投注类型</text>
-            <picker class="picker-wrapper" mode="selector" :range="betTypeOptions" @change="(e) => onLegBetTypeChange(leg.id, e.detail.value)" :disabled="ocrLoading">
-              <view class="picker-value" :class="{ disabled: ocrLoading }">{{ leg.betType }}</view>
-            </picker>
+            <view class="picker-value" :class="{ disabled: ocrLoading }" @tap="() => openLegBetTypePicker(leg)">{{ leg.betType }}</view>
           </view>
           <view class="inline-item">
             <text class="label">投注方向</text>
             <!-- 让球：主/客 + 正负 +/- + 让球数值 -->
             <view v-if="leg.betType === '让球'" class="selection-with-prefix">
-              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getTeamOptions(leg.betType)" @change="(e) => onLegHandicapTeamChange(leg.id, e.detail.value)">
-                <view class="picker-value">{{ getHandicapTeamLabel(leg) }}</view>
-              </picker>
-              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getSignOptions(leg.betType)" @change="(e) => onLegHandicapSignChange(leg.id, e.detail.value)">
-                <view class="picker-value">{{ getHandicapSignLabel(leg) }}</view>
-              </picker>
-              <picker class="picker-wrapper" mode="selector" :range="getDirectionOptions(leg.betType)" @change="(e) => onLegSelectionChange(leg.id, e.detail.value)">
-                <view class="picker-value">{{ getSelectionValueLabel(leg) }}</view>
-              </picker>
+              <view class="picker-value prefix-val" @tap="() => openLegHandicapTeamPicker(leg)">{{ getHandicapTeamLabel(leg) }}</view>
+              <view class="picker-value prefix-val" @tap="() => openLegHandicapSignPicker(leg)">{{ getHandicapSignLabel(leg) }}</view>
+              <view class="picker-value" @tap="() => openLegSelectionPicker(leg)">{{ getSelectionValueLabel(leg) }}</view>
             </view>
             <!-- 其它带前缀的类型：前缀 + 数值（如 大/小 + 盘口） -->
             <view v-else-if="requiresPrefix(leg.betType)" class="selection-with-prefix">
-              <picker class="picker-wrapper prefix-picker" mode="selector" :range="getPrefixOptions(leg.betType)" @change="(e) => onLegPrefixChange(leg.id, e.detail.value)">
-                <view class="picker-value">{{ getSelectionPrefixLabel(leg) }}</view>
-              </picker>
-              <picker class="picker-wrapper" mode="selector" :range="getDirectionOptions(leg.betType)" @change="(e) => onLegSelectionChange(leg.id, e.detail.value)">
-                <view class="picker-value">{{ getSelectionValueLabel(leg) }}</view>
-              </picker>
+              <view class="picker-value prefix-val" @tap="() => openLegPrefixPicker(leg)">{{ getSelectionPrefixLabel(leg) }}</view>
+              <view class="picker-value" @tap="() => openLegSelectionPicker(leg)">{{ getSelectionValueLabel(leg) }}</view>
             </view>
-            <picker
-              v-else
-              class="picker-wrapper"
-              mode="selector"
-              :range="getDirectionOptions(leg.betType)"
-              @change="(e) => onLegSelectionChange(leg.id, e.detail.value)"
-            >
-              <view class="picker-value">{{ leg.selection || "选择投注方向" }}</view>
-            </picker>
+            <view v-else class="picker-value" @tap="() => openLegSelectionPicker(leg)">{{ leg.selection || "选择投注方向" }}</view>
           </view>
         </view>
 
@@ -137,10 +115,11 @@
 
     <view class="field">
       <text class="label">投注结果</text>
-      <picker class="picker-wrapper" mode="selector" :range="resultOptions" range-key="label" @change="onResultChange" :disabled="ocrLoading">
-        <view class="picker-value" :class="{ disabled: ocrLoading }">{{ resultLabel }}</view>
-      </picker>
+      <view class="picker-value" :class="{ disabled: ocrLoading }" @tap="openResultPicker">{{ resultLabel }}</view>
     </view>
+    <ActionPicker ref="resultPickerRef" />
+    <ActionPicker ref="formPickerRef" />
+    <DatePicker ref="datePickerRef" />
 
     <!-- 表单验证提示（只在尝试提交后显示） -->
     <view v-if="!isFieldsDisabled && hasAttemptedSubmit && !isFormValid && formErrors.length > 0" class="validation-tips">
@@ -161,6 +140,8 @@
 <script setup>
 import dayjs from "dayjs";
 import { computed, reactive, ref, watch } from "vue";
+import ActionPicker from "@/components/ActionPicker.vue";
+import DatePicker from "@/components/DatePicker.vue";
 
 const props = defineProps({
   editingBet: {
@@ -686,9 +667,69 @@ function onLegDateChange(legId, value) {
   }
 }
 
-function onResultChange(event) {
-  const index = Number(event.detail.value);
-  form.result = resultOptions[index].value;
+const formPickerRef = ref(null);
+const datePickerRef = ref(null);
+
+async function openLegDatePicker(leg) {
+  if (props.ocrLoading) return;
+  const result = await datePickerRef.value.show({ value: leg.matchDate || currentDate });
+  if (result) onLegDateChange(leg.id, result);
+}
+
+async function openLegBetTypePicker(leg) {
+  if (props.ocrLoading) return;
+  const idx = betTypeOptions.indexOf(leg.betType);
+  const result = await formPickerRef.value.show({ title: "投注类型", options: betTypeOptions, defaultIndex: idx >= 0 ? idx : 0 });
+  if (result) onLegBetTypeChange(leg.id, result.index);
+}
+
+async function openLegSelectionPicker(leg) {
+  const options = getDirectionOptions(leg.betType);
+  if (!options.length) return;
+  const current = leg.betType === "让球" ? getHandicapParts(leg.selection).value : requiresPrefix(leg.betType) ? getSelectionParts(leg.betType, leg.selection).value : leg.selection;
+  const idx = options.indexOf(current);
+  const result = await formPickerRef.value.show({ title: "投注方向", options, defaultIndex: idx >= 0 ? idx : 0 });
+  if (result) onLegSelectionChange(leg.id, result.index);
+}
+
+async function openLegPrefixPicker(leg) {
+  const options = getPrefixOptions(leg.betType);
+  if (!options.length) return;
+  const { prefix } = getSelectionParts(leg.betType, leg.selection);
+  const idx = options.indexOf(prefix);
+  const result = await formPickerRef.value.show({ title: "选择", options, defaultIndex: idx >= 0 ? idx : 0 });
+  if (result) onLegPrefixChange(leg.id, result.index);
+}
+
+async function openLegHandicapTeamPicker(leg) {
+  const options = getTeamOptions(leg.betType);
+  const { team } = getHandicapParts(leg.selection);
+  const idx = options.indexOf(team);
+  const result = await formPickerRef.value.show({ title: "主/客", options, defaultIndex: idx >= 0 ? idx : 0 });
+  if (result) onLegHandicapTeamChange(leg.id, result.index);
+}
+
+async function openLegHandicapSignPicker(leg) {
+  const options = getSignOptions(leg.betType);
+  const { sign } = getHandicapParts(leg.selection);
+  const idx = options.indexOf(sign);
+  const result = await formPickerRef.value.show({ title: "正/负", options, defaultIndex: idx >= 0 ? idx : 0 });
+  if (result) onLegHandicapSignChange(leg.id, result.index);
+}
+
+const resultPickerRef = ref(null);
+
+async function openResultPicker() {
+  if (props.ocrLoading) return;
+  const currentIndex = resultOptions.findIndex((o) => o.value === form.result);
+  const result = await resultPickerRef.value.show({
+    title: "投注结果",
+    options: resultOptions.map((o) => o.label),
+    defaultIndex: currentIndex >= 0 ? currentIndex : 0,
+  });
+  if (result) {
+    form.result = resultOptions[result.index].value;
+  }
 }
 
 function selectParlayType(value) {
@@ -923,7 +964,12 @@ input:disabled {
     flex: 0 0 28%;
   }
 
-  .picker-wrapper:last-child {
+  .prefix-val {
+    flex: 0 0 28%;
+  }
+
+  .picker-wrapper:last-child,
+  .picker-value:last-child {
     flex: 1;
   }
 }

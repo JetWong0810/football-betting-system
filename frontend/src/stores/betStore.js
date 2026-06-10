@@ -35,6 +35,9 @@ export const useBetStore = defineStore("bet", () => {
   const total = ref(0);
   const hasMore = ref(true);
 
+  // 跳转到记录页时指定显示哪个tab
+  let pendingTab = null;
+
   // 计算总投注金额（只统计投注中和已结算的）
   const totalStake = computed(() => bets.value.filter((bet) => bet.status === "betting" || bet.status === "settled").reduce((sum, bet) => sum + Number(bet.stake || 0), 0));
 
@@ -497,6 +500,7 @@ export const useBetStore = defineStore("bet", () => {
     pageSize,
     total,
     hasMore,
+    pendingTab,
     // 方法
     bootstrap,
     fetchBets,

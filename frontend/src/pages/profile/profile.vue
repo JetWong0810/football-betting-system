@@ -120,14 +120,17 @@
         </view>
       </view>
     </scroll-view>
+    <ConfirmDialog />
   </view>
 </template>
 
 <script setup>
 import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { useUserStore } from "@/stores/userStore";
 import { requireAuth } from "@/utils/auth";
+import { showConfirm } from "@/utils/confirm";
 
 const userStore = useUserStore();
 // 使用 base64 编码的默认头像，避免小程序中加载外部图片失败
@@ -149,43 +152,32 @@ function handleEditProfile() {
 }
 
 function handleHelp() {
-  uni.showModal({
-    title: "帮助中心",
-    content: "如有问题，请联系客服",
-    showCancel: false,
-  });
+  showConfirm({ title: "帮助中心", content: "如有问题，请联系客服", confirmText: "知道了", cancelText: "" });
 }
 
 function handleAbout() {
-  uni.showModal({
-    title: "关于我们",
-    content: "理性玩球小助手 v1.0.0\n\n帮助您理性投注，科学决策",
-    showCancel: false,
-  });
+  showConfirm({ title: "关于我们", content: "理性玩球小助手 v1.0.0\n帮助您理性投注，科学决策", confirmText: "知道了", cancelText: "" });
 }
 
-function handleLogout() {
-  uni.showModal({
+async function handleLogout() {
+  const confirmed = await showConfirm({
     title: "退出登录",
     content: "确定要退出登录吗？",
-    success: (res) => {
-      if (res.confirm) {
-        userStore.logout();
-        uni.showToast({ title: "已退出登录", icon: "success", duration: 1500 });
-        
-        // 延迟跳转
-        setTimeout(() => {
-          // #ifdef MP-WEIXIN
-          uni.reLaunch({ url: "/pages/auth/wechat-login" });
-          // #endif
-          
-          // #ifndef MP-WEIXIN
-          uni.reLaunch({ url: "/pages/auth/login" });
-          // #endif
-        }, 1500);
-      }
-    },
+    confirmText: "退出",
+    type: "danger",
   });
+  if (confirmed) {
+    userStore.logout();
+    uni.showToast({ title: "已退出登录", icon: "success", duration: 1500 });
+    setTimeout(() => {
+      // #ifdef MP-WEIXIN
+      uni.reLaunch({ url: "/pages/auth/wechat-login" });
+      // #endif
+      // #ifndef MP-WEIXIN
+      uni.reLaunch({ url: "/pages/auth/login" });
+      // #endif
+    }, 1500);
+  }
 }
 
 function handleImageError(e) {

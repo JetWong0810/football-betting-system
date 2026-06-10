@@ -1,1027 +1,630 @@
 <template>
   <view class="page-wrapper">
-    <!-- 顶部渐变头部 -->
-    <view class="header-section">
-      <view class="header-top">
-        <view class="title-wrapper">
-          <view class="icon-wrapper">
-            <text class="icon">📋</text>
-          </view>
-          <text class="title">投注记录</text>
-        </view>
-        <view class="header-btns">
-          <button class="add-btn" @tap="showFormDialog">
-            <text class="add-icon">+</text>
-            <text class="btn-text">新增</text>
-          </button>
-        </view>
-      </view>
-
-      <!-- 统计卡片 -->
-      <view class="stats-grid">
-        <view class="stat-card">
-          <view class="stat-label">
-            <view class="stat-icon-wrapper">¥</view>
-            <text>总投注</text>
-          </view>
-          <view class="stat-value">¥{{ totalAmount }}</view>
-        </view>
-        <view class="stat-card">
-          <view class="stat-label">
-            <view class="stat-icon-wrapper">#</view>
-            <text>记录数</text>
-          </view>
-          <view class="stat-value">{{ betStore.total || betStore.bets.length }}</view>
-        </view>
+    <!-- 顶部工具栏 -->
+    <view class="toolbar">
+      <view class="tabs-list">
+        <view class="tab-item" :class="{ active: activeTab === 'saved' }" @tap="activeTab = 'saved'">保存记录</view>
+        <view class="tab-item" :class="{ active: activeTab === 'betting' }" @tap="activeTab = 'betting'">投注记录</view>
       </view>
     </view>
 
-    <view class="content-wrapper">
-      <!-- 主标签切换：记录 / 分析 -->
-      <view class="main-tabs-wrapper">
-        <view class="main-tabs-list">
-          <view class="main-tab-item" :class="{ active: mainTab === 'records' }" @tap="mainTab = 'records'">
-            <text class="tab-icon">📝</text>
-            <text>记录</text>
+    <!-- 列表 -->
+    <mescroll-body ref="mescrollRef" :down="downOption" :up="upOption" :bottombar="false" @init="mescrollInit" @down="downCallback" @up="upCallback">
+      <view class="records-section">
+        <!-- 保存记录 tab -->
+        <view v-if="activeTab === 'saved'">
+          <view v-if="displayedBets.length === 0 && !betStore.loading" class="empty-state">
+            <text class="empty-text">暂无保存记录</text>
+            <text class="empty-hint">从赛事列表页选择比赛并保存</text>
           </view>
-          <view class="main-tab-item" :class="{ active: mainTab === 'analysis' }" @tap="mainTab = 'analysis'">
-            <text class="tab-icon">📊</text>
-            <text>分析</text>
-          </view>
-        </view>
-      </view>
 
-      <!-- 记录标签页 -->
-      <view v-if="mainTab === 'records'">
-        <!-- 标签切换 -->
-        <view class="tabs-wrapper">
-          <view class="tabs-list">
-            <view class="tab-item" :class="{ active: activeTab === 'all' }" @tap="activeTab = 'all'"> 全部记录 </view>
-            <view class="tab-item" :class="{ active: activeTab === 'parlay' }" @tap="activeTab = 'parlay'"> 串关记录 </view>
-          </view>
-        </view>
-
-        <!-- 使用 mescroll 实现分页 -->
-        <mescroll-body ref="mescrollRef" :down="downOption" :up="upOption" :bottombar="false" @init="mescrollInit" @down="downCallback" @up="upCallback">
-          <view class="records-section">
-            <view v-if="displayedBets.length === 0 && !betStore.loading" class="empty-state">
-              <view class="empty-icon-wrapper">
-                <text class="empty-icon">-</text>
+          <view v-else class="bet-list">
+            <view v-for="bet in displayedBets" :key="bet.id" class="saved-card" :class="{ 'is-parlay': bet.legs?.length > 1 }">
+              <!-- 串关标识条 -->
+              <view class="parlay-bar" v-if="bet.legs?.length > 1">
+                <text class="parlay-label">{{ getParlayTypeLabel(bet) }}</text>
+                <text class="parlay-total">总赔率 {{ bet.odds }}</text>
+                <text class="card-delete" @tap.stop="() => removeBet(bet.id)">删除</text>
               </view>
-              <text class="empty-text">{{ activeTab === "parlay" ? "暂无串关记录" : "暂无投注记录" }}</text>
-            </view>
 
-            <view v-else class="bet-list">
-              <view v-for="bet in displayedBets" :key="bet.id" class="bet-card">
-                <!-- 卡片头部 -->
-                <view class="card-header">
-                  <view class="header-left">
-                    <view class="badge-row">
-                      <view class="badge" :class="bet.legs?.length > 1 ? 'parlay' : 'single'">
-                        {{ bet.legs?.length > 1 ? getParlayTypeLabel(bet) : "单关" }}
-                      </view>
-                      <text class="league-text">
-                        {{ bet.legs?.length > 1 ? `共${bet.legs.length}场` : bet.legs?.[0]?.league || "未知联赛" }}
-                      </text>
-                    </view>
-                    <view class="match-title">{{ primaryMatch(bet) }}</view>
-                  </view>
-                  <view class="header-right">
-                    <view class="status-actions">
-                      <view class="badges-row">
-                        <view class="status-badge" :class="bet.status">
-                          {{ statusText(bet) }}
-                        </view>
-                        <view class="result-badge" :class="bet.result" v-if="bet.status === 'settled'">
-                          {{ resultText(bet) }}
-                        </view>
-                      </view>
-                      <view class="action-btns">
-                        <button v-if="bet.status !== 'saved' && bet.status !== 'settled'" class="icon-btn edit" @tap.stop="() => startEdit(bet)">
-                          <text class="btn-icon">✎</text>
-                        </button>
-                        <button v-if="bet.status !== 'settled'" class="icon-btn delete" @tap.stop="() => removeBet(bet.id)">
-                          <text class="btn-icon">×</text>
-                        </button>
-                      </view>
-                    </view>
-                  </view>
+              <!-- 单关的删除按钮 -->
+              <text class="card-delete corner" v-if="bet.legs?.length === 1" @tap.stop="() => removeBet(bet.id)">删除</text>
+
+              <!-- 比赛legs -->
+              <view v-for="(leg, idx) in bet.legs" :key="leg.id" class="leg" :class="{ 'leg--divider': idx > 0 }">
+                <view class="leg-row1">
+                  <text class="leg-teams">{{ formatTeams(leg) }}</text>
                 </view>
-
-                <!-- 串关详情 -->
-                <view v-if="bet.legs?.length > 1" class="parlay-details">
-                  <view v-for="leg in bet.legs" :key="leg.id" class="parlay-match">
-                    <view class="parlay-teams">{{ formatTeams(leg) }}</view>
-                    <view class="parlay-info"> {{ leg.league || "未知" }} · {{ leg.betType }} · @{{ leg.odds }} </view>
-                  </view>
-                </view>
-
-                <!-- 卡片内容 -->
-                <view class="card-content">
-                  <view class="info-row">
-                    <view class="calendar-icon">
-                      <text>📅</text>
-                    </view>
-                    <text class="info-text">{{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
-                  </view>
-
-                  <view class="divider"></view>
-
-                  <view class="bottom-row">
-                    <view class="odds-section">
-                      <text class="odds-label"> {{ bet.legs?.length === 1 ? `${bet.legs[0].betType} · ` : "" }}赔率 @{{ bet.odds }} </text>
-                    </view>
-                    <view class="amount-section">
-                      <text class="amount-label">投注金额</text>
-                      <text class="amount-value">¥{{ bet.stake }}</text>
-                    </view>
-                  </view>
+                <text class="leg-sub">{{ leg.league }} {{ formatDate(leg.matchTime) }}</text>
+                <view class="leg-row3">
+                  <view class="sel-chip">{{ leg.selection || '未选' }}</view>
+                  <text class="leg-type">{{ leg.betType }}</text>
+                  <text class="leg-at">@{{ leg.odds }}</text>
                 </view>
               </view>
             </view>
           </view>
-        </mescroll-body>
-      </view>
-
-      <!-- 分析标签页 -->
-      <view v-if="mainTab === 'analysis'" class="analysis-wrapper">
-        <view class="analysis-section">
-          <text class="section-title">盈亏趋势</text>
-          <ChartProfit :series="statStore.trendSeries" />
         </view>
 
-        <view class="analysis-section">
-          <text class="section-title">玩法盈亏占比</text>
-          <ChartPie :dataset="statStore.pieDataset" />
-        </view>
-
-        <view class="analysis-section">
-          <text class="section-title">周度盈亏</text>
-          <view v-if="!weekList.length" class="empty-state">
-            <view class="empty-icon-wrapper">
-              <text class="empty-icon">-</text>
+        <!-- 投注记录 tab -->
+        <view v-else>
+          <!-- 筛选栏始终显示 -->
+          <view class="filter-bar">
+            <view class="filter-tabs">
+              <text class="filter-tab" :class="{ active: betFilter === 'all' }" @tap="betFilter = 'all'">全部</text>
+              <text class="filter-tab" :class="{ active: betFilter === 'unsettled' }" @tap="betFilter = 'unsettled'">未结算</text>
+              <text class="filter-tab" :class="{ active: betFilter === 'settled' }" @tap="betFilter = 'settled'">已结算</text>
             </view>
-            <text class="empty-text">暂无数据</text>
+            <text class="add-link" @tap="showFormDialog">+ 新增</text>
           </view>
-          <view v-else class="weekly">
-            <view v-for="row in weekList" :key="row.week" class="weekly-row">
-              <view class="week">{{ row.week }}</view>
-              <view class="meta">投入 {{ formatCurrency(row.stake) }}</view>
-              <view class="meta" :class="{ win: row.profit >= 0, lose: row.profit < 0 }"> 盈亏 {{ formatCurrency(row.profit) }} </view>
+
+          <view v-if="displayedBets.length === 0 && !betStore.loading" class="empty-state">
+            <text class="empty-text">{{ betFilter === 'settled' ? '暂无已结算记录' : betFilter === 'unsettled' ? '暂无未结算记录' : '暂无投注记录' }}</text>
+            <text class="empty-hint" v-if="betFilter === 'all'">点击"+ 新增"添加投注记录</text>
+          </view>
+
+          <view v-else class="bet-list">
+            <view v-for="bet in displayedBets" :key="bet.id" class="bet-card">
+              <view class="bet-card-header">
+                <view class="bet-card-left">
+                  <text class="bet-card-title">{{ primaryMatch(bet) }}</text>
+                  <text class="bet-card-sub">{{ bet.legs?.length > 1 ? `${bet.legs.length}场串关` : bet.legs?.[0]?.league || '' }} · {{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
+                </view>
+                <view class="bet-card-badges">
+                  <view class="badge-status" :class="bet.status">{{ statusText(bet) }}</view>
+                  <view class="badge-result" :class="bet.result" v-if="bet.status === 'settled'">{{ resultText(bet) }}</view>
+                </view>
+              </view>
+
+              <!-- 串关展开 -->
+              <view v-if="bet.legs?.length > 1" class="bet-legs-list">
+                <view v-for="leg in bet.legs" :key="leg.id" class="bet-leg-row">
+                  <text class="bet-leg-name">{{ formatTeams(leg) }}</text>
+                  <view class="bet-leg-right">
+                    <view class="sel-chip sm">{{ leg.selection || leg.betType }}</view>
+                    <text class="bet-leg-odds">@{{ leg.odds }}</text>
+                  </view>
+                </view>
+              </view>
+
+              <!-- 底部 -->
+              <view class="bet-card-footer">
+                <view class="bet-card-info-row">
+                  <view class="bet-card-sel" v-if="bet.legs?.length === 1">
+                    <view class="sel-chip sm">{{ bet.legs[0].selection }}</view>
+                    <text class="bet-card-type">{{ bet.legs[0].betType }} @{{ bet.odds }}</text>
+                  </view>
+                  <view class="bet-card-sel" v-else>
+                    <text class="bet-card-type">总赔率 @{{ bet.odds }}</text>
+                  </view>
+                  <text class="bet-amount" v-if="bet.stake">¥{{ bet.stake }}</text>
+                </view>
+                <view class="bet-card-actions" v-if="bet.status === 'betting'">
+                  <text class="act-link settle" @tap.stop="() => startSettle(bet)">结算</text>
+                  <text class="act-link edit" @tap.stop="() => startEdit(bet)">编辑</text>
+                  <text class="act-link del" @tap.stop="() => removeBet(bet.id)">删除</text>
+                </view>
+              </view>
             </view>
           </view>
         </view>
       </view>
-    </view>
+    </mescroll-body>
 
-    <!-- 投注记录弹窗 -->
-    <BetRecordDialog v-model:visible="showDialog" :editing-bet="editingBet" @success="handleRecordSuccess" />
+    <BetRecordDialog v-model:visible="showDialog" :editing-bet="editingBet" :settle-mode="settleMode" @success="handleRecordSuccess" />
+    <ConfirmDialog />
   </view>
 </template>
 
 <script setup>
 import dayjs from "dayjs";
 import BetRecordDialog from "@/components/BetRecordDialog.vue";
-import ChartPie from "@/components/ChartPie.vue";
-import ChartProfit from "@/components/ChartProfit.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import MescrollBody from "mescroll-uni/mescroll-body.vue";
 import { useBetStore } from "@/stores/betStore";
-import { useStatStore } from "@/stores/statStore";
+import { showConfirm } from "@/utils/confirm";
 import { ref, computed, onMounted } from "vue";
-import { formatCurrency } from "@/utils/formatters";
+import { onShow } from "@dcloudio/uni-app";
 import { requireAuth } from "@/utils/auth";
 
 const betStore = useBetStore();
-const statStore = useStatStore();
-const mainTab = ref("records");
 const editingBet = ref(null);
-const activeTab = ref("all");
+const settleMode = ref(false);
+const activeTab = ref("saved");
+const betFilter = ref("all");
 const showDialog = ref(false);
 
-// mescroll 相关
 const mescrollRef = ref(null);
 let mescroll = null;
 
-// 初始化 mescroll
+
 function mescrollInit(mescrollInstance) {
   mescroll = mescrollInstance;
-  // 延迟触发上拉加载，确保 mescroll 完全初始化
   setTimeout(() => {
-    if (mescroll && mescroll.triggerUpScroll) {
-      mescroll.triggerUpScroll();
-    }
+    if (mescroll && mescroll.triggerUpScroll) mescroll.triggerUpScroll();
   }, 100);
 }
 
-// 下拉刷新回调
 function downCallback() {
-  betStore
-    .refreshBets()
-    .then(() => {
-      if (mescroll) {
-        mescroll.endSuccess();
-      }
-    })
-    .catch(() => {
-      if (mescroll) {
-        mescroll.endErr();
-      }
-    });
+  betStore.refreshBets()
+    .then(() => { if (mescroll) mescroll.endSuccess(); })
+    .catch(() => { if (mescroll) mescroll.endErr(); });
 }
 
-// 上拉加载回调
-function upCallback(page) {
-  betStore
-    .loadMore()
-    .then(() => {
-      if (mescroll) {
-        const dataLength = displayedBets.value.length;
-        const hasMore = betStore.hasMore;
-        mescroll.endSuccess(dataLength, hasMore);
-      }
-    })
-    .catch(() => {
-      if (mescroll) {
-        mescroll.endErr();
-      }
-    });
+function upCallback() {
+  betStore.loadMore()
+    .then(() => { if (mescroll) mescroll.endSuccess(displayedBets.value.length, betStore.hasMore); })
+    .catch(() => { if (mescroll) mescroll.endErr(); });
 }
 
-// 下拉刷新配置
-const downOption = {
-  auto: false, // 不自动加载
-};
+const downOption = { auto: false };
+const upOption = { auto: false, page: { num: 0, size: betStore.pageSize }, noMoreSize: 0, empty: { use: false } };
 
-// 上拉加载配置
-const upOption = {
-  auto: false, // 手动触发上拉加载（在 mescrollInit 中触发）
-  page: {
-    num: 0, // 当前页码,默认0,回调之前会加1,即callback(page)会从1开始
-    size: betStore.pageSize, // 每页数据的数量
-  },
-  noMoreSize: 0, // 不显示"无更多数据"提示
-  empty: {
-    use: false, // 关闭 mescroll 自带空布局，避免与自定义空态重复
-    tip: "暂无投注记录",
-  },
-};
-
-// 页面加载时初始化数据
 onMounted(() => {
-  // 检查登录状态
-  if (!requireAuth()) {
-    return;
-  }
-
-  if (betStore.bets.length === 0) {
-    betStore.bootstrap();
-  }
+  if (!requireAuth()) return;
+  if (betStore.bets.length === 0) betStore.bootstrap();
 });
 
-// 计算总投注金额
-const totalAmount = computed(() => {
-  return betStore.bets.reduce((sum, bet) => sum + (Number(bet.stake) || 0), 0);
+onShow(() => {
+  if (betStore.pendingTab) {
+    activeTab.value = betStore.pendingTab;
+    betStore.pendingTab = null;
+  }
+  if (betStore.bets.length > 0) betStore.refreshBets();
 });
 
-// 根据选中的标签过滤投注记录
+const allBets = computed(() => betStore.bets);
+
 const displayedBets = computed(() => {
-  if (activeTab.value === "parlay") {
-    return betStore.bets.filter((bet) => bet.legs?.length > 1);
+  if (activeTab.value === "saved") return allBets.value.filter((b) => b.status === "saved");
+  const bettingList = allBets.value.filter((b) => b.status === "betting" || b.status === "settled");
+  if (betFilter.value === "unsettled") return bettingList.filter((b) => b.status === "betting");
+  if (betFilter.value === "settled") return bettingList.filter((b) => b.status === "settled");
+  return bettingList;
+});
+
+function showFormDialog() { editingBet.value = null; showDialog.value = true; }
+function handleRecordSuccess(payload) {
+  editingBet.value = null;
+  if (payload && payload.status === "betting") {
+    activeTab.value = "betting";
+    betFilter.value = "unsettled";
   }
-  return betStore.bets;
-});
-
-// 周度数据列表
-const weekList = computed(() => {
-  return Object.entries(statStore.periodStats)
-    .map(([week, payload]) => ({ week, ...payload }))
-    .sort((a, b) => a.week.localeCompare(b.week));
-});
-
-function showFormDialog() {
-  editingBet.value = null;
-  showDialog.value = true;
 }
 
-function handleRecordSuccess() {
-  // 记录添加/更新成功后，清除编辑状态
-  editingBet.value = null;
-}
-
-function removeBet(id) {
-  uni.showModal({
+async function removeBet(id) {
+  const confirmed = await showConfirm({
     title: "删除记录",
-    content: "确认删除这条投注记录吗？",
-    success: async (res) => {
-      if (res.confirm) {
-        try {
-          if (editingBet.value?.id === id) {
-            editingBet.value = null;
-          }
-          await betStore.removeBet(id);
-          uni.showToast({ title: "已删除", icon: "success" });
-        } catch (error) {
-          uni.showToast({ title: error.message || "删除失败", icon: "none" });
-          console.error("删除投注记录失败:", error);
-        }
-      }
-    },
+    content: "确认删除这条记录吗？删除后不可恢复。",
+    confirmText: "删除",
+    type: "danger",
   });
+  if (!confirmed) return;
+  try {
+    if (editingBet.value?.id === id) editingBet.value = null;
+    await betStore.removeBet(id);
+    uni.showToast({ title: "已删除", icon: "success" });
+  } catch (e) {
+    uni.showToast({ title: e.message || "删除失败", icon: "none" });
+  }
 }
 
 function startEdit(bet) {
-  // 已保存状态不允许编辑
-  if (bet.status === "saved") {
-    uni.showToast({ title: "已保存的记录不可编辑，只能删除", icon: "none" });
-    return;
-  }
-  // 已结算状态不允许编辑
-  if (bet.status === "settled") {
-    uni.showToast({ title: "已结算的记录不可编辑", icon: "none" });
-    return;
-  }
-
-  editingBet.value = bet;
-  showDialog.value = true;
+  if (bet.status === "settled") { uni.showToast({ title: "已结算不可编辑", icon: "none" }); return; }
+  settleMode.value = false;
+  editingBet.value = bet; showDialog.value = true;
 }
 
-function formatDate(value) {
-  if (!value) return "-";
-  return dayjs(value).format("MM-DD HH:mm");
+function startSettle(bet) {
+  settleMode.value = true;
+  editingBet.value = bet; showDialog.value = true;
 }
 
-function resultText(bet) {
-  const dict = {
-    win: "全赢",
-    lose: "全输",
-    pending: "进行中",
-    "half-win": "赢半",
-    "half-lose": "输半",
-  };
-  return dict[bet.result] || "未知";
+function formatDate(v) { return v ? dayjs(v).format("MM-DD HH:mm") : "-"; }
+function resultText(b) { return { win: "赢", lose: "输", pending: "待定", "half-win": "赢半", "half-lose": "输半" }[b.result] || ""; }
+function statusText(b) { return { saved: "已保存", betting: "投注中", settled: "已结算" }[b.status] || ""; }
+function primaryMatch(b) {
+  const legs = b.legs || [];
+  if (!legs.length) return b.matchName || "未命名";
+  if (legs.length === 1) return formatTeams(legs[0]);
+  return `${formatTeams(legs[0])} 等${legs.length}场`;
 }
-
-function statusText(bet) {
-  const dict = {
-    saved: "已保存",
-    betting: "投注中",
-    settled: "已结算",
-  };
-  return dict[bet.status] || "未知";
-}
-
-function primaryMatch(bet) {
-  const legs = bet.legs || [];
-  if (!legs.length) {
-    return bet.matchName || "未命名比赛";
-  }
-  const title = formatTeams(legs[0]);
-  if (legs.length === 1) return title;
-  return `${title}`;
-}
-
-function formatTeams(leg) {
-  const home = leg?.homeTeam || "主队";
-  const away = leg?.awayTeam || "客队";
-  return `${home} vs ${away}`;
-}
-
-function formatSelection(leg) {
-  if (leg?.selection) return leg.selection;
-  if (leg?.betType === "大小球") return "大小盘";
-  if (leg?.betType === "让球") return "盘口方向";
-  return "投注方向";
-}
-
-function getParlayTypeLabel(bet) {
-  if (!bet.legs || bet.legs.length < 2) return "单关";
-
-  // 如果有保存的parlayType，使用它
-  if (bet.parlayType) {
-    const [m, n] = bet.parlayType.split("_");
-    return `${m}串${n}`;
-  }
-
-  // 否则默认显示N串1
-  return `${bet.legs.length}串1`;
+function formatTeams(l) { return `${l?.homeTeam || "主队"} vs ${l?.awayTeam || "客队"}`; }
+function getParlayTypeLabel(b) {
+  if (!b.legs || b.legs.length < 2) return "单关";
+  if (b.parlayType) { const [m, n] = b.parlayType.split("_"); return `${m}串${n}`; }
+  return `${b.legs.length}串1`;
 }
 </script>
 
 <style lang="scss" scoped>
 @import "@/uni.scss";
 
-/* 页面容器 */
 .page-wrapper {
   min-height: 100vh;
-  width: 100%;
-  max-width: 100vw;
-  overflow-x: hidden;
-  background: linear-gradient(180deg, #e8f8f5 0%, #f2fbf9 100%);
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  background: #f4f5f7;
 }
 
-/* ========== 顶部头部区域 ========== */
-.header-section {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-  padding: 40rpx 24rpx 24rpx;
-  border-radius: 0 0 24rpx 24rpx;
-  box-shadow: 0 4rpx 16rpx rgba(13, 148, 136, 0.15);
-}
-
-.header-top {
+/* ===== 工具栏 ===== */
+.toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24rpx;
-  width: 100%;
-}
-
-.title-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  flex: 1;
-}
-
-.icon-wrapper {
-  width: 36rpx;
-  height: 36rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 8rpx;
-}
-
-.icon {
-  font-size: 20rpx;
-  line-height: 1;
-}
-
-.title {
-  font-size: 36rpx;
-  font-weight: 600;
-  color: #ffffff;
-  letter-spacing: 0.5rpx;
-}
-
-.header-btns {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  flex-shrink: 0;
-  margin-left: 16rpx;
-}
-
-.add-btn {
-  background: #ffffff;
-  color: #0d9488;
-  border-radius: 8rpx;
-  padding: 6rpx 20rpx;
-  font-size: 24rpx;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.15);
-  border: none;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  height: 52rpx;
-  line-height: 1;
-}
-
-.add-btn:active {
-  transform: scale(0.97);
-  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.12);
-}
-
-.add-icon {
-  font-size: 28rpx;
-  font-weight: 700;
-}
-
-.btn-text {
-  line-height: 1;
-}
-
-/* 统计卡片网格 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  padding: 16rpx 24rpx;
   gap: 16rpx;
-}
-
-.stat-card {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
-  border-radius: 8rpx;
-  padding: 18rpx;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.stat-label {
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  font-size: 22rpx;
-  color: rgba(255, 255, 255, 0.85);
-  margin-bottom: 10rpx;
-}
-
-.stat-icon-wrapper {
-  width: 28rpx;
-  height: 28rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 8rpx;
-  font-size: 18rpx;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.stat-value {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-/* ========== 内容区域 ========== */
-.content-wrapper {
-  flex: 1;
-  padding: 0 24rpx 24rpx;
-  box-sizing: border-box;
-  width: 100%;
-}
-
-/* mescroll 容器样式 */
-.records-section {
-  padding: 0 0 24rpx;
-}
-
-/* 主标签切换 */
-.main-tabs-wrapper {
-  margin: 24rpx 0 20rpx;
-}
-
-.main-tabs-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   background: #ffffff;
-  border-radius: 8rpx;
-  padding: 6rpx;
-  border: 1px solid rgba(13, 148, 136, 0.1);
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-  gap: 8rpx;
-}
-
-.main-tab-item {
-  padding: 16rpx;
-  text-align: center;
-  font-size: 26rpx;
-  font-weight: 500;
-  color: #6b7280;
-  border-radius: 8rpx;
-  transition: all 0.3s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-}
-
-.main-tab-item .tab-icon {
-  font-size: 24rpx;
-}
-
-.main-tab-item.active {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-  color: #ffffff;
-  font-weight: 600;
-  box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
-}
-
-/* 标签切换 */
-.tabs-wrapper {
-  margin: 0 0 20rpx;
+  border-bottom: 1px solid #eceef2;
 }
 
 .tabs-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  background: #ffffff;
-  border-radius: 8rpx;
+  flex: 1;
+  display: flex;
+  background: #f4f5f7;
+  border-radius: 6rpx;
   padding: 4rpx;
-  border: 1px solid rgba(13, 148, 136, 0.1);
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 }
 
 .tab-item {
-  padding: 14rpx;
+  flex: 1;
+  padding: 14rpx 0;
   text-align: center;
   font-size: 26rpx;
   font-weight: 500;
   color: #6b7280;
-  border-radius: 8rpx;
-  transition: all 0.3s;
+  border-radius: 6rpx;
 }
 
 .tab-item.active {
-  background: #0d9488;
-  color: #ffffff;
-  font-weight: 600;
-  box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
-}
-
-/* ========== 分析页面区域 ========== */
-.analysis-wrapper {
-  padding-bottom: 24rpx;
-}
-
-.analysis-section {
-  margin-bottom: 32rpx;
-}
-
-.section-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #0d9488;
-  margin-bottom: 16rpx;
-  display: block;
-}
-
-.weekly {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.weekly-row {
   background: #ffffff;
-  border-radius: 8rpx;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(13, 148, 136, 0.1);
-}
-
-.week {
-  font-size: 26rpx;
+  color: #1f2937;
   font-weight: 600;
-  color: #111827;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.meta {
-  font-size: 24rpx;
-  color: #6b7280;
-}
 
-.meta.win {
-  color: #10b981;
-  font-weight: 500;
-}
-
-.meta.lose {
-  color: #ef4444;
-  font-weight: 500;
-}
-
-/* ========== 记录列表区域 ========== */
+/* ===== 列表区域 ===== */
 .records-section {
-  padding-bottom: 24rpx;
+  padding: 16rpx 24rpx 40rpx;
 }
 
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 100rpx 0;
-  background: #ffffff;
-  border-radius: 8rpx;
-  border: 1px solid rgba(13, 148, 136, 0.1);
-}
-
-.empty-icon-wrapper {
-  width: 80rpx;
-  height: 80rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, rgba(13, 148, 136, 0.1) 0%, rgba(20, 184, 166, 0.1) 100%);
-  border-radius: 50%;
-  margin-bottom: 20rpx;
-}
-
-.empty-icon {
-  font-size: 40rpx;
-  color: #0d9488;
-  opacity: 0.5;
+  padding: 200rpx 40rpx;
 }
 
 .empty-text {
-  font-size: 26rpx;
+  font-size: 28rpx;
   color: #9ca3af;
 }
 
-/* 投注卡片列表 */
+.empty-hint {
+  font-size: 24rpx;
+  color: #d1d5db;
+  margin-top: 8rpx;
+}
+
 .bet-list {
   display: flex;
   flex-direction: column;
   gap: 16rpx;
 }
 
-.bet-card {
+/* ===== 保存记录卡片 ===== */
+.saved-card {
   background: #ffffff;
-  border-radius: 8rpx;
+  border-radius: 6rpx;
   padding: 20rpx;
-  border: 1px solid rgba(13, 148, 136, 0.1);
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-  transition: all 0.3s;
   position: relative;
-  overflow: hidden;
-  box-sizing: border-box;
-  width: 100%;
 }
 
-/* 卡片头部 */
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16rpx;
+.saved-card.is-parlay {
+  padding-top: 0;
 }
 
-.header-left {
-  flex: 1;
-}
-
-.badge-row {
+.parlay-bar {
   display: flex;
   align-items: center;
   gap: 12rpx;
+  padding: 14rpx 0;
+  margin-bottom: 8rpx;
+  border-bottom: 1px solid #f0f1f3;
+}
+
+.parlay-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #0d9488;
+  background: #ecfdf5;
+  padding: 4rpx 12rpx;
+  border-radius: 6rpx;
+}
+
+.parlay-total {
+  font-size: 22rpx;
+  color: #6b7280;
+  flex: 1;
+}
+
+.card-delete {
+  font-size: 22rpx;
+  color: #ef4444;
+  background: #fef2f2;
+  padding: 4rpx 14rpx;
+  border-radius: 6rpx;
+}
+
+.card-delete:active {
+  opacity: 0.7;
+}
+
+.card-delete.corner {
+  position: absolute;
+  top: 20rpx;
+  right: 20rpx;
+}
+
+/* Leg 样式 */
+.leg {
+  padding: 12rpx 0;
+}
+
+.leg--divider {
+  border-top: 1px dashed #eceef2;
+  margin-top: 8rpx;
+  padding-top: 16rpx;
+}
+
+.leg-row1 {
+  margin-bottom: 2rpx;
+}
+
+.leg-teams {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2937;
+  letter-spacing: 0.5rpx;
+}
+
+.leg-sub {
+  font-size: 22rpx;
+  color: #a0a5ae;
   margin-bottom: 12rpx;
 }
 
-.badge {
-  display: inline-flex;
-  padding: 6rpx 16rpx;
-  border-radius: 8rpx;
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.badge.parlay {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-}
-
-.badge.single {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.league-text {
-  font-size: 22rpx;
-  color: #9ca3af;
-}
-
-.match-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #111827;
-  line-height: 1.4;
-  word-break: break-all;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.header-right {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-  margin-left: 16rpx;
-  align-items: flex-end;
-}
-
-.status-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 12rpx;
-}
-
-.action-btns {
-  display: flex;
-  gap: 12rpx;
-}
-
-.icon-btn {
-  width: 48rpx;
-  height: 48rpx;
-  border-radius: 8rpx;
+.leg-row3 {
   display: flex;
   align-items: center;
+  gap: 12rpx;
+}
+
+.sel-chip {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  border: none;
-  padding: 0;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.icon-btn:active {
-  transform: scale(0.95);
-}
-
-.icon-btn.edit {
-  background: rgba(13, 148, 136, 0.1);
-}
-
-.icon-btn.delete {
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.btn-icon {
-  font-size: 24rpx;
+  background: #0d9488;
+  color: #ffffff;
+  font-size: 22rpx;
   font-weight: 600;
+  padding: 6rpx 16rpx;
+  border-radius: 6rpx;
+  min-width: 48rpx;
+}
+
+.sel-chip.sm {
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+}
+
+.leg-type {
+  font-size: 24rpx;
+  color: #4b5563;
+}
+
+.leg-at {
+  font-size: 24rpx;
+  color: #0d9488;
+  font-weight: 600;
+}
+
+/* ===== 筛选栏 ===== */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.filter-tab {
+  font-size: 24rpx;
+  color: #6b7280;
+  padding: 8rpx 16rpx;
+  border-radius: 6rpx;
+}
+
+.filter-tab.active {
+  color: #0d9488;
+  background: #ecfdf5;
+  font-weight: 600;
+}
+
+.add-link {
+  font-size: 24rpx;
+  font-weight: 500;
   color: #0d9488;
 }
 
-.icon-btn.delete .btn-icon {
-  color: #ef4444;
+.add-link:active {
+  opacity: 0.6;
+}
+
+/* ===== 投注记录卡片 ===== */
+.bet-card {
+  background: #ffffff;
+  border-radius: 6rpx;
+  padding: 20rpx;
+}
+
+.bet-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12rpx;
+}
+
+.bet-card-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.bet-card-title {
   font-size: 28rpx;
-}
-
-/* 串关详情 */
-.parlay-details {
-  background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);
-  border-radius: 8rpx;
-  padding: 16rpx;
-  margin-bottom: 16rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.parlay-match {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-
-.parlay-teams {
-  font-size: 26rpx;
   font-weight: 600;
+  color: #1f2937;
+  display: block;
+  margin-bottom: 4rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bet-card-sub {
+  font-size: 22rpx;
+  color: #a0a5ae;
+}
+
+.bet-card-badges {
+  display: flex;
+  gap: 8rpx;
+  margin-left: 12rpx;
+  flex-shrink: 0;
+}
+
+.badge-status {
+  font-size: 20rpx;
+  font-weight: 500;
+  padding: 4rpx 10rpx;
+  border-radius: 6rpx;
+}
+
+.badge-status.saved {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.badge-status.betting {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-status.settled {
+  background: #ecfdf5;
   color: #065f46;
 }
 
-.parlay-info {
-  font-size: 22rpx;
-  color: #047857;
+.badge-result {
+  font-size: 20rpx;
+  font-weight: 600;
+  padding: 4rpx 10rpx;
+  border-radius: 6rpx;
+  color: #ffffff;
 }
 
-/* 卡片内容 */
-.card-content {
+.badge-result.win { background: #10b981; }
+.badge-result.lose { background: #ef4444; }
+.badge-result.pending { background: #94a3b8; }
+.badge-result.half-win { background: #84cc16; }
+.badge-result.half-lose { background: #f59e0b; }
+
+.bet-legs-list {
+  background: #f9fafb;
+  border-radius: 6rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 12rpx;
   display: flex;
   flex-direction: column;
-  gap: 16rpx;
+  gap: 10rpx;
 }
 
-.info-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.calendar-icon {
-  width: 40rpx;
-  height: 40rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, rgba(13, 148, 136, 0.1) 0%, rgba(20, 184, 166, 0.1) 100%);
-  border-radius: 8rpx;
-  font-size: 20rpx;
-  flex-shrink: 0;
-}
-
-.info-text {
-  font-size: 24rpx;
-  color: #6b7280;
-}
-
-.divider {
-  height: 1px;
-  background: rgba(13, 148, 136, 0.1);
-  margin: 10rpx 0;
-}
-
-.bottom-row {
+.bet-leg-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
 }
 
-.odds-section {
-  flex: 1;
-}
-
-.odds-label {
+.bet-leg-name {
   font-size: 24rpx;
-  color: #6b7280;
+  color: #374151;
+  font-weight: 500;
 }
 
-.amount-section {
-  text-align: right;
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 8rpx;
-}
-
-.amount-label {
-  font-size: 24rpx;
-  color: #6b7280;
-  white-space: nowrap;
-}
-
-.amount-value {
-  font-size: 32rpx;
-  font-weight: 700;
-  color: #0d9488;
-  white-space: nowrap;
-}
-
-/* 结果徽章 */
-.result-badge {
-  display: inline-flex;
-  padding: 4rpx 12rpx;
-  border-radius: 8rpx;
-  font-size: 20rpx;
-  font-weight: 600;
-  color: #ffffff;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.result-badge.win {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-}
-
-.result-badge.lose {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-}
-
-.result-badge.pending {
-  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
-}
-
-.result-badge.half-win {
-  background: linear-gradient(135deg, #84cc16 0%, #65a30d 100%);
-}
-
-.result-badge.half-lose {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-}
-
-/* 徽章容器 */
-.badges-row {
+.bet-leg-right {
   display: flex;
   align-items: center;
   gap: 8rpx;
-  margin-bottom: 8rpx;
 }
 
-/* 状态徽章 */
-.status-badge {
-  display: inline-flex;
-  padding: 4rpx 12rpx;
-  border-radius: 8rpx;
-  font-size: 20rpx;
+.bet-leg-odds {
+  font-size: 22rpx;
+  color: #6b7280;
+}
+
+.bet-card-footer {
+  padding-top: 12rpx;
+  border-top: 1px solid #f0f1f3;
+}
+
+.bet-card-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bet-card-sel {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.bet-card-type {
+  font-size: 22rpx;
+  color: #6b7280;
+}
+
+.bet-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24rpx;
+  margin-top: 12rpx;
+}
+
+.bet-amount {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.act-link {
+  font-size: 24rpx;
+}
+
+.act-link.settle {
+  color: #0d9488;
   font-weight: 600;
-  color: #ffffff;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
-.status-badge.saved {
-  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+.act-link.edit {
+  color: #6b7280;
 }
 
-.status-badge.betting {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-}
-
-.status-badge.settled {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+.act-link.del {
+  color: #ef4444;
 }
 </style>

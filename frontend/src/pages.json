@@ -39,7 +39,7 @@
     {
       "path": "pages/record/record",
       "style": {
-        "navigationBarTitleText": "投注记录",
+        "navigationBarTitleText": "记录列表",
         "navigationBarBackgroundColor": "#0d9488",
         "navigationBarTextStyle": "white"
       }
@@ -178,14 +178,6 @@
     "fontSize": "10px",
     "iconWidth": "24px",
     "spacing": "3px",
-    "midButton": {
-      "width": "65px",
-      "height": "65px",
-      "text": "预测",
-      "iconPath": "static/tabbar/predict.png",
-      "iconWidth": "30px",
-      "backgroundImage": "static/tabbar/predict-bg.png"
-    },
     "list": [
       {
         "pagePath": "pages/home/home",
@@ -198,12 +190,6 @@
         "iconPath": "static/tabbar/matches.png",
         "selectedIconPath": "static/tabbar/matches-active.png",
         "text": "赛事"
-      },
-      {
-        "pagePath": "pages/predict/predict",
-        "iconPath": "static/tabbar/predict.png",
-        "selectedIconPath": "static/tabbar/predict-active.png",
-        "text": "预测"
       },
       {
         "pagePath": "pages/record/record",

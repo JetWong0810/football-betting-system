@@ -2,7 +2,7 @@
   <view v-if="visible" class="dialog-overlay" @tap="handleClose">
     <view class="dialog-content" @tap.stop>
       <view class="dialog-header">
-        <text class="dialog-title">{{ editingBet ? "编辑投注记录" : "新增投注记录" }}</text>
+        <text class="dialog-title">{{ isEditingBetting ? "结算" : editingBet ? "编辑投注记录" : "新增投注记录" }}</text>
         <view class="dialog-header-actions">
           <button class="ocr-btn" @tap="handleOcrClick" :disabled="ocrLoading">
             <text class="ocr-icon">📷</text>
@@ -30,8 +30,11 @@
           <button class="cancel-footer-btn" @tap="handleClose" :disabled="ocrLoading">取消</button>
           <button class="settle-btn" @tap="handleSettle" :disabled="ocrLoading">结算</button>
         </view>
+        <view v-else-if="editingBet" class="footer-buttons">
+          <button class="cancel-footer-btn" @tap="handleClose" :disabled="ocrLoading">取消</button>
+          <button class="bet-footer-btn" @tap="submitFormWithStatus('betting')" :disabled="ocrLoading">更新</button>
+        </view>
         <view v-else class="footer-buttons">
-          <button class="save-footer-btn" @tap="submitFormWithStatus('saved')" :disabled="ocrLoading">保存</button>
           <button class="bet-footer-btn" @tap="submitFormWithStatus('betting')" :disabled="ocrLoading">投注</button>
         </view>
       </view>
@@ -56,6 +59,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  settleMode: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["update:visible", "success"]);
@@ -64,7 +71,7 @@ const betFormRef = ref(null);
 const ocrLoading = ref(false);
 
 const isEditingBetting = computed(() => {
-  return props.editingBet && props.editingBet.status === "betting";
+  return props.settleMode && props.editingBet && props.editingBet.status === "betting";
 });
 
 watch(

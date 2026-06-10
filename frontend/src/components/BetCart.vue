@@ -99,21 +99,14 @@
             <text class="error-icon">⚠️</text>
             <text class="error-text">{{ betCart.cannotBetReason }}</text>
           </view>
-          <view class="footer-buttons three-buttons">
+          <view class="footer-buttons">
             <button class="cancel-btn" @tap="showCart = false">取消</button>
-            <button 
-              class="save-btn" 
+            <button
+              class="save-btn"
               :class="{ disabled: !betCart.canBet }"
               @tap="() => handleSaveWithStatus('saved')"
             >
               保存
-            </button>
-            <button 
-              class="bet-btn" 
-              :class="{ disabled: !betCart.canBet }"
-              @tap="() => handleSaveWithStatus('betting')"
-            >
-              投注
             </button>
           </view>
         </view>
@@ -126,6 +119,7 @@
 import { ref, computed } from 'vue'
 import { useBetCartStore } from '@/stores/betCartStore'
 import { useBetStore } from '@/stores/betStore'
+import { showConfirm } from '@/utils/confirm'
 
 const betCart = useBetCartStore()
 const betStore = useBetStore()
@@ -193,17 +187,17 @@ function formatOdds(value) {
   return Number(value).toFixed(2)
 }
 
-function handleClear() {
-  uni.showModal({
-    title: '确认清空',
-    content: '确定要清空投注车吗？',
-    success: (res) => {
-      if (res.confirm) {
-        betCart.clearCart()
-        showCart.value = false
-      }
-    }
+async function handleClear() {
+  const confirmed = await showConfirm({
+    title: '清空投注车',
+    content: '确定要清空所有选择吗？',
+    confirmText: '清空',
+    type: 'danger',
   })
+  if (confirmed) {
+    betCart.clearCart()
+    showCart.value = false
+  }
 }
 
 function handleRemove(key) {
@@ -233,6 +227,7 @@ async function handleSaveWithStatus(status) {
     showCart.value = false
     
     // 延迟跳转到记录页面
+    betStore.pendingTab = status === 'saved' ? 'saved' : 'betting'
     setTimeout(() => {
       uni.switchTab({ url: '/pages/record/record' })
     }, 1000)
@@ -728,12 +723,6 @@ async function handleSaveWithStatus(status) {
       transition: all 0.2s;
     }
     
-    &.three-buttons {
-      .cancel-btn {
-        flex: 0.8;
-      }
-    }
-
     .cancel-btn {
       background: #f5f5f5;
       color: #666;
@@ -744,20 +733,6 @@ async function handleSaveWithStatus(status) {
     }
 
     .save-btn {
-      background: #94a3b8;
-      color: #fff;
-
-      &:active {
-        background: #64748b;
-      }
-
-      &.disabled {
-        background: #d1d5db;
-        color: #9ca3af;
-      }
-    }
-    
-    .bet-btn {
       background: #0d9488;
       color: #fff;
       box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);

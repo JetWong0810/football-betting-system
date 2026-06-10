@@ -2,6 +2,16 @@
   <view class="matches-page">
     <mescroll-body ref="mescrollRef" :down="downOption" :up="upOption" :bottombar="false" @init="mescrollInit" @down="downCallback" @up="upCallback">
       <view class="list-content">
+        <!-- 快捷入口 -->
+        <view class="quick-nav">
+          <view class="quick-nav-item" @tap="goPredictPage">
+            <text class="quick-nav-text">预测分析</text>
+          </view>
+          <view class="quick-nav-item" @tap="goResults">
+            <text class="quick-nav-text">赛果查询</text>
+          </view>
+        </view>
+
         <view v-if="visibleMatches.length > 0">
           <view class="day-section" v-for="group in groupedMatches" :key="group.key">
             <view class="day-header" @tap="toggleGroup(group.key)">
@@ -145,11 +155,8 @@
 
     <!-- 投注车组件 -->
     <BetCart />
+    <ConfirmDialog />
 
-    <!-- 赛果入口 -->
-    <view class="results-entry" @tap="goResults">
-      <text class="results-entry-text">赛果</text>
-    </view>
   </view>
 </template>
 
@@ -159,6 +166,7 @@ import { onShow, onPageScroll, onReachBottom } from "@dcloudio/uni-app";
 import dayjs from "dayjs";
 import MescrollBody from "mescroll-uni/mescroll-body.vue";
 import BetCart from "@/components/BetCart.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { useMatchStore } from "@/stores/matchStore";
 import { useBetCartStore } from "@/stores/betCartStore";
 
@@ -311,6 +319,10 @@ function goPredict(match) {
     ? `/pages/worldcup/predict?matchId=${match.matchId}`
     : `/pages/predict/predict?matchId=${match.matchId}`;
   uni.navigateTo({ url });
+}
+
+function goPredictPage() {
+  uni.navigateTo({ url: "/pages/predict/predict" });
 }
 
 function goResults() {
@@ -887,22 +899,25 @@ function hasMatchSelection(matchId) {
   color: #666;
 }
 
-.results-entry {
-  position: fixed;
-  top: 12rpx;
-  right: 24rpx;
+.quick-nav {
+  display: flex;
+  gap: 16rpx;
+  padding: 16rpx 24rpx;
+}
+
+.quick-nav-item {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8rpx 18rpx;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
-  z-index: 999;
+  padding: 16rpx 0;
+  background: #fff;
+  border-radius: 4rpx;
+  border: 1px solid #e5e7eb;
 }
 
-.results-entry-text {
-  font-size: 22rpx;
+.quick-nav-text {
+  font-size: 26rpx;
   color: #0d9488;
   font-weight: 500;
 }

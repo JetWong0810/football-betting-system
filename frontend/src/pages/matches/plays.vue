@@ -130,6 +130,7 @@
 
     <!-- 投注车组件 -->
     <BetCart />
+    <ConfirmDialog />
   </view>
 </template>
 
@@ -137,6 +138,7 @@
 import { computed, ref } from "vue";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 import BetCart from "@/components/BetCart.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { useMatchStore } from "@/stores/matchStore";
 import { useBetCartStore } from "@/stores/betCartStore";
 
