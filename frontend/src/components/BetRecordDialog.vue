@@ -80,6 +80,10 @@ watch(
     if (visible && !props.editingBet) {
       nextTick(() => {
         betFormRef.value?.resetForm?.();
+        if (betStore.predictPrefill) {
+          betFormRef.value?.fillFromPredict?.(betStore.predictPrefill);
+          betStore.predictPrefill = null;
+        }
       });
     }
   }

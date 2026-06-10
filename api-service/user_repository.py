@@ -228,6 +228,7 @@ class UserRepository:
             "stop_loss_limit": "stop_loss_limit",
             "target_monthly_return": "target_monthly_return",
             "theme": "theme",
+            "risk_tolerance": "risk_tolerance",
         }
 
         for key, field in field_map.items():
@@ -252,7 +253,7 @@ class UserRepository:
                     params.append(user_id)
                     sql = f"UPDATE user_configs SET {', '.join(updates)} WHERE user_id = %s"
                     cursor.execute(sql, params)
-                    return cursor.rowcount > 0
+                    return True
                 else:
                     # 创建新配置（使用传入的值或默认值）
                     insert_fields = ["user_id"]
@@ -265,6 +266,7 @@ class UserRepository:
                         "stop_loss_limit": 3,
                         "target_monthly_return": 0.1000,
                         "theme": "light",
+                        "risk_tolerance": "balanced",
                     }
                     
                     for key, field in field_map.items():

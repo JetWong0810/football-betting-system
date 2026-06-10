@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS user_configs (
     stop_loss_limit INT DEFAULT 3 COMMENT '止损次数',
     target_monthly_return DECIMAL(5,4) DEFAULT 0.1000 COMMENT '月度盈利目标',
     theme VARCHAR(20) DEFAULT 'light' COMMENT '主题',
+    risk_tolerance VARCHAR(20) DEFAULT 'balanced' COMMENT '风险策略等级',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY unique_user_config (user_id),

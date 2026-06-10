@@ -89,7 +89,7 @@
           <view class="divider-line"></view>
         </view>
 
-        <view class="result-card" :class="prediction.direction">
+        <view class="result-card" :class="[prediction.direction, { reversed: prediction.overallReverse }]">
           <view class="result-left">
             <text class="dir-arrow">{{ prediction.direction === 'upper' ? '↑' : prediction.direction === 'lower' ? '↓' : '−' }}</text>
             <view class="dir-info">
@@ -101,6 +101,10 @@
             <text class="conf-num">{{ prediction.confidence }}<text class="conf-unit">%</text></text>
             <text class="conf-label">置信度</text>
           </view>
+        </view>
+
+        <view class="reverse-tag" v-if="prediction.overallReverse">
+          <text class="reverse-text">逆向修正：多数因子共识一致，触发反向机制</text>
         </view>
 
         <!-- 已结束比赛：实际结果对比 (有比分才展示) -->
@@ -150,6 +154,49 @@
             <text class="ai-title">AI 综合分析</text>
           </view>
           <text class="ai-text">{{ aiAnalysis }}</text>
+        </view>
+
+        <!-- 投注建议（仅未开始的比赛） -->
+        <view class="bet-advice" v-if="matchStatus === 'not_started' && prediction.direction !== 'neutral'">
+          <view class="advice-header">
+            <text class="advice-title">投注建议</text>
+            <text class="advice-strategy">{{ currentStrategyLabel }}</text>
+          </view>
+
+          <view class="advice-body">
+            <view class="advice-row">
+              <text class="advice-label">建议方向</text>
+              <text class="advice-value dir" :class="prediction.direction">{{ directionLabel(prediction.direction) }}</text>
+            </view>
+            <view class="advice-row">
+              <text class="advice-label">置信度</text>
+              <text class="advice-value" :class="confidenceClass">{{ prediction.confidence }}%</text>
+            </view>
+            <view class="advice-row">
+              <text class="advice-label">可用余额</text>
+              <text class="advice-value">¥{{ bankroll }}</text>
+            </view>
+            <view class="advice-row highlight">
+              <text class="advice-label">建议金额</text>
+              <text class="advice-value amount">¥{{ recommendedStake.amount }}</text>
+            </view>
+            <view class="advice-detail">
+              <text>Kelly ¥{{ recommendedStake.kelly }} / 固定 ¥{{ recommendedStake.fixed }}，取{{ recommendedStake.method }}</text>
+            </view>
+          </view>
+
+          <view class="advice-warning" v-if="riskWarning">
+            <text class="warning-text">{{ riskWarning }}</text>
+          </view>
+
+          <view class="advice-actions">
+            <view class="advice-btn secondary" @tap="adjustStake">
+              <text>调整金额</text>
+            </view>
+            <view class="advice-btn primary" @tap="betWithAdvice">
+              <text>按此建议投注</text>
+            </view>
+          </view>
         </view>
       </view>
     </scroll-view>
@@ -260,6 +307,9 @@
 import { ref, computed, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
+import { useConfigStore } from '@/stores/configStore'
+import { useBetStore } from '@/stores/betStore'
+import { calcRecommendedStake, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
 
 const matchStatus = ref('not_started')
 const selectedMatch = ref(null)
@@ -270,13 +320,64 @@ const filterLeague = ref('all')
 const analyzing = ref(false)
 const analysisComplete = ref(false)
 const analysisSteps = ref([])
-const prediction = ref({ direction: '', confidence: 0 })
+const prediction = ref({ direction: '', confidence: 0, overallReverse: false })
 const aiAnalysis = ref('')
 
 const allMatches = ref([])
 const loadingMatches = ref(false)
 const finishedDates = ref([])
 const pendingMatchId = ref(null)
+const customStake = ref(null)
+
+const configStore = useConfigStore()
+const betStore = useBetStore()
+
+const bankroll = computed(() => {
+  const val = Number(configStore.startingCapital) + Number(betStore.totalProfit)
+  return Math.max(0, Math.round(val))
+})
+
+const currentStrategyLabel = computed(() => {
+  const preset = getStrategyPreset(configStore.riskTolerance)
+  return preset.label
+})
+
+const recommendedStake = computed(() => {
+  if (!analysisComplete.value || !prediction.value.confidence) {
+    return { amount: 0, kelly: 0, fixed: 0, method: '-' }
+  }
+  const odds = selectedMatch.value?.handicap != null ? 1.9 : 1.85
+  return calcRecommendedStake({
+    bankroll: bankroll.value,
+    odds,
+    confidence: prediction.value.confidence,
+    riskLevel: configStore.riskTolerance
+  })
+})
+
+const confidenceClass = computed(() => {
+  const c = prediction.value.confidence
+  if (c >= 75) return 'high'
+  if (c >= 60) return 'medium'
+  return 'low'
+})
+
+const riskWarning = computed(() => {
+  const preset = getStrategyPreset(configStore.riskTolerance)
+  const warnings = []
+  if (prediction.value.confidence < preset.minConfidence) {
+    warnings.push(`置信度${prediction.value.confidence}%低于策略门槛${preset.minConfidence}%，建议减小投注或跳过`)
+  }
+  const status = checkRiskStatus({
+    consecutiveLosses: betStore.consecutiveLosses,
+    drawdown: 0,
+    riskLevel: configStore.riskTolerance
+  })
+  if (!status.safe) {
+    warnings.push(status.reason + '，' + status.suggestedAction)
+  }
+  return warnings.join('；')
+})
 
 onLoad((query) => {
   if (query?.matchId) {
@@ -466,8 +567,9 @@ function selectMatch(match) {
   showPicker.value = false
   analysisSteps.value = []
   analysisComplete.value = false
-  prediction.value = { direction: '', confidence: 0 }
+  prediction.value = { direction: '', confidence: 0, overallReverse: false }
   aiAnalysis.value = ''
+  uni.removeStorageSync('predict-last-result')
 }
 
 async function startAnalysis() {
@@ -541,10 +643,24 @@ async function startAnalysis() {
     const pred = data.prediction || {}
     prediction.value = {
       direction: pred.direction || 'neutral',
-      confidence: pred.confidence || 60
+      confidence: pred.confidence || 60,
+      overallReverse: pred.overall_reverse || false
     }
     aiAnalysis.value = pred.analysis || '分析完成'
     analysisComplete.value = true
+
+    // 缓存本次预测结果
+    try {
+      uni.setStorageSync('predict-last-result', {
+        matchId: selectedMatch.value.matchId,
+        match: selectedMatch.value,
+        steps: analysisSteps.value,
+        prediction: prediction.value,
+        aiAnalysis: aiAnalysis.value,
+        matchStatus: matchStatus.value,
+        timestamp: Date.now()
+      })
+    } catch (e) { /* ignore */ }
   } catch (e) {
     clearInterval(animateInterval)
     console.error('预测请求失败:', e)
@@ -553,6 +669,31 @@ async function startAnalysis() {
   } finally {
     analyzing.value = false
   }
+}
+
+function adjustStake() {
+  customStake.value = recommendedStake.value.amount
+  uni.showToast({ title: '可在投注时修改金额', icon: 'none' })
+}
+
+function betWithAdvice() {
+  const match = selectedMatch.value
+  if (!match) return
+  const stake = customStake.value || recommendedStake.value.amount
+  const data = {
+    matchName: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
+    league: match.league,
+    homeTeam: match.homeTeam.name,
+    awayTeam: match.awayTeam.name,
+    matchTime: `${match.matchDate} ${match.matchTime}`,
+    handicap: match.handicap,
+    predictedDirection: prediction.value.direction,
+    confidence: prediction.value.confidence,
+    recommendedStake: stake
+  }
+  uni.setStorageSync('predict-bet-prefill', data)
+  betStore.pendingTab = 'betting'
+  uni.switchTab({ url: '/pages/record/record' })
 }
 
 function formatHandicap(v) {
@@ -592,6 +733,21 @@ onShow(() => {
     fetchDates()
   } else {
     fetchMatches()
+  }
+
+  // 恢复上次预测结果（仅当当前没有结果时）
+  if (!analysisComplete.value && !pendingMatchId.value) {
+    try {
+      const cached = uni.getStorageSync('predict-last-result')
+      if (cached && cached.matchId && Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
+        selectedMatch.value = cached.match
+        analysisSteps.value = cached.steps || []
+        prediction.value = cached.prediction || { direction: '', confidence: 0, overallReverse: false }
+        aiAnalysis.value = cached.aiAnalysis || ''
+        analysisComplete.value = true
+        matchStatus.value = cached.matchStatus || 'not_started'
+      }
+    } catch (e) { /* ignore */ }
   }
 })
 </script>
@@ -957,6 +1113,20 @@ onShow(() => {
   .divider-text { font-size: 22rpx; color: $frbt-primary; font-weight: 600; letter-spacing: 2rpx; }
 }
 
+.reverse-tag {
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 6rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 20rpx;
+
+  .reverse-text {
+    font-size: 22rpx;
+    color: #92400e;
+    line-height: 1.5;
+  }
+}
+
 .result-card {
   display: flex;
   align-items: center;
@@ -976,6 +1146,11 @@ onShow(() => {
   &.neutral {
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     border: 1px solid #e2e8f0;
+  }
+
+  &.reversed {
+    border-style: dashed;
+    position: relative;
   }
 
   .result-left {
@@ -1115,6 +1290,133 @@ onShow(() => {
     font-size: 24rpx;
     color: #475569;
     line-height: 1.7;
+  }
+}
+
+/* ===== 投注建议卡片 ===== */
+.bet-advice {
+  margin-top: 20rpx;
+  background: #fff;
+  border: 1px solid #d1fae5;
+  border-radius: 12rpx;
+  overflow: hidden;
+}
+
+.advice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 24rpx;
+  background: #f0fdf4;
+  border-bottom: 1px solid #d1fae5;
+
+  .advice-title {
+    font-size: 26rpx;
+    font-weight: 600;
+    color: #166534;
+  }
+
+  .advice-strategy {
+    font-size: 22rpx;
+    color: #15803d;
+    background: #dcfce7;
+    padding: 4rpx 14rpx;
+    border-radius: 4rpx;
+  }
+}
+
+.advice-body {
+  padding: 20rpx 24rpx;
+}
+
+.advice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10rpx 0;
+
+  .advice-label {
+    font-size: 24rpx;
+    color: #6b7280;
+  }
+
+  .advice-value {
+    font-size: 24rpx;
+    color: #1f2937;
+    font-weight: 500;
+
+    &.dir.upper { color: #dc2626; }
+    &.dir.lower { color: #059669; }
+    &.high { color: #059669; }
+    &.medium { color: #d97706; }
+    &.low { color: #dc2626; }
+    &.amount {
+      font-size: 32rpx;
+      font-weight: 700;
+      color: #0d9488;
+    }
+  }
+
+  &.highlight {
+    margin-top: 8rpx;
+    padding-top: 16rpx;
+    border-top: 1px solid #f3f4f6;
+  }
+}
+
+.advice-detail {
+  padding: 8rpx 0 4rpx;
+
+  text {
+    font-size: 20rpx;
+    color: #9ca3af;
+  }
+}
+
+.advice-warning {
+  margin: 12rpx 24rpx 0;
+  padding: 12rpx 16rpx;
+  background: #fef3c7;
+  border-radius: 6rpx;
+  border: 1px solid #fde68a;
+
+  .warning-text {
+    font-size: 22rpx;
+    color: #92400e;
+    line-height: 1.5;
+  }
+}
+
+.advice-actions {
+  display: flex;
+  gap: 16rpx;
+  padding: 20rpx 24rpx 24rpx;
+}
+
+.advice-btn {
+  flex: 1;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6rpx;
+  transition: opacity 0.15s;
+
+  &:active { opacity: 0.8; }
+
+  text {
+    font-size: 26rpx;
+    font-weight: 600;
+  }
+
+  &.secondary {
+    background: #f3f4f6;
+    text { color: #4b5563; }
+  }
+
+  &.primary {
+    background: #0d9488;
+    text { color: #fff; }
   }
 }
 

@@ -1,54 +1,122 @@
 <template>
   <view class="page-wrapper">
     <scroll-view class="page" scroll-y>
-    <view class="section">
-      <view class="summary">
-        <view>
-          <view class="caption">实时余额</view>
-          <view class="balance">{{ formatCurrency(statStore.balance) }}</view>
+      <!-- 当前策略概览 -->
+      <view class="strategy-header">
+        <view class="strategy-info">
+          <text class="strategy-label">当前策略</text>
+          <text class="strategy-name">{{ currentPreset.label }}</text>
         </view>
-        <view>
-          <view class="caption">连续亏损</view>
-          <view class="balance">{{ betStore.consecutiveLosses }} 场</view>
-        </view>
-      </view>
-      <view class="inputs">
-        <view class="input-item">
-          <text>主观胜率 (%)</text>
-          <input type="number" v-model.number="subjectiveWinRate" />
-        </view>
-        <view class="input-item">
-          <text>盘口赔率</text>
-          <input type="number" v-model.number="odds" />
+        <view class="strategy-link" @tap="goSettings">
+          <text>切换</text>
         </view>
       </view>
-    </view>
 
-    <view class="section">
-      <KellyCalc
-        :bankroll="statStore.balance"
-        :probability="subjectiveWinRate / 100"
-        :odds="odds"
-        :adjustment="config.kellyFactor"
-      />
-      <FixedRatioCalc :bankroll="statStore.balance" :ratio="config.fixedRatio" />
-      <StopLossAlert
-        :consecutive-losses="betStore.consecutiveLosses"
-        :limit="config.stopLossLimit"
-        :drawdown="statStore.drawdown"
-      />
-    </view>
-
-    <view class="section final">
-      <text class="section-title">综合建议</text>
-      <view class="recommend">
-        <view class="value">{{ formatCurrency(recommendedStake) }}</view>
-        <view class="desc">取凯利与固定比例中的更保守值</view>
-        <view class="risk" :class="{ danger: shouldPause }">
-          {{ riskText }}
+      <!-- 下一注推荐 -->
+      <view class="section">
+        <text class="section-title">下一注推荐</text>
+        <view class="recommend-card">
+          <view class="odds-table">
+            <view class="odds-row header">
+              <text class="odds-cell">赔率</text>
+              <text class="odds-cell">置信60%</text>
+              <text class="odds-cell">置信70%</text>
+              <text class="odds-cell">置信80%</text>
+            </view>
+            <view v-for="row in oddsTable" :key="row.odds" class="odds-row">
+              <text class="odds-cell label">{{ row.odds }}</text>
+              <text class="odds-cell">¥{{ row.c60 }}</text>
+              <text class="odds-cell">¥{{ row.c70 }}</text>
+              <text class="odds-cell">¥{{ row.c80 }}</text>
+            </view>
+          </view>
+          <text class="recommend-hint">基于余额 ¥{{ bankroll }} 和{{ currentPreset.label }}策略计算</text>
         </view>
       </view>
-    </view>
+
+      <!-- 风险状态 -->
+      <view class="section">
+        <text class="section-title">风险状态</text>
+        <view class="risk-panel">
+          <view class="risk-item">
+            <view class="risk-head">
+              <text class="risk-name">连败</text>
+              <text class="risk-status" :class="lossStatus">{{ betStore.consecutiveLosses }} / {{ config.stopLossLimit }}</text>
+            </view>
+            <view class="risk-bar-wrap">
+              <view class="risk-bar" :class="lossStatus" :style="{ width: lossBarWidth }"></view>
+            </view>
+          </view>
+
+          <view class="risk-item">
+            <view class="risk-head">
+              <text class="risk-name">回撤</text>
+              <text class="risk-status" :class="drawdownStatus">{{ formatPercent(statStore.drawdown) }}</text>
+            </view>
+            <view class="risk-bar-wrap">
+              <view class="risk-bar" :class="drawdownStatus" :style="{ width: drawdownBarWidth }"></view>
+            </view>
+          </view>
+
+          <view class="risk-item">
+            <view class="risk-head">
+              <text class="risk-name">本月投注</text>
+              <text class="risk-status safe">{{ monthBetCount }} 注</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 手动计算器 -->
+      <view class="section">
+        <text class="section-title">手动计算</text>
+        <view class="calc-card">
+          <view class="calc-inputs">
+            <view class="calc-field">
+              <text class="calc-label">胜率 (%)</text>
+              <input type="digit" v-model.number="manualWinRate" placeholder="60" />
+            </view>
+            <view class="calc-field">
+              <text class="calc-label">赔率</text>
+              <input type="digit" v-model.number="manualOdds" placeholder="1.90" />
+            </view>
+          </view>
+          <view class="calc-result" v-if="manualResult.amount > 0">
+            <text class="calc-amount">建议金额：¥{{ manualResult.amount }}</text>
+            <text class="calc-method">{{ manualResult.method }}（Kelly ¥{{ manualResult.kelly }} / 固定 ¥{{ manualResult.fixed }}）</text>
+          </view>
+          <view class="calc-result" v-else>
+            <text class="calc-empty">输入胜率和赔率查看建议金额</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 策略参数明细 -->
+      <view class="section">
+        <text class="section-title">策略参数</text>
+        <view class="params-card">
+          <view class="param-row">
+            <text class="param-label">单注上限</text>
+            <text class="param-value">{{ (currentPreset.maxRatio * 100).toFixed(0) }}%</text>
+          </view>
+          <view class="param-row">
+            <text class="param-label">Kelly系数</text>
+            <text class="param-value">{{ currentPreset.kellyFactor }}</text>
+          </view>
+          <view class="param-row">
+            <text class="param-label">连败止损</text>
+            <text class="param-value">{{ currentPreset.stopLossLimit }} 场</text>
+          </view>
+          <view class="param-row">
+            <text class="param-label">最大回撤</text>
+            <text class="param-value">{{ (Math.abs(currentPreset.maxDrawdown) * 100).toFixed(0) }}%</text>
+          </view>
+          <view class="param-row">
+            <text class="param-label">最低置信度</text>
+            <text class="param-value">{{ currentPreset.minConfidence }}%</text>
+          </view>
+        </view>
+      </view>
     </scroll-view>
   </view>
 </template>
@@ -56,59 +124,84 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import KellyCalc from '@/components/KellyCalc.vue'
-import FixedRatioCalc from '@/components/FixedRatioCalc.vue'
-import StopLossAlert from '@/components/StopLossAlert.vue'
 import { useBetStore } from '@/stores/betStore'
 import { useStatStore } from '@/stores/statStore'
 import { useConfigStore } from '@/stores/configStore'
-import { calcKellyStake } from '@/utils/kelly'
-import { calcFixedRatioStake } from '@/utils/fixedRatio'
-import { checkStopLoss } from '@/utils/stopLoss'
-import { formatCurrency } from '@/utils/formatters'
+import { getStrategyPreset, calcRecommendedStake } from '@/utils/strategyEngine'
+import { formatCurrency, formatPercent } from '@/utils/formatters'
 import { requireAuth } from '@/utils/auth'
+import dayjs from 'dayjs'
 
 const betStore = useBetStore()
 const statStore = useStatStore()
 const config = useConfigStore()
 
-const subjectiveWinRate = ref(55)
-const odds = ref(1.9)
+const manualWinRate = ref(null)
+const manualOdds = ref(null)
 
-const kellyStake = computed(() => calcKellyStake({
-  bankroll: statStore.balance,
-  odds: odds.value,
-  probability: subjectiveWinRate.value / 100,
-  adjustment: config.kellyFactor
-}))
+const bankroll = computed(() => betStore.bankroll)
+const currentPreset = computed(() => getStrategyPreset(config.riskTolerance))
 
-const fixedStake = computed(() => calcFixedRatioStake({
-  bankroll: statStore.balance,
-  ratio: config.fixedRatio
-}))
-
-const recommendedStake = computed(() => Math.min(kellyStake.value, fixedStake.value))
-
-const stopLossStatus = computed(() => checkStopLoss({
-  consecutiveLosses: betStore.consecutiveLosses,
-  limit: config.stopLossLimit,
-  drawdown: statStore.drawdown
-}))
-
-const shouldPause = computed(() => stopLossStatus.value.shouldPause)
-const riskText = computed(() => {
-  if (shouldPause.value) {
-    return stopLossStatus.value.warnings.join('；')
-  }
-  return '状态稳定，可按建议额度执行。'
+const oddsTable = computed(() => {
+  const b = bankroll.value
+  const level = config.riskTolerance
+  const rows = [1.70, 1.85, 1.90, 2.00, 2.10, 2.30]
+  return rows.map(odds => ({
+    odds: odds.toFixed(2),
+    c60: calcRecommendedStake({ bankroll: b, odds, confidence: 60, riskLevel: level }).amount,
+    c70: calcRecommendedStake({ bankroll: b, odds, confidence: 70, riskLevel: level }).amount,
+    c80: calcRecommendedStake({ bankroll: b, odds, confidence: 80, riskLevel: level }).amount,
+  }))
 })
 
+const manualResult = computed(() => {
+  if (!manualWinRate.value || !manualOdds.value) return { amount: 0, kelly: 0, fixed: 0, method: '' }
+  return calcRecommendedStake({
+    bankroll: bankroll.value,
+    odds: manualOdds.value,
+    confidence: manualWinRate.value,
+    riskLevel: config.riskTolerance
+  })
+})
+
+const monthBetCount = computed(() => {
+  const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
+  return betStore.bets.filter(b =>
+    (b.status === 'betting' || b.status === 'settled') &&
+    dayjs(b.betTime).format('YYYY-MM-DD') >= startOfMonth
+  ).length
+})
+
+const lossBarWidth = computed(() => {
+  const ratio = betStore.consecutiveLosses / config.stopLossLimit
+  return `${Math.min(ratio * 100, 100)}%`
+})
+
+const lossStatus = computed(() => {
+  const ratio = betStore.consecutiveLosses / config.stopLossLimit
+  if (ratio >= 1) return 'danger'
+  if (ratio >= 0.6) return 'warning'
+  return 'safe'
+})
+
+const drawdownBarWidth = computed(() => {
+  const ratio = Math.abs(statStore.drawdown) / Math.abs(currentPreset.value.maxDrawdown)
+  return `${Math.min(ratio * 100, 100)}%`
+})
+
+const drawdownStatus = computed(() => {
+  const ratio = Math.abs(statStore.drawdown) / Math.abs(currentPreset.value.maxDrawdown)
+  if (ratio >= 1) return 'danger'
+  if (ratio >= 0.6) return 'warning'
+  return 'safe'
+})
+
+function goSettings() {
+  uni.navigateTo({ url: '/pages/settings/settings' })
+}
+
 onShow(() => {
-  // 检查登录状态
-  if (!requireAuth()) {
-    return
-  }
-  uni.$emit('tab-active', 'strategy')
+  if (!requireAuth()) return
 })
 </script>
 
@@ -117,119 +210,265 @@ onShow(() => {
 
 .page-wrapper {
   min-height: 100vh;
-  position: relative;
-  padding-bottom: 32rpx;
-  background: linear-gradient(180deg, #e8f8f5 0%, #f2fbf9 100%);
+  background: #f4f5f7;
 }
 
 .page {
   padding: 24rpx;
   box-sizing: border-box;
+  min-height: 100vh;
 }
 
-.summary {
-  @include card;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20rpx;
-  padding: 20rpx;
+/* 策略头部 */
+.strategy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border-radius: 6rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.caption {
+.strategy-label {
   font-size: 22rpx;
   color: #6b7280;
-  margin-bottom: 6rpx;
+  display: block;
 }
 
-.balance {
-  font-size: 36rpx;
-  font-weight: 600;
+.strategy-name {
+  font-size: 32rpx;
+  font-weight: 700;
   color: #0d9488;
+  display: block;
+  margin-top: 4rpx;
 }
 
-.inputs {
-  margin-top: 16rpx;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16rpx;
+.strategy-link {
+  padding: 8rpx 20rpx;
+  border: 1px solid #e5e7eb;
+  border-radius: 4rpx;
+
+  text {
+    font-size: 24rpx;
+    color: #6b7280;
+  }
+
+  &:active {
+    background: #f9fafb;
+  }
 }
 
-.input-item {
-  @include card;
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  padding: 16rpx;
-}
-
-.input-item text {
-  font-size: 24rpx;
-  color: #374151;
-  font-weight: 500;
-}
-
-.input-item input {
-  background: #f9fafb;
-  border-radius: 8rpx;
-  padding: 12rpx;
-  border: 1px solid rgba(13, 148, 136, 0.15);
-  transition: all 0.3s;
-  font-size: 26rpx;
-}
-
-.input-item input:focus {
-  border-color: #0d9488;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
-}
-
+/* 通用 */
 .section {
-  margin-top: 24rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
+  margin-bottom: 24rpx;
 }
 
 .section-title {
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 600;
-  color: #0d9488;
+  color: #374151;
   margin-bottom: 12rpx;
 }
 
-.recommend {
-  @include card;
-  text-align: center;
+/* 推荐卡片 */
+.recommend-card {
+  background: #fff;
+  border-radius: 6rpx;
+  padding: 20rpx;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.odds-table {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
-  padding: 20rpx;
 }
 
-.recommend .value {
-  font-size: 44rpx;
-  font-weight: 700;
-  color: #0d9488;
+.odds-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 12rpx 0;
+  border-bottom: 1px solid #f3f4f6;
+
+  &.header {
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  &:last-child {
+    border-bottom: none;
+  }
 }
 
-.recommend .desc {
+.odds-cell {
+  font-size: 24rpx;
+  color: #374151;
+  text-align: center;
+
+  .header & {
+    font-size: 22rpx;
+    color: #9ca3af;
+    font-weight: 500;
+  }
+
+  &.label {
+    font-weight: 600;
+    color: #0d9488;
+  }
+}
+
+.recommend-hint {
+  font-size: 20rpx;
+  color: #9ca3af;
+  margin-top: 12rpx;
+  display: block;
+}
+
+/* 风险面板 */
+.risk-panel {
+  background: #fff;
+  border-radius: 6rpx;
+  padding: 20rpx 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.risk-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.risk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.risk-name {
   font-size: 24rpx;
   color: #6b7280;
 }
 
-.recommend .risk {
-  padding: 12rpx;
-  border-radius: 8rpx;
-  background: linear-gradient(135deg, rgba(13, 148, 136, 0.1) 0%, rgba(20, 184, 166, 0.1) 100%);
-  color: #0d9488;
-  font-weight: 500;
+.risk-status {
   font-size: 24rpx;
-  line-height: 1.6;
+  font-weight: 500;
+
+  &.safe { color: #059669; }
+  &.warning { color: #d97706; }
+  &.danger { color: #dc2626; }
 }
 
-.recommend .risk.danger {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%);
-  color: #ef4444;
+.risk-bar-wrap {
+  height: 8rpx;
+  background: #f3f4f6;
+  border-radius: 4rpx;
+  overflow: hidden;
+}
+
+.risk-bar {
+  height: 100%;
+  border-radius: 4rpx;
+  transition: width 0.3s;
+
+  &.safe { background: #0d9488; }
+  &.warning { background: #f59e0b; }
+  &.danger { background: #ef4444; }
+}
+
+/* 手动计算器 */
+.calc-card {
+  background: #fff;
+  border-radius: 6rpx;
+  padding: 20rpx 24rpx;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.calc-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+}
+
+.calc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.calc-label {
+  font-size: 22rpx;
+  color: #6b7280;
+}
+
+.calc-field input {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6rpx;
+  padding: 14rpx 16rpx;
+  font-size: 26rpx;
+  color: #1f2937;
+
+  &:focus {
+    border-color: #0d9488;
+    background: #fff;
+  }
+}
+
+.calc-result {
+  padding: 16rpx;
+  background: #f0fdfa;
+  border-radius: 6rpx;
+  text-align: center;
+}
+
+.calc-amount {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #0d9488;
+  display: block;
+}
+
+.calc-method {
+  font-size: 22rpx;
+  color: #6b7280;
+  margin-top: 6rpx;
+  display: block;
+}
+
+.calc-empty {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+/* 参数明细 */
+.params-card {
+  background: #fff;
+  border-radius: 6rpx;
+  padding: 20rpx 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.param-label {
+  font-size: 24rpx;
+  color: #6b7280;
+}
+
+.param-value {
+  font-size: 24rpx;
+  color: #1f2937;
   font-weight: 500;
 }
 </style>

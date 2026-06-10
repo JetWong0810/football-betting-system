@@ -563,11 +563,34 @@ function fillFromOcr(data) {
   hasAttemptedSubmit.value = false;
 }
 
+function fillFromPredict(data) {
+  if (!data) return;
+  form.id = "";
+  form.result = "pending";
+  form.betTime = dayjs().format("YYYY-MM-DD HH:mm");
+  form.stake = data.recommendedStake || null;
+  form.parlayType = "2_1";
+
+  const directionMap = { upper: '上盘', lower: '下盘' };
+  const selection = directionMap[data.predictedDirection] || '';
+
+  form.legs = [createLeg({
+    homeTeam: data.homeTeam || '',
+    awayTeam: data.awayTeam || '',
+    league: data.league || '',
+    matchDate: data.matchTime?.split(' ')[0] || getCurrentDate(),
+    betType: '让球',
+    selection: selection ? `主让 ${selection}` : '',
+    odds: null,
+  })];
+
+  form.odds = null;
+  hasAttemptedSubmit.value = false;
+}
+
 function addLeg() {
   form.legs = [...form.legs, createLeg()];
-  // 添加赛事后，如果是串关，自动更新赔率
   if (isParlay.value && !isFieldsDisabled.value) {
-    // 等待下一个tick，确保串关选项已更新
     setTimeout(() => {
       form.odds = calculatedOdds.value;
     }, 0);
@@ -828,6 +851,7 @@ defineExpose({
   handleSubmitWithStatus,
   resetForm: reset,
   fillFromOcr,
+  fillFromPredict,
 });
 </script>
 

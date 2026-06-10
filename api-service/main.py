@@ -180,6 +180,7 @@ class UpdateConfigRequest(BaseModel):
     stop_loss_limit: Optional[int] = None
     target_monthly_return: Optional[float] = None
     theme: Optional[str] = None
+    risk_tolerance: Optional[str] = None
 
 
 class CreateBetRequest(BaseModel):
@@ -926,7 +927,8 @@ def get_user_config(user_id: int = Depends(require_auth)):
         "kelly_factor": float(config.get("kelly_factor", 0.5)),
         "stop_loss_limit": int(config.get("stop_loss_limit", 3)),
         "target_monthly_return": float(config.get("target_monthly_return", 0.1)),
-        "theme": config.get("theme", "light")
+        "theme": config.get("theme", "light"),
+        "risk_tolerance": config.get("risk_tolerance", "balanced")
     }
 
 

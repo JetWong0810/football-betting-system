@@ -171,6 +171,18 @@ onShow(() => {
     betStore.pendingTab = null;
   }
   if (betStore.bets.length > 0) betStore.refreshBets();
+
+  const prefill = uni.getStorageSync('predict-bet-prefill');
+  if (prefill) {
+    uni.removeStorageSync('predict-bet-prefill');
+    activeTab.value = 'betting';
+    editingBet.value = null;
+    settleMode.value = false;
+    setTimeout(() => {
+      showDialog.value = true;
+      betStore.predictPrefill = prefill;
+    }, 300);
+  }
 });
 
 const allBets = computed(() => betStore.bets);

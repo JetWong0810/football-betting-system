@@ -41,7 +41,7 @@ export const useConfigStore = defineStore('config', () => {
         stopLossLimit.value = Number(config.stop_loss_limit ?? stopLossLimit.value)
         targetMonthlyReturn.value = Number(config.target_monthly_return ?? targetMonthlyReturn.value)
         theme.value = config.theme || theme.value
-        // riskTolerance 不在后端配置中，保持本地值
+        riskTolerance.value = config.risk_tolerance || riskTolerance.value
       }
     } catch (error) {
       console.error('加载用户配置失败:', error)
@@ -88,7 +88,8 @@ export const useConfigStore = defineStore('config', () => {
           kelly_factor: kellyFactor.value,
           stop_loss_limit: stopLossLimit.value,
           target_monthly_return: targetMonthlyReturn.value,
-          theme: theme.value
+          theme: theme.value,
+          risk_tolerance: riskTolerance.value
         }
       })
     } catch (error) {
