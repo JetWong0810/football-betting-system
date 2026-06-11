@@ -186,17 +186,17 @@ const resultOptions = [
   { label: "进行中", value: "pending" },
   { label: "全赢", value: "win" },
   { label: "全输", value: "lose" },
+  { label: "走水(和)", value: "draw" },
   { label: "赢半", value: "half-win" },
   { label: "输半", value: "half-lose" },
-  { label: "和", value: "draw" },
 ];
 const resultDict = {
   pending: "进行中",
   win: "全赢",
   lose: "全输",
+  draw: "走水(和)",
   "half-win": "赢半",
   "half-lose": "输半",
-  draw: "和",
 };
 
 const getCurrentDate = () => dayjs().format("YYYY-MM-DD");
@@ -523,43 +523,57 @@ function hydrate(bet) {
  *   parlayType?: string
  * }
  */
+function normalizeOcrLeg(leg) {
+  let betType = leg.betType || "胜平负"
+  let selection = leg.selection || ""
+
+  // 兼容旧格式映射
+  if (betType === "让球胜平负" || (betType.includes("让球") && betType !== "让球")) {
+    betType = "让球"
+  }
+  if (betType === "总进球") {
+    betType = "大小球"
+  }
+
+  // 胜平负 selection 映射
+  if (betType === "胜平负") {
+    const spfMap = { "胜": "主胜", "平": "主平", "负": "主负" }
+    selection = spfMap[selection] || selection
+  }
+
+  return {
+    homeTeam: leg.homeTeam || "",
+    awayTeam: leg.awayTeam || "",
+    league: leg.league || "",
+    matchDate: leg.matchDate || getCurrentDate(),
+    betType,
+    selection,
+    odds: leg.odds || null,
+  }
+}
+
 function fillFromOcr(data) {
   if (!data || !Array.isArray(data.legs) || !data.legs.length) return;
 
-  // 重置基础字段，但保留当前记录 id（如果在编辑则不覆盖 id）
   if (!form.id) {
     form.betTime = dayjs().format("YYYY-MM-DD HH:mm");
   }
   form.result = "pending";
 
-  // 构造 legs
-  const sourceLegs = data.legs.map((leg) => ({
-    homeTeam: leg.homeTeam || "",
-    awayTeam: leg.awayTeam || "",
-    league: leg.league || "",
-    matchDate: leg.matchDate || getCurrentDate(),
-    betType: leg.betType || "胜平负",
-    selection: leg.selection || "",
-    odds: leg.odds || null,
-  }));
-
+  const sourceLegs = data.legs.map(normalizeOcrLeg);
   form.legs = sourceLegs.map((leg) => createLeg(leg));
 
-  // 串关信息
   if (form.legs.length > 1) {
     form.parlayType = data.parlayType || `${form.legs.length}_1`;
   } else {
     form.parlayType = "2_1";
   }
 
-  // 下注金额
   form.stake = data.stake ? Number(data.stake) : null;
 
-  // 根据 legs 自动计算总赔率
   const totalOdds = form.legs.reduce((acc, leg) => acc * (Number(leg.odds) || 1), 1);
   form.odds = Number(totalOdds.toFixed(2));
 
-  // 来自 OCR 的填充视为一次新录入，清理验证提示
   hasAttemptedSubmit.value = false;
 }
 
