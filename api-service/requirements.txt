@@ -16,3 +16,6 @@ Pillow>=10.1.0
 openai>=1.0.0
 # 500.com odds scraping
 beautifulsoup4>=4.12.0
+# NL query (Claude Bedrock + DeepSeek fallback)
+requests>=2.31.0
+boto3>=1.34.0
