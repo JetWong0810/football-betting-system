@@ -112,6 +112,10 @@
     </scroll-view>
 
     <BetRecordDialog v-model:visible="showDialog" @success="handleRecordSuccess" />
+
+    <!-- 数据查询助手 -->
+    <DataQueryFab @open="showQueryPanel = true" />
+    <DataQueryPanel :visible="showQueryPanel" @close="showQueryPanel = false" />
   </view>
 </template>
 
@@ -123,6 +127,8 @@ import { useConfigStore } from '@/stores/configStore'
 import { useStatStore } from '@/stores/statStore'
 import ChartProfit from '@/components/ChartProfit.vue'
 import BetRecordDialog from '@/components/BetRecordDialog.vue'
+import DataQueryFab from '@/components/DataQueryFab.vue'
+import DataQueryPanel from '@/components/DataQueryPanel.vue'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
 import { getStrategyPreset, generateAdvice, checkRiskStatus, calcRecommendedStake } from '@/utils/strategyEngine'
 import dayjs from 'dayjs'
@@ -131,6 +137,7 @@ const betStore = useBetStore()
 const config = useConfigStore()
 const statStore = useStatStore()
 const showDialog = ref(false)
+const showQueryPanel = ref(false)
 
 const bankroll = computed(() => betStore.bankroll)
 const targetProgress = computed(() => Math.min(Math.max(statStore.targetProgress, 0), 2))

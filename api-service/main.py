@@ -1671,6 +1671,339 @@ def list_result_dates():
     return {"dates": dates}
 
 
+class NLQueryRequest(BaseModel):
+    question: str
+    model: str = "claude"
+
+
+@app.post("/api/nl-query")
+async def nl_query_endpoint(req: NLQueryRequest):
+    from nl_query import generate_sql, parse_response, execute_sql
+    from analysis_functions import try_analysis_function
+
+    # 优先尝试分析函数（复杂的多步/跨库逻辑）
+    af_result = try_analysis_function(req.question, req.model)
+    if af_result:
+        columns = list(af_result["rows"][0].keys()) if af_result["rows"] else []
+        rows = []
+        for r in af_result["rows"]:
+            cleaned = {k: _transform_value(k, str(v)) for k, v in r.items() if v is not None}
+            rows.append(cleaned)
+        if rows:
+            valid_cols = [c for c in columns if any(r.get(c) for r in rows)]
+            columns = valid_cols
+            rows = [{k: v for k, v in r.items() if k in valid_cols} for r in rows]
+        rows, columns = _post_process(rows, columns)
+        return {
+            "success": True,
+            "source": af_result.get("source", "分析"),
+            "sql": af_result.get("sql", ""),
+            "count": len(rows),
+            "columns": columns,
+            "rows": rows,
+            "text": af_result.get("text"),
+        }
+
+    # 普通查询：AI 生成 SQL
+    raw = generate_sql(req.question, req.model)
+    if not raw:
+        return {"success": False, "error": "生成SQL失败，请稍后重试"}
+
+    db, sql = parse_response(raw)
+
+    if not sql.strip().upper().startswith("SELECT"):
+        return {"success": False, "error": "安全限制：仅支持查询操作"}
+
+    result = execute_sql(db, sql)
+
+    if isinstance(result, str):
+        retry_q = (
+            f"SQL执行报错。数据库: {db}, 错误: {result}\n"
+            f"原始SQL: {sql}\n"
+            f"注意: SQLite 不支持在 UNION ALL 子查询中使用 ORDER BY + LIMIT，"
+            f"请改用子查询 SELECT MIN(id) 或 GROUP BY year 的方式。\n"
+            f"请修正SQL。原始问题: {req.question}"
+        )
+        raw2 = generate_sql(retry_q, req.model)
+        if raw2:
+            _, sql2 = parse_response(raw2)
+            if sql2.strip().upper().startswith("SELECT"):
+                result = execute_sql(db, sql2)
+                sql = sql2
+        if isinstance(result, str):
+            return {"success": False, "error": result, "sql": sql, "db": db}
+
+    source = "世界杯" if db == "worldcup" else "竞彩"
+    columns = list(result[0].keys()) if result else []
+    rows = []
+    for row in result:
+        cleaned = {}
+        for k, v in row.items():
+            if v is None:
+                continue
+            cleaned[k] = _transform_value(k, str(v))
+        rows.append(cleaned)
+
+    # 世界杯结果：如果有比分但没盘口结果，自动补充
+    if db == "worldcup" and rows and "盘口结果" not in (rows[0] if rows else {}):
+        rows, columns = _enrich_handicap_result(rows, columns)
+
+    # 去掉所有行都为空值的列
+    if rows:
+        valid_cols = [c for c in columns if any(r.get(c) for r in rows)]
+        columns = valid_cols
+        rows = [{k: v for k, v in r.items() if k in valid_cols} for r in rows]
+
+    # 后处理：合并字段、简化展示
+    rows, columns = _post_process(rows, columns)
+
+    return {
+        "success": True,
+        "source": source,
+        "sql": sql,
+        "count": len(rows),
+        "columns": columns,
+        "rows": rows,
+    }
+
+
+# 值转换：英文队名→中文、结果代码→中文
+_TEAM_CN = {
+    "France": "法国", "Brazil": "巴西", "Germany": "德国", "Argentina": "阿根廷",
+    "Spain": "西班牙", "Netherlands": "荷兰", "England": "英格兰", "Portugal": "葡萄牙",
+    "Italy": "意大利", "Japan": "日本", "South Korea": "韩国", "Nigeria": "尼日利亚",
+    "Cameroon": "喀麦隆", "Croatia": "克罗地亚", "Belgium": "比利时", "Mexico": "墨西哥",
+    "Colombia": "哥伦比亚", "Uruguay": "乌拉圭", "Switzerland": "瑞士", "Australia": "澳大利亚",
+    "Iran": "伊朗", "Saudi Arabia": "沙特", "Morocco": "摩洛哥", "Senegal": "塞内加尔",
+    "Ghana": "加纳", "Ecuador": "厄瓜多尔", "Qatar": "卡塔尔", "Wales": "威尔士",
+    "USA": "美国", "Canada": "加拿大", "Serbia": "塞尔维亚", "Denmark": "丹麦",
+    "Tunisia": "突尼斯", "Poland": "波兰", "Peru": "秘鲁", "Costa Rica": "哥斯达黎加",
+    "Panama": "巴拿马", "Iceland": "冰岛", "Sweden": "瑞典", "Russia": "俄罗斯",
+    "South Africa": "南非", "Chile": "智利", "Algeria": "阿尔及利亚", "Honduras": "洪都拉斯",
+    "Greece": "希腊", "New Zealand": "新西兰", "Slovakia": "斯洛伐克", "Paraguay": "巴拉圭",
+    "Côte d'Ivoire": "科特迪瓦", "North Korea": "朝鲜", "Slovenia": "斯洛文尼亚",
+    "Bosnia and Herzegovina": "波黑", "Egypt": "埃及",
+}
+
+_RESULT_CN = {"H": "主胜", "D": "平局", "A": "客胜"}
+
+_STAGE_CN = {
+    "group": "小组赛", "group_stage": "小组赛",
+    "round_of_16": "16强", "quarter": "1/4决赛", "quarter_final": "1/4决赛",
+    "semi": "半决赛", "semi_final": "半决赛",
+    "final": "决赛", "third": "三四名", "third_place": "三四名",
+}
+
+
+def _transform_value(col_name: str, value: str) -> str:
+    if not value:
+        return value
+    if value in _TEAM_CN:
+        return _TEAM_CN[value]
+    if value in _RESULT_CN and ("结果" in col_name or "result" in col_name.lower()):
+        return _RESULT_CN[value]
+    if value in _STAGE_CN:
+        return _STAGE_CN[value]
+    return value
+
+
+def _enrich_handicap_result(rows, columns):
+    """为世界杯查询结果补充盘口结果列（如果有比分信息）"""
+    from nl_query import execute_sqlite
+
+    # 检测是否有比分相关字段
+    col_set = set(columns)
+    has_score = ("比分" in col_set) or ("主队进球" in col_set)
+    has_teams = "主队" in col_set and "客队" in col_set
+    if not has_score or not has_teams:
+        return rows, columns
+
+    # 批量查出世界杯所有澳门终盘亚盘
+    handicap_map = {}
+    try:
+        hcap_rows = execute_sqlite(
+            "SELECT m.home_team, m.away_team, m.year, ah.close_handicap_value "
+            "FROM wc_asian_handicap ah JOIN matches m ON ah.match_id = m.id "
+            "WHERE ah.company = '澳门'"
+        )
+        if not isinstance(hcap_rows, str):
+            for r in hcap_rows:
+                key = (r["home_team"], r["away_team"], str(r["year"]))
+                handicap_map[key] = r["close_handicap_value"]
+    except Exception:
+        return rows, columns
+
+    if not handicap_map:
+        return rows, columns
+
+    # 反向队名映射(中文→英文)
+    cn_to_en = {v: k for k, v in _TEAM_CN.items()}
+
+    for row in rows:
+        home_cn = row.get("主队", "")
+        away_cn = row.get("客队", "")
+        year = row.get("年份", "")
+        home_en = cn_to_en.get(home_cn, home_cn)
+        away_en = cn_to_en.get(away_cn, away_cn)
+
+        handicap = handicap_map.get((home_en, away_en, str(year)))
+        if handicap is None:
+            row["盘口结果"] = "-"
+            continue
+
+        # 解析比分
+        score_str = row.get("比分", "")
+        if ":" in score_str:
+            parts = score_str.split(":")
+        elif "-" in score_str:
+            parts = score_str.split("-")
+        else:
+            h = row.get("主队进球", "0")
+            a = row.get("客队进球", "0")
+            parts = [h, a]
+
+        try:
+            home_score = int(parts[0])
+            away_score = int(parts[1])
+            hcap = float(handicap)
+
+            if hcap >= 0:
+                diff = home_score - away_score - hcap
+            else:
+                diff = away_score - home_score - abs(hcap)
+
+            if diff > 0:
+                row["盘口结果"] = "赢盘"
+            elif diff == 0:
+                row["盘口结果"] = "走水"
+            else:
+                row["盘口结果"] = "输盘"
+        except (ValueError, TypeError, IndexError):
+            row["盘口结果"] = "-"
+
+    if "盘口结果" not in columns:
+        columns.append("盘口结果")
+
+    return rows, columns
+
+
+# 盘口文字 → 数值
+_HANDICAP_MAP = {
+    "平手": "0", "平手/半球": "+0.25", "半球": "+0.5", "半球/一球": "+0.75",
+    "一球": "+1", "一球/球半": "+1.25", "球半": "+1.5", "球半/两球": "+1.75",
+    "两球": "+2", "两球/两球半": "+2.25", "两球半": "+2.5", "两球半/三球": "+2.75", "三球": "+3",
+    "受平手/半球": "-0.25", "受半球": "-0.5", "受半球/一球": "-0.75",
+    "受一球": "-1", "受一球/球半": "-1.25", "受球半": "-1.5", "受球半/两球": "-1.75",
+    "受两球": "-2", "受两球/两球半": "-2.25", "受两球半": "-2.5",
+}
+
+
+def _post_process(rows, columns):
+    if not rows:
+        return rows, columns
+
+    new_rows = []
+    merge_rules = []
+
+    # 检测需要合并的字段
+    col_set = set(columns)
+    has_score_split = "主队进球" in col_set and "客队进球" in col_set
+    has_initial_water = "初盘主队水位" in col_set and "初盘客队水位" in col_set
+    has_close_water = "终盘主队水位" in col_set and "终盘客队水位" in col_set
+    has_initial_handicap = "初盘让球" in col_set
+    has_close_handicap = "终盘让球" in col_set
+
+    for row in rows:
+        new_row = dict(row)
+
+        # 合并进球 → 比分
+        if has_score_split:
+            h = new_row.pop("主队进球", "")
+            a = new_row.pop("客队进球", "")
+            if h or a:
+                new_row["比分"] = f"{h}:{a}"
+
+        # 初盘让球文字 → 数值
+        if has_initial_handicap and "初盘让球" in new_row:
+            val = new_row["初盘让球"]
+            new_row["初盘让球"] = _HANDICAP_MAP.get(val, val)
+
+        # 终盘让球文字 → 数值
+        if has_close_handicap and "终盘让球" in new_row:
+            val = new_row["终盘让球"]
+            new_row["终盘让球"] = _HANDICAP_MAP.get(val, val)
+
+        # 合并初盘水位 → "主/客"
+        if has_initial_water:
+            h = new_row.pop("初盘主队水位", "")
+            a = new_row.pop("初盘客队水位", "")
+            if h or a:
+                new_row["初盘水位"] = f"{h}/{a}"
+
+        # 合并终盘水位 → "主/客"
+        if has_close_water:
+            h = new_row.pop("终盘主队水位", "")
+            a = new_row.pop("终盘客队水位", "")
+            if h or a:
+                new_row["终盘水位"] = f"{h}/{a}"
+
+        # 合并竞彩初盘赔率 → "主/平/客"
+        has_jc_init = "竞彩初盘主胜" in col_set
+        if has_jc_init:
+            w = new_row.pop("竞彩初盘主胜", "")
+            d = new_row.pop("竞彩初盘平", "")
+            l = new_row.pop("竞彩初盘客胜", "")
+            if w or d or l:
+                new_row["竞彩初盘"] = f"{w}/{d}/{l}"
+
+        # 合并竞彩终盘赔率 → "主/平/客"
+        has_jc_close = "竞彩终盘主胜" in col_set
+        if has_jc_close:
+            w = new_row.pop("竞彩终盘主胜", "")
+            d = new_row.pop("竞彩终盘平", "")
+            l = new_row.pop("竞彩终盘客胜", "")
+            if w or d or l:
+                new_row["竞彩终盘"] = f"{w}/{d}/{l}"
+
+        # 合并普通初盘/终盘赔率(非竞彩标记的)
+        has_init_odds = "初盘主胜" in col_set and "竞彩初盘主胜" not in col_set
+        if has_init_odds:
+            w = new_row.pop("初盘主胜", "")
+            d = new_row.pop("初盘平局", "")
+            l = new_row.pop("初盘客胜", "")
+            if w or d or l:
+                new_row["初盘赔率"] = f"{w}/{d}/{l}"
+
+        has_close_odds = "终盘主胜" in col_set and "竞彩终盘主胜" not in col_set
+        if has_close_odds:
+            w = new_row.pop("终盘主胜", "")
+            d = new_row.pop("终盘平局", "")
+            l = new_row.pop("终盘客胜", "")
+            if w or d or l:
+                new_row["终盘赔率"] = f"{w}/{d}/{l}"
+
+        new_rows.append(new_row)
+
+    # 重建列顺序
+    merge_map = {
+        "主队进球": "比分", "客队进球": "比分",
+        "初盘主队水位": "初盘水位", "初盘客队水位": "初盘水位",
+        "终盘主队水位": "终盘水位", "终盘客队水位": "终盘水位",
+        "竞彩初盘主胜": "竞彩初盘", "竞彩初盘平": "竞彩初盘", "竞彩初盘客胜": "竞彩初盘",
+        "竞彩终盘主胜": "竞彩终盘", "竞彩终盘平": "竞彩终盘", "竞彩终盘客胜": "竞彩终盘",
+        "初盘主胜": "初盘赔率", "初盘平局": "初盘赔率", "初盘客胜": "初盘赔率",
+        "终盘主胜": "终盘赔率", "终盘平局": "终盘赔率", "终盘客胜": "终盘赔率",
+    }
+
+    new_columns = []
+    for c in columns:
+        target = merge_map.get(c, c)
+        if target not in new_columns:
+            new_columns.append(target)
+
+    return new_rows, new_columns
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7001)
