@@ -19,27 +19,37 @@
           </view>
 
           <view v-else class="bet-list">
-            <view v-for="bet in displayedBets" :key="bet.id" class="saved-card" :class="{ 'is-parlay': bet.legs?.length > 1 }">
+            <view v-for="bet in displayedBets" :key="bet.id" class="saved-card" :class="{ 'is-parlay': getMatchCount(bet) > 1, 'bet-hit': getBetHitStatus(bet) === 'hit', 'bet-miss': getBetHitStatus(bet) === 'miss' }">
               <!-- 串关标识条 -->
-              <view class="parlay-bar" v-if="bet.legs?.length > 1">
+              <view class="parlay-bar" v-if="getMatchCount(bet) > 1">
                 <text class="parlay-label">{{ getParlayTypeLabel(bet) }}</text>
                 <text class="parlay-total">总赔率 {{ bet.odds }}</text>
-                <text class="card-delete" @tap.stop="() => removeBet(bet.id)">删除</text>
+                <view class="parlay-bar-right">
+                  <text class="hit-badge hit" v-if="getBetHitStatus(bet) === 'hit'">命中</text>
+                  <text class="hit-badge miss" v-else-if="getBetHitStatus(bet) === 'miss'">未中</text>
+                  <text class="card-delete" @tap.stop="() => removeBet(bet.id)">删除</text>
+                </view>
               </view>
 
-              <!-- 单关的删除按钮 -->
-              <text class="card-delete corner" v-if="bet.legs?.length === 1" @tap.stop="() => removeBet(bet.id)">删除</text>
+              <!-- 单关的操作区 -->
+              <view class="single-bar" v-if="getMatchCount(bet) <= 1">
+                <text class="hit-badge hit" v-if="getBetHitStatus(bet) === 'hit'">命中</text>
+                <text class="hit-badge miss" v-else-if="getBetHitStatus(bet) === 'miss'">未中</text>
+                <text class="card-delete corner" @tap.stop="() => removeBet(bet.id)">删除</text>
+              </view>
 
-              <!-- 比赛legs -->
-              <view v-for="(leg, idx) in bet.legs" :key="leg.id" class="leg" :class="{ 'leg--divider': idx > 0 }">
+              <!-- 按比赛分组展示 -->
+              <view v-for="(group, idx) in groupLegs(bet.legs)" :key="group.key" class="leg" :class="{ 'leg--divider': idx > 0 }">
                 <view class="leg-row1">
-                  <text class="leg-teams">{{ formatTeams(leg) }}</text>
+                  <text class="leg-teams">{{ formatTeams(group.legs[0]) }}</text>
                 </view>
-                <text class="leg-sub">{{ leg.league }} {{ formatDate(leg.matchTime) }}</text>
-                <view class="leg-row3">
-                  <view class="sel-chip">{{ leg.selection || '未选' }}</view>
+                <text class="leg-sub">{{ group.legs[0].league }} {{ formatDate(group.legs[0].matchTime) }}</text>
+                <view v-for="leg in group.legs" :key="leg.id" class="leg-row3">
+                  <view class="sel-chip" :class="{ 'chip-hit': getLegHitStatus(leg) === 'hit', 'chip-miss': getLegHitStatus(leg) === 'miss' }">{{ leg.selection || '未选' }}</view>
                   <text class="leg-type">{{ leg.betType }}</text>
                   <text class="leg-at">@{{ leg.odds }}</text>
+                  <text class="leg-hit-icon" v-if="getLegHitStatus(leg) === 'hit'">✓</text>
+                  <text class="leg-miss-icon" v-else-if="getLegHitStatus(leg) === 'miss'">✗</text>
                 </view>
               </view>
             </view>
@@ -68,7 +78,7 @@
               <view class="bet-card-header">
                 <view class="bet-card-left">
                   <text class="bet-card-title">{{ primaryMatch(bet) }}</text>
-                  <text class="bet-card-sub">{{ bet.legs?.length > 1 ? `${bet.legs.length}场串关` : bet.legs?.[0]?.league || '' }} · {{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
+                  <text class="bet-card-sub">{{ getMatchCount(bet) > 1 ? `${getMatchCount(bet)}场串关` : bet.legs?.[0]?.league || '' }} · {{ formatDate(bet.legs?.[0]?.matchTime || bet.betTime) }}</text>
                 </view>
                 <view class="bet-card-badges">
                   <view class="badge-status" :class="bet.status">{{ statusText(bet) }}</view>
@@ -76,13 +86,16 @@
                 </view>
               </view>
 
-              <!-- 串关展开 -->
-              <view v-if="bet.legs?.length > 1" class="bet-legs-list">
-                <view v-for="leg in bet.legs" :key="leg.id" class="bet-leg-row">
-                  <text class="bet-leg-name">{{ formatTeams(leg) }}</text>
-                  <view class="bet-leg-right">
-                    <view class="sel-chip sm">{{ leg.selection || leg.betType }}</view>
-                    <text class="bet-leg-odds">@{{ leg.odds }}</text>
+              <!-- 串关展开（按比赛分组） -->
+              <view v-if="getMatchCount(bet) > 1" class="bet-legs-list">
+                <view v-for="group in groupLegs(bet.legs)" :key="group.key" class="bet-leg-group">
+                  <text class="bet-leg-name">{{ formatTeams(group.legs[0]) }}</text>
+                  <view v-for="leg in group.legs" :key="leg.id" class="bet-leg-row">
+                    <view class="bet-leg-right">
+                      <view class="sel-chip sm">{{ leg.selection || leg.betType }}</view>
+                      <text class="bet-leg-type">{{ leg.betType }}</text>
+                      <text class="bet-leg-odds">@{{ leg.odds }}</text>
+                    </view>
                   </view>
                 </view>
               </view>
@@ -90,9 +103,11 @@
               <!-- 底部 -->
               <view class="bet-card-footer">
                 <view class="bet-card-info-row">
-                  <view class="bet-card-sel" v-if="bet.legs?.length === 1">
-                    <view class="sel-chip sm">{{ bet.legs[0].selection }}</view>
-                    <text class="bet-card-type">{{ bet.legs[0].betType }} @{{ bet.odds }}</text>
+                  <view class="bet-card-sel" v-if="getMatchCount(bet) <= 1">
+                    <template v-for="leg in (bet.legs || [])" :key="leg.id">
+                      <view class="sel-chip sm">{{ leg.selection }}</view>
+                    </template>
+                    <text class="bet-card-type">{{ bet.legs?.[0]?.betType }} @{{ bet.odds }}</text>
                   </view>
                   <view class="bet-card-sel" v-else>
                     <text class="bet-card-type">总赔率 @{{ bet.odds }}</text>
@@ -123,7 +138,8 @@ import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import MescrollBody from "mescroll-uni/mescroll-body.vue";
 import { useBetStore } from "@/stores/betStore";
 import { showConfirm } from "@/utils/confirm";
-import { ref, computed, onMounted } from "vue";
+import { request } from "@/utils/http";
+import { ref, computed, onMounted, watch } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { requireAuth } from "@/utils/auth";
 
@@ -133,6 +149,9 @@ const settleMode = ref(false);
 const activeTab = ref("saved");
 const betFilter = ref("all");
 const showDialog = ref(false);
+
+// 赛果数据缓存：{ "YYYY-MM-DD": [match items] }
+const resultsCache = ref({});
 
 const mescrollRef = ref(null);
 let mescroll = null;
@@ -187,6 +206,126 @@ onShow(() => {
 
 const allBets = computed(() => betStore.bets);
 
+// 监听保存记录变化，自动加载赛果
+watch(() => betStore.bets, () => { loadResultsForSavedBets(); }, { deep: true });
+
+async function loadResultsForSavedBets() {
+  const savedBets = allBets.value.filter(b => b.status === 'saved')
+  const dates = new Set()
+  savedBets.forEach(bet => {
+    (bet.legs || []).forEach(leg => {
+      if (leg.matchTime || leg.matchDate) {
+        const d = dayjs(leg.matchTime || leg.matchDate).format('YYYY-MM-DD')
+        if (d && d !== 'Invalid Date') {
+          dates.add(d)
+          // 凌晨场（00:00-06:00）归属前一天期号
+          const hour = dayjs(leg.matchTime || leg.matchDate).hour()
+          if (hour < 6) {
+            dates.add(dayjs(d).subtract(1, 'day').format('YYYY-MM-DD'))
+          }
+        }
+      }
+    })
+  })
+  for (const date of dates) {
+    if (resultsCache.value[date]) continue
+    try {
+      const data = await request({ url: '/api/match-results', method: 'GET', data: { date } })
+      resultsCache.value[date] = data.items || []
+    } catch (e) {
+      resultsCache.value[date] = []
+    }
+  }
+}
+
+function findMatchResult(leg) {
+  const home = (leg.homeTeam || '').trim()
+  const away = (leg.awayTeam || '').trim()
+  if (!home || !away) return null
+  // 搜索所有已缓存的赛果
+  for (const items of Object.values(resultsCache.value)) {
+    if (!items || !items.length) continue
+    const found = items.find(m => {
+      const mHome = (m.homeTeam?.name || m.homeTeam || '').trim()
+      const mAway = (m.awayTeam?.name || m.awayTeam || '').trim()
+      return (mHome === home && mAway === away) || (mHome.includes(home) && mAway.includes(away)) || (home.includes(mHome) && away.includes(mAway))
+    })
+    if (found) return found
+  }
+  return null
+}
+
+function getLegHitStatus(leg) {
+  const match = findMatchResult(leg)
+  if (!match) return null // 未找到赛果
+  if (match.homeScore === null || match.homeScore === undefined) return null // 比赛未结束
+
+  const hs = Number(match.homeScore)
+  const as = Number(match.awayScore)
+  const selection = (leg.selection || '').trim()
+  const betType = (leg.betType || '').trim()
+
+  if (betType.includes('让球')) {
+    // 让球胜平负：从 handicap 或 note 中提取让球数
+    let handicap = 0
+    if (leg.handicap !== undefined && leg.handicap !== null) {
+      handicap = Number(leg.handicap)
+    } else if (leg.note) {
+      const m = leg.note.match(/\(([+-]?\d+\.?\d*)\)/)
+      if (m) handicap = Number(m[1])
+    }
+    const adjusted = hs + handicap - as
+    let actualResult = ''
+    if (adjusted > 0) actualResult = '胜'
+    else if (adjusted === 0) actualResult = '平'
+    else actualResult = '负'
+    return selection === actualResult ? 'hit' : 'miss'
+  }
+
+  if (betType.includes('胜平负') || betType === '胜平负') {
+    let actualResult = ''
+    if (hs > as) actualResult = '胜'
+    else if (hs === as) actualResult = '平'
+    else actualResult = '负'
+    return selection === actualResult ? 'hit' : 'miss'
+  }
+
+  if (betType.includes('总进球')) {
+    const totalGoals = hs + as
+    // selection 格式如 "0", "1", "2", "3", "4", "5", "6", "7+"
+    if (selection.includes('+')) {
+      const min = parseInt(selection)
+      return totalGoals >= min ? 'hit' : 'miss'
+    }
+    return totalGoals === parseInt(selection) ? 'hit' : 'miss'
+  }
+
+  if (betType.includes('半全场')) {
+    // 需要半场比分数据，暂不支持
+    return null
+  }
+
+  if (betType.includes('比分')) {
+    // selection 格式如 "1:0", "2:1"
+    const parts = selection.split(':')
+    if (parts.length === 2) {
+      return (hs === parseInt(parts[0]) && as === parseInt(parts[1])) ? 'hit' : 'miss'
+    }
+    return null
+  }
+
+  return null
+}
+
+function getBetHitStatus(bet) {
+  const legs = bet.legs || []
+  if (!legs.length) return null
+  const statuses = legs.map(getLegHitStatus)
+  if (statuses.some(s => s === null)) return null // 有比赛未出结果
+  if (statuses.every(s => s === 'hit')) return 'hit'
+  return 'miss'
+}
+
 const displayedBets = computed(() => {
   if (activeTab.value === "saved") return allBets.value.filter((b) => b.status === "saved");
   const bettingList = allBets.value.filter((b) => b.status === "betting" || b.status === "settled");
@@ -238,14 +377,32 @@ function statusText(b) { return { saved: "已保存", betting: "投注中", sett
 function primaryMatch(b) {
   const legs = b.legs || [];
   if (!legs.length) return b.matchName || "未命名";
-  if (legs.length === 1) return formatTeams(legs[0]);
-  return `${formatTeams(legs[0])} 等${legs.length}场`;
+  const mc = getMatchCount(b)
+  if (mc === 1) return formatTeams(legs[0]);
+  return `${formatTeams(legs[0])} 等${mc}场`;
 }
 function formatTeams(l) { return `${l?.homeTeam || "主队"} vs ${l?.awayTeam || "客队"}`; }
+
+function groupLegs(legs) {
+  if (!legs) return []
+  const map = {}
+  legs.forEach(leg => {
+    const key = `${leg.homeTeam}-${leg.awayTeam}-${leg.matchTime}`
+    if (!map[key]) map[key] = { key, legs: [] }
+    map[key].legs.push(leg)
+  })
+  return Object.values(map)
+}
+
+function getMatchCount(bet) {
+  return groupLegs(bet.legs).length
+}
+
 function getParlayTypeLabel(b) {
-  if (!b.legs || b.legs.length < 2) return "单关";
+  const mc = getMatchCount(b)
+  if (mc < 2) return "单关";
   if (b.parlayType) { const [m, n] = b.parlayType.split("_"); return `${m}串${n}`; }
-  return `${b.legs.length}串1`;
+  return `${mc}串1`;
 }
 </script>
 
@@ -358,6 +515,45 @@ function getParlayTypeLabel(b) {
   flex: 1;
 }
 
+.parlay-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.single-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12rpx;
+  padding-bottom: 4rpx;
+}
+
+.hit-badge {
+  font-size: 20rpx;
+  font-weight: 600;
+  padding: 4rpx 12rpx;
+  border-radius: 6rpx;
+
+  &.hit {
+    background: #ecfdf5;
+    color: #059669;
+  }
+
+  &.miss {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+}
+
+.saved-card.bet-hit {
+  border-left: 6rpx solid #10b981;
+}
+
+.saved-card.bet-miss {
+  border-left: 6rpx solid #ef4444;
+}
+
 .card-delete {
   font-size: 22rpx;
   color: #ef4444;
@@ -368,12 +564,6 @@ function getParlayTypeLabel(b) {
 
 .card-delete:active {
   opacity: 0.7;
-}
-
-.card-delete.corner {
-  position: absolute;
-  top: 20rpx;
-  right: 20rpx;
 }
 
 /* Leg 样式 */
@@ -408,6 +598,7 @@ function getParlayTypeLabel(b) {
   display: flex;
   align-items: center;
   gap: 12rpx;
+  margin-top: 8rpx;
 }
 
 .sel-chip {
@@ -421,11 +612,31 @@ function getParlayTypeLabel(b) {
   padding: 6rpx 16rpx;
   border-radius: 6rpx;
   min-width: 48rpx;
+
+  &.chip-hit {
+    background: #059669;
+  }
+
+  &.chip-miss {
+    background: #9ca3af;
+  }
 }
 
 .sel-chip.sm {
   font-size: 20rpx;
   padding: 4rpx 12rpx;
+}
+
+.leg-hit-icon {
+  font-size: 24rpx;
+  color: #059669;
+  font-weight: 700;
+}
+
+.leg-miss-icon {
+  font-size: 24rpx;
+  color: #ef4444;
+  font-weight: 700;
 }
 
 .leg-type {
@@ -561,13 +772,20 @@ function getParlayTypeLabel(b) {
   margin-bottom: 12rpx;
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
+  gap: 12rpx;
+}
+
+.bet-leg-group {
+  &:not(:first-child) {
+    border-top: 1px dashed #eceef2;
+    padding-top: 10rpx;
+  }
 }
 
 .bet-leg-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  margin-top: 6rpx;
 }
 
 .bet-leg-name {
@@ -580,6 +798,11 @@ function getParlayTypeLabel(b) {
   display: flex;
   align-items: center;
   gap: 8rpx;
+}
+
+.bet-leg-type {
+  font-size: 22rpx;
+  color: #9ca3af;
 }
 
 .bet-leg-odds {

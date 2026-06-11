@@ -2,7 +2,7 @@
   <view v-if="betCart.hasSelections" class="bet-cart-wrapper">
     <!-- 浮动按钮 -->
     <view class="float-button" @tap="showCart = !showCart">
-      <view class="badge" v-if="betCart.count > 0">{{ betCart.count }}</view>
+      <view class="badge" v-if="betCart.matchCount > 0">{{ betCart.matchCount }}</view>
       <text class="icon">🛒</text>
       <text class="label">投注车</text>
     </view>
@@ -16,30 +16,32 @@
         <view class="cart-header">
           <view class="title">
             <text>投注车</text>
-            <text class="count-badge">{{ betCart.count }}</text>
+            <text class="count-badge">{{ betCart.matchCount }}场{{ betCart.count > betCart.matchCount ? ' / ' + betCart.count + '项' : '' }}</text>
           </view>
           <button class="clear-btn" @tap="handleClear">清空</button>
         </view>
 
-        <!-- 选项列表 -->
+        <!-- 选项列表（按比赛分组） -->
         <scroll-view class="selections-list" scroll-y>
-          <view 
-            v-for="item in betCart.selections" 
-            :key="item.key" 
+          <view
+            v-for="group in betCart.groupedSelections"
+            :key="group.matchId"
             class="selection-item"
           >
             <view class="item-row">
               <view class="item-info">
-                <text class="teams">{{ item.homeTeam }} VS {{ item.awayTeam }}</text>
-                <view class="details">
-                  <text class="play">{{ item.playName }}<text v-if="item.handicap" class="handicap">({{ formatHandicap(item.handicap) }})</text></text>
-                </view>
+                <text class="teams">{{ group.homeTeam }} VS {{ group.awayTeam }}</text>
               </view>
-              <text class="remove-btn" @tap="handleRemove(item.key)">×</text>
             </view>
-            <view class="item-bet">
-              <view class="selection">{{ item.selectionLabel }}</view>
-              <text class="odds">@ {{ item.odds }}</text>
+            <view class="item-bets">
+              <view v-for="item in group.items" :key="item.key" class="item-bet">
+                <view class="bet-left">
+                  <text class="play-tag">{{ item.playName }}<text v-if="item.handicap" class="handicap">({{ formatHandicap(item.handicap) }})</text></text>
+                  <view class="selection">{{ item.selectionLabel }}</view>
+                  <text class="odds">@ {{ item.odds }}</text>
+                </view>
+                <text class="remove-btn" @tap="handleRemove(item.key)">×</text>
+              </view>
             </view>
           </view>
         </scroll-view>
@@ -126,13 +128,13 @@ const betStore = useBetStore()
 
 const showCart = ref(false)
 
-// 串关选项
+// 串关选项（基于比赛场次数）
 const parlayOptions = computed(() => {
-  const count = betCart.count
-  if (count < 2) return []
-  
+  const mc = betCart.matchCount
+  if (mc < 2) return []
+
   const options = []
-  for (let i = 2; i <= count; i++) {
+  for (let i = 2; i <= mc; i++) {
     options.push({
       value: `${i}_1`,
       label: `${i}串1`
@@ -422,52 +424,43 @@ async function handleSaveWithStatus(status) {
         font-weight: 500;
         color: #111;
         display: block;
-        margin-bottom: 6rpx;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-
-      .details {
-        display: flex;
-        align-items: center;
-        gap: 8rpx;
-
-        .play {
-          font-size: 22rpx;
-          color: #999;
-
-          .handicap {
-            color: #0d9488;
-            font-weight: 500;
-          }
-        }
-      }
     }
+  }
 
-    .remove-btn {
-      width: 36rpx;
-      height: 36rpx;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 36rpx;
-      color: #d1d5db;
-      line-height: 1;
-      margin-left: 8rpx;
-      transition: color 0.2s;
-
-      &:active {
-        color: #999;
-      }
-    }
+  .item-bets {
+    display: flex;
+    flex-direction: column;
+    gap: 8rpx;
   }
 
   .item-bet {
     display: flex;
     align-items: center;
-    gap: 10rpx;
+    justify-content: space-between;
     width: 100%;
+
+    .bet-left {
+      display: flex;
+      align-items: center;
+      gap: 10rpx;
+      flex: 1;
+      min-width: 0;
+
+      .play-tag {
+        font-size: 22rpx;
+        color: #999;
+        white-space: nowrap;
+
+        .handicap {
+          color: #0d9488;
+          font-weight: 500;
+        }
+      }
+    }
 
     .selection {
       background: #0d9488;
@@ -484,6 +477,24 @@ async function handleSaveWithStatus(status) {
       color: #0d9488;
       font-weight: 600;
       white-space: nowrap;
+    }
+
+    .remove-btn {
+      width: 36rpx;
+      height: 36rpx;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36rpx;
+      color: #d1d5db;
+      line-height: 1;
+      margin-left: 8rpx;
+      transition: color 0.2s;
+      flex-shrink: 0;
+
+      &:active {
+        color: #999;
+      }
     }
   }
 }

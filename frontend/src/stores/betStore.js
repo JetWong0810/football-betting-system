@@ -186,10 +186,12 @@ export const useBetStore = defineStore("bet", () => {
           awayTeam: leg.awayTeam || "",
           league: leg.league || payload.league || "",
           matchTime: leg.matchTime || payload.betTime || base.betTime,
+          matchDate: leg.matchDate || "",
           betType: leg.betType || payload.betType || "胜平负",
           odds: Number(leg.odds || 1),
           stake: Number(leg.stake || 0),
           selection: leg.selection || "",
+          handicap: leg.handicap ?? null,
           note: leg.note || "",
         }));
       }
