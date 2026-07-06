@@ -1,25 +1,27 @@
 <template>
-  <view v-if="visible" class="overlay" @tap="handleCancel">
-    <view class="sheet" @tap.stop>
-      <view class="sheet-header">
-        <text class="sheet-cancel" @tap="handleCancel">取消</text>
-        <text class="sheet-title">{{ title }}</text>
-        <text class="sheet-confirm" @tap="handleConfirm">确定</text>
-      </view>
-      <scroll-view class="sheet-options" scroll-y>
-        <view
-          v-for="(item, idx) in options"
-          :key="idx"
-          class="sheet-option"
-          :class="{ active: idx === selectedIndex }"
-          @tap="selectedIndex = idx"
-        >
-          <text class="option-label">{{ item.label || item }}</text>
-          <view class="option-check" v-if="idx === selectedIndex"></view>
+  <teleport to="body">
+    <view v-if="visible" class="ap-overlay" @tap="handleCancel">
+      <view class="ap-sheet" @tap.stop>
+        <view class="ap-header">
+          <text class="ap-cancel" @tap="handleCancel">取消</text>
+          <text class="ap-title">{{ title }}</text>
+          <text class="ap-confirm" @tap="handleConfirm">确定</text>
         </view>
-      </scroll-view>
+        <view class="ap-options">
+          <view
+            v-for="(item, idx) in options"
+            :key="idx"
+            class="ap-option"
+            :class="{ active: idx === selectedIndex }"
+            @tap="selectedIndex = idx"
+          >
+            <text class="ap-option-label">{{ item.label || item }}</text>
+            <view class="ap-option-check" v-if="idx === selectedIndex"></view>
+          </view>
+        </view>
+      </view>
     </view>
-  </view>
+  </teleport>
 </template>
 
 <script setup>
@@ -54,8 +56,8 @@ function handleCancel() {
 defineExpose({ show });
 </script>
 
-<style lang="scss" scoped>
-.overlay {
+<style lang="scss">
+.ap-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -64,70 +66,74 @@ defineExpose({ show });
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: flex-end;
-  z-index: 9999;
+  z-index: 99999;
 }
 
-.sheet {
+.ap-sheet {
   width: 100%;
   background: #ffffff;
   border-radius: 16rpx 16rpx 0 0;
-  max-height: 70vh;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
 }
 
-.sheet-header {
+.ap-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 24rpx 32rpx;
   border-bottom: 1px solid #f0f1f3;
+  flex-shrink: 0;
 }
 
-.sheet-cancel {
+.ap-cancel {
   font-size: 28rpx;
   color: #6b7280;
 }
 
-.sheet-title {
+.ap-title {
   font-size: 28rpx;
   font-weight: 600;
   color: #1f2937;
 }
 
-.sheet-confirm {
+.ap-confirm {
   font-size: 28rpx;
   font-weight: 600;
   color: #0d9488;
 }
 
-.sheet-options {
+.ap-options {
   padding: 8rpx 0;
-  max-height: 600rpx;
+  padding-bottom: calc(8rpx + env(safe-area-inset-bottom));
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-.sheet-option {
+.ap-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 28rpx 32rpx;
 }
 
-.sheet-option.active {
+.ap-option.active {
   background: #f0fdfa;
 }
 
-.sheet-option.active .option-label {
+.ap-option.active .ap-option-label {
   color: #0d9488;
   font-weight: 600;
 }
 
-.option-label {
+.ap-option-label {
   font-size: 28rpx;
   color: #374151;
 }
 
-.option-check {
+.ap-option-check {
   width: 20rpx;
   height: 20rpx;
   border-radius: 50%;

@@ -46,17 +46,18 @@ export const useBetCartStore = defineStore('betCart', () => {
       // 如果已存在，则移除
       selections.value.splice(existingIndex, 1)
     } else {
-      // 检查是否同一场比赛已有其他选项
-      const sameMatchIndex = selections.value.findIndex(s => s.matchId === item.matchId)
-      if (sameMatchIndex > -1) {
-        // 替换同一场比赛的选项
-        selections.value.splice(sameMatchIndex, 1, {
+      // 检查同一场比赛已有多少选项
+      const sameMatchSelections = selections.value.filter(s => s.matchId === item.matchId)
+      if (sameMatchSelections.length >= 2) {
+        // 已有2个选项，替换最早添加的那个
+        const oldestIndex = selections.value.findIndex(s => s.key === sameMatchSelections[0].key)
+        selections.value.splice(oldestIndex, 1, {
           ...item,
           key,
           addedAt: Date.now()
         })
       } else {
-        // 添加新选项
+        // 未满2个，直接添加
         selections.value.push({
           ...item,
           key,
@@ -70,12 +71,45 @@ export const useBetCartStore = defineStore('betCart', () => {
   }
 
   /**
+   * 已选比赛场次数（去重）
+   */
+  const matchCount = computed(() => {
+    const ids = new Set(selections.value.map(s => s.matchId))
+    return ids.size
+  })
+
+  /**
+   * 按比赛分组的选项
+   */
+  const groupedSelections = computed(() => {
+    const map = {}
+    selections.value.forEach(s => {
+      if (!map[s.matchId]) {
+        map[s.matchId] = {
+          matchId: s.matchId,
+          homeTeam: s.homeTeam,
+          awayTeam: s.awayTeam,
+          league: s.league,
+          matchDate: s.matchDate,
+          matchTime: s.matchTime,
+          items: []
+        }
+      }
+      map[s.matchId].items.push(s)
+    })
+    return Object.values(map)
+  })
+
+  /**
    * 自动更新串关类型
    */
   function updateParlayType() {
-    const count = selections.value.length
-    if (count >= 2) {
-      parlayType.value = `${count}_1`
+    const mc = matchCount.value
+    if (mc >= 2) {
+      const [current] = parlayType.value.split('_').map(Number)
+      if (current > mc) {
+        parlayType.value = `${mc}_1`
+      }
     }
   }
 
@@ -114,7 +148,7 @@ export const useBetCartStore = defineStore('betCart', () => {
   // ========== 计算属性 ==========
 
   /**
-   * 已选数量
+   * 已选数量（总选项数）
    */
   const count = computed(() => selections.value.length)
 
@@ -124,21 +158,21 @@ export const useBetCartStore = defineStore('betCart', () => {
   const hasSelections = computed(() => selections.value.length > 0)
 
   /**
-   * 投注模式（自动判断）
+   * 投注模式（基于比赛场次数判断）
    */
   const betMode = computed(() => {
-    return count.value >= 2 ? 'parlay' : 'single'
+    return matchCount.value >= 2 ? 'parlay' : 'single'
   })
 
   /**
    * 是否单关模式
    */
-  const isSingleMode = computed(() => count.value === 1)
+  const isSingleMode = computed(() => matchCount.value === 1)
 
   /**
    * 是否串关模式
    */
-  const isParlayMode = computed(() => count.value >= 2)
+  const isParlayMode = computed(() => matchCount.value >= 2)
 
   /**
    * 计算组合数 C(n, m)
@@ -174,15 +208,24 @@ export const useBetCartStore = defineStore('betCart', () => {
   }
 
   /**
-   * 串关注数
+   * 串关注数（复式：各场选项数乘积 × 场次组合数）
    */
   const parlayCount = computed(() => {
     if (!isParlayMode.value) return 1
-    
+
     const [m] = parlayType.value.split('_').map(Number)
-    const n = count.value
-    
-    return getCombinationCount(n, m)
+    const groups = groupedSelections.value
+    const n = groups.length
+
+    if (m > n) return 0
+
+    const matchCombinations = getCombinations(groups, m)
+    let totalBets = 0
+    for (const combo of matchCombinations) {
+      const bets = combo.reduce((acc, group) => acc * group.items.length, 1)
+      totalBets += bets
+    }
+    return totalBets
   })
 
   /**
@@ -194,36 +237,49 @@ export const useBetCartStore = defineStore('betCart', () => {
   })
 
   /**
-   * 总赔率（串关时为所有组合的平均赔率）
+   * 总赔率（串关复式时为所有注的平均赔率）
    */
   const totalOdds = computed(() => {
     if (selections.value.length === 0) return 0
-    
-    // 单关模式
+
+    // 单关模式（只有1场比赛）
     if (isSingleMode.value) {
-      return selections.value[0]?.odds || 0
+      // 同一场有多个选项时取平均赔率
+      const odds = selections.value.map(s => s.odds || 0)
+      return odds.reduce((a, b) => a + b, 0) / odds.length
     }
-    
-    // 串关模式
+
+    // 串关模式：计算所有注的平均赔率
     const [m] = parlayType.value.split('_').map(Number)
-    const n = count.value
-    
-    // 如果是全选（N串1，m=n）
-    if (m === n) {
-      return selections.value.reduce((acc, item) => acc * (item.odds || 1), 1)
-    }
-    
-    // 计算所有组合的平均赔率
-    const combinations = getCombinations(selections.value, m)
+    const groups = groupedSelections.value
+    const n = groups.length
+
+    if (m > n) return 0
+
+    const matchCombinations = getCombinations(groups, m)
     let totalOddsSum = 0
-    
-    for (const combo of combinations) {
-      const comboOdds = combo.reduce((acc, item) => acc * (item.odds || 1), 1)
-      totalOddsSum += comboOdds
+    let totalBets = 0
+
+    for (const combo of matchCombinations) {
+      // 对每个场次组合，展开各场选项的笛卡尔积
+      const cartesian = combo.reduce((acc, group) => {
+        const result = []
+        for (const prev of acc) {
+          for (const item of group.items) {
+            result.push([...prev, item])
+          }
+        }
+        return result
+      }, [[]])
+
+      for (const bet of cartesian) {
+        const betOdds = bet.reduce((acc, item) => acc * (item.odds || 1), 1)
+        totalOddsSum += betOdds
+        totalBets++
+      }
     }
-    
-    // 返回平均赔率
-    return combinations.length > 0 ? totalOddsSum / combinations.length : 0
+
+    return totalBets > 0 ? totalOddsSum / totalBets : 0
   })
 
   /**
@@ -242,7 +298,8 @@ export const useBetCartStore = defineStore('betCart', () => {
    */
   const parlayTypeLabel = computed(() => {
     if (isSingleMode.value) {
-      return '单关'
+      const itemCount = selections.value.length
+      return itemCount > 1 ? `单关(复式${itemCount}注)` : '单关'
     }
     return parlayType.value.replace('_', '串')
   })
@@ -259,17 +316,17 @@ export const useBetCartStore = defineStore('betCart', () => {
    * 是否可以投注
    * 规则：
    * 1. 至少有一项选择
-   * 2. 如果是单关，必须支持单关
-   * 3. 如果是串关，自动允许
+   * 2. 如果是单关（仅1场比赛），必须支持单关
+   * 3. 如果是串关（>=2场比赛），自动允许
    */
   const canBet = computed(() => {
     if (!hasSelections.value) return false
-    
+
     // 单关模式：必须支持单关
     if (isSingleMode.value) {
       return allSupportSingle.value
     }
-    
+
     // 串关模式：自动允许
     return true
   })
@@ -307,6 +364,7 @@ export const useBetCartStore = defineStore('betCart', () => {
 
     return {
       wagerType: betMode.value,
+      parlayType: isParlayMode.value ? parlayType.value : null,
       stake: totalStake.value,
       odds: Number(totalOdds.value.toFixed(2)),
       result: 'pending',
@@ -320,9 +378,11 @@ export const useBetCartStore = defineStore('betCart', () => {
     selections,
     multiple,
     parlayType,
-    
+
     // 计算属性
     count,
+    matchCount,
+    groupedSelections,
     hasSelections,
     betMode,
     isSingleMode,
@@ -335,7 +395,7 @@ export const useBetCartStore = defineStore('betCart', () => {
     canBet,
     cannotBetReason,
     allSupportSingle,
-    
+
     // 方法
     toggleSelection,
     isSelected,
