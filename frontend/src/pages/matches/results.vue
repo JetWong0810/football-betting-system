@@ -392,7 +392,7 @@ function handicapLabel(r) {
 }
 
 function onReview(match) {
-  uni.showToast({ title: "复盘功能开发中", icon: "none" });
+  uni.navigateTo({ url: `/pages/review/detail?matchId=${match.id}` });
 }
 </script>
 

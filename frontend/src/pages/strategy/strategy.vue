@@ -128,6 +128,7 @@ import { useBetStore } from '@/stores/betStore'
 import { useStatStore } from '@/stores/statStore'
 import { useConfigStore } from '@/stores/configStore'
 import { getStrategyPreset, calcRecommendedStake } from '@/utils/strategyEngine'
+import { loadCalibration } from '@/utils/calibration'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
 import { requireAuth } from '@/utils/auth'
 import dayjs from 'dayjs'
@@ -140,27 +141,50 @@ const manualWinRate = ref(null)
 const manualOdds = ref(null)
 
 const bankroll = computed(() => betStore.bankroll)
-const currentPreset = computed(() => getStrategyPreset(config.riskTolerance))
+
+// 自定义策略配置
+const customConfig = computed(() => {
+  if (config.riskTolerance !== 'custom') return null
+  return {
+    fixedRatio: config.fixedRatio,
+    kellyFactor: config.kellyFactor,
+    stopLossLimit: config.stopLossLimit,
+    maxDrawdown: config.maxDrawdown,
+    minConfidence: config.minConfidence,
+  }
+})
+
+const currentPreset = computed(() => getStrategyPreset(config.riskTolerance, customConfig.value))
+
+// 校准数据（命中率分桶），用于把置信度校准为真实概率
+const calibrationData = ref(null)
+
+// 策略页进入时预加载校准数据
+loadCalibration().then((cal) => { calibrationData.value = cal })
 
 const oddsTable = computed(() => {
   const b = bankroll.value
   const level = config.riskTolerance
+  const cc = customConfig.value
+  const cal = calibrationData.value
   const rows = [1.70, 1.85, 1.90, 2.00, 2.10, 2.30]
   return rows.map(odds => ({
     odds: odds.toFixed(2),
-    c60: calcRecommendedStake({ bankroll: b, odds, confidence: 60, riskLevel: level }).amount,
-    c70: calcRecommendedStake({ bankroll: b, odds, confidence: 70, riskLevel: level }).amount,
-    c80: calcRecommendedStake({ bankroll: b, odds, confidence: 80, riskLevel: level }).amount,
+    c60: calcRecommendedStake({ bankroll: b, odds, confidence: 60, riskLevel: level, customConfig: cc, calibration: cal }).amount,
+    c70: calcRecommendedStake({ bankroll: b, odds, confidence: 70, riskLevel: level, customConfig: cc, calibration: cal }).amount,
+    c80: calcRecommendedStake({ bankroll: b, odds, confidence: 80, riskLevel: level, customConfig: cc, calibration: cal }).amount,
   }))
 })
 
 const manualResult = computed(() => {
   if (!manualWinRate.value || !manualOdds.value) return { amount: 0, kelly: 0, fixed: 0, method: '' }
+  // 手动计算器：用户直接输入胜率，视为真实概率，跳过校准
   return calcRecommendedStake({
     bankroll: bankroll.value,
     odds: manualOdds.value,
-    confidence: manualWinRate.value,
-    riskLevel: config.riskTolerance
+    probability: Number(manualWinRate.value) / 100,
+    riskLevel: config.riskTolerance,
+    customConfig: customConfig.value,
   })
 })
 

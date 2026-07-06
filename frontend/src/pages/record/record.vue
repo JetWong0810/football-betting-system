@@ -73,6 +73,11 @@
                 <view class="bet-card-badges">
                   <view class="badge-status" :class="bet.status">{{ statusText(bet) }}</view>
                   <view class="badge-result" :class="bet.result" v-if="bet.status === 'settled'">{{ resultText(bet) }}</view>
+                  <view
+                    class="badge-prediction"
+                    :class="{ 'pred-hit': bet.predictionHit === true, 'pred-miss': bet.predictionHit === false }"
+                    v-if="bet.status === 'settled' && bet.predictionHit != null"
+                  >预测{{ bet.predictionHit ? '命中' : '未中' }}</view>
                 </view>
               </view>
 
@@ -182,6 +187,16 @@ onShow(() => {
       showDialog.value = true;
       betStore.predictPrefill = prefill;
     }, 300);
+  }
+
+  // 来自首页 QuickRecordFab 的快速记录入口
+  const openNew = uni.getStorageSync('open-new-bet');
+  if (openNew) {
+    uni.removeStorageSync('open-new-bet');
+    editingBet.value = null;
+    settleMode.value = false;
+    activeTab.value = 'betting';
+    setTimeout(() => { showDialog.value = true; }, 300);
   }
 });
 
@@ -553,6 +568,26 @@ function getParlayTypeLabel(b) {
 .badge-result.pending { background: #94a3b8; }
 .badge-result.half-win { background: #84cc16; }
 .badge-result.half-lose { background: #f59e0b; }
+
+.badge-prediction {
+  font-size: 18rpx;
+  font-weight: 600;
+  padding: 4rpx 10rpx;
+  border-radius: 6rpx;
+  border: 1px solid transparent;
+}
+
+.badge-prediction.pred-hit {
+  color: #059669;
+  background: #d1fae5;
+  border-color: #a7f3d0;
+}
+
+.badge-prediction.pred-miss {
+  color: #ef4444;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
 
 .bet-legs-list {
   background: #f9fafb;

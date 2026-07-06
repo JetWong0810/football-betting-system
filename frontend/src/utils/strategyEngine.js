@@ -1,4 +1,5 @@
 import { calcKellyStake } from './kelly'
+import { calibrateProbability } from './calibration'
 
 const PRESETS = {
   conservative: {
@@ -27,7 +28,23 @@ const PRESETS = {
   }
 }
 
-export function getStrategyPreset(riskLevel) {
+/**
+ * 自定义策略：从 configStore 字段构造 preset
+ * customConfig 形如 { fixedRatio, kellyFactor, stopLossLimit, maxDrawdown, minConfidence }
+ */
+function resolveCustomPreset(customConfig) {
+  return {
+    label: '自定义',
+    maxRatio: Number(customConfig?.fixedRatio ?? 0.05),
+    kellyFactor: Number(customConfig?.kellyFactor ?? 0.5),
+    stopLossLimit: Number(customConfig?.stopLossLimit ?? 3),
+    maxDrawdown: Number(customConfig?.maxDrawdown ?? -0.15),
+    minConfidence: Number(customConfig?.minConfidence ?? 55)
+  }
+}
+
+export function getStrategyPreset(riskLevel, customConfig = null) {
+  if (riskLevel === 'custom' && customConfig) return resolveCustomPreset(customConfig)
   return PRESETS[riskLevel] || PRESETS.balanced
 }
 
@@ -35,33 +52,74 @@ export function getAllPresets() {
   return PRESETS
 }
 
-export function calcRecommendedStake({ bankroll, odds, confidence, riskLevel = 'balanced', customConfig = null }) {
-  const preset = customConfig || getStrategyPreset(riskLevel)
-  const probability = Math.min(confidence / 100, 0.95)
+/**
+ * 计算建议投注金额。
+ *
+ * 关键修正：
+ * 1. 不再把模型置信度直接当真实概率——用 calibrateProbability 校准
+ * 2. 引入 edge 检查：校准概率 * 赔率 <= 1 时（无正预期）注额为 0
+ * 3. 自定义策略（riskLevel='custom'）真正使用 configStore 的 kellyFactor/fixedRatio
+ *
+ * @param {object} opts
+ * @param {number} opts.bankroll 当前可用资金
+ * @param {number} opts.odds 投注赔率（小数，如 1.90）
+ * @param {number} [opts.confidence] 模型置信度 35-92（会被校准为概率）
+ * @param {number} [opts.probability] 直接指定概率 0-1（优先于 confidence，跳过校准，用于手动计算器）
+ * @param {string} [opts.riskLevel] 预设名 conservative/balanced/aggressive/custom
+ * @param {object} [opts.customConfig] 自定义配置（riskLevel='custom' 时必传）
+ * @param {object} [opts.calibration] loadCalibration() 的返回
+ */
+export function calcRecommendedStake({
+  bankroll,
+  odds,
+  confidence,
+  probability,
+  riskLevel = 'balanced',
+  customConfig = null,
+  calibration = null
+}) {
+  const preset = (riskLevel === 'custom' && customConfig)
+    ? resolveCustomPreset(customConfig)
+    : (PRESETS[riskLevel] || PRESETS.balanced)
+
+  // 概率来源：手动指定优先；否则用校准后的置信度
+  const p = probability != null
+    ? Math.min(Math.max(Number(probability), 0), 0.95)
+    : calibrateProbability(confidence ?? 0, calibration)
+
+  const o = Number(odds)
+  const safeBankroll = Math.max(Number(bankroll) || 0, 0)
+
+  // edge 检查：无正向预期（含赔率无效）时直接 0 注额
+  const edge = p * o - 1
+  const fixed = Math.round(safeBankroll * preset.maxRatio)
+  if (!safeBankroll || !o || o <= 1 || edge <= 0) {
+    return { amount: 0, kelly: 0, fixed, method: '无价值', probability: Number(p.toFixed(3)), edge: Number(edge.toFixed(3)) }
+  }
 
   const kelly = calcKellyStake({
-    bankroll,
-    odds,
-    probability,
+    bankroll: safeBankroll,
+    odds: o,
+    probability: p,
     adjustment: preset.kellyFactor
   })
 
-  const fixed = Math.round(bankroll * preset.maxRatio)
-  const cap = Math.round(bankroll * preset.maxRatio)
-  const amount = Math.min(kelly, fixed, cap)
+  // Kelly 与固定比例上限取小（原 cap 与 fixed 同值，已合并）
+  const amount = Math.min(kelly, fixed)
   const finalAmount = Math.max(amount, 0)
 
   return {
     amount: finalAmount,
     kelly: Math.round(kelly),
     fixed,
-    cap,
-    method: kelly <= fixed ? 'Kelly' : '固定比例'
+    method: kelly <= fixed ? 'Kelly' : '固定比例',
+    probability: Number(p.toFixed(3)),
+    edge: Number(edge.toFixed(3))
   }
 }
 
-export function generateAdvice({ consecutiveWins = 0, consecutiveLosses = 0, drawdown = 0, riskLevel = 'balanced' }) {
-  const preset = getStrategyPreset(riskLevel)
+export function generateAdvice({ consecutiveWins = 0, consecutiveLosses = 0, drawdown = 0, riskLevel = 'balanced', customConfig = null }) {
+  const preset = getStrategyPreset(riskLevel, customConfig)
   let text = ''
   let suggestedLevel = riskLevel
   let warning = false
@@ -86,8 +144,8 @@ export function generateAdvice({ consecutiveWins = 0, consecutiveLosses = 0, dra
   return { text, suggestedLevel, warning }
 }
 
-export function checkRiskStatus({ consecutiveLosses = 0, drawdown = 0, riskLevel = 'balanced' }) {
-  const preset = getStrategyPreset(riskLevel)
+export function checkRiskStatus({ consecutiveLosses = 0, drawdown = 0, riskLevel = 'balanced', customConfig = null }) {
+  const preset = getStrategyPreset(riskLevel, customConfig)
 
   if (consecutiveLosses >= preset.stopLossLimit) {
     return {

@@ -116,6 +116,9 @@
     <!-- 数据查询助手 -->
     <DataQueryFab @open="showQueryPanel = true" />
     <DataQueryPanel :visible="showQueryPanel" @close="showQueryPanel = false" />
+
+    <!-- 快速记录入口 -->
+    <QuickRecordFab />
   </view>
 </template>
 
@@ -129,6 +132,7 @@ import ChartProfit from '@/components/ChartProfit.vue'
 import BetRecordDialog from '@/components/BetRecordDialog.vue'
 import DataQueryFab from '@/components/DataQueryFab.vue'
 import DataQueryPanel from '@/components/DataQueryPanel.vue'
+import QuickRecordFab from '@/components/QuickRecordFab.vue'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
 import { getStrategyPreset, generateAdvice, checkRiskStatus, calcRecommendedStake } from '@/utils/strategyEngine'
 import dayjs from 'dayjs'
@@ -143,8 +147,20 @@ const bankroll = computed(() => betStore.bankroll)
 const targetProgress = computed(() => Math.min(Math.max(statStore.targetProgress, 0), 2))
 const progressWidth = computed(() => `${Math.min(targetProgress.value * 100, 100)}%`)
 
+// 自定义策略配置（仅 custom 模式）
+const customConfig = computed(() => {
+  if (config.riskTolerance !== 'custom') return null
+  return {
+    fixedRatio: config.fixedRatio,
+    kellyFactor: config.kellyFactor,
+    stopLossLimit: config.stopLossLimit,
+    maxDrawdown: config.maxDrawdown,
+    minConfidence: config.minConfidence,
+  }
+})
+
 const strategyLabel = computed(() => {
-  const preset = getStrategyPreset(config.riskTolerance)
+  const preset = getStrategyPreset(config.riskTolerance, customConfig.value)
   return preset.label
 })
 
@@ -152,8 +168,10 @@ const consecutiveWins = computed(() => {
   let streak = 0
   const settled = betStore.bets.filter(b => b.status === 'settled')
   for (const bet of settled) {
-    if (bet.result === 'win') streak++
-    else break
+    const r = bet.result
+    if (r === 'win' || r === 'half-win') streak++
+    else if (r === 'lose' || r === 'half-lose') break
+    // push/走水中性，不累加不中断
   }
   return streak
 })
@@ -162,19 +180,21 @@ const advice = computed(() => generateAdvice({
   consecutiveWins: consecutiveWins.value,
   consecutiveLosses: betStore.consecutiveLosses,
   drawdown: statStore.drawdown,
-  riskLevel: config.riskTolerance
+  riskLevel: config.riskTolerance,
+  customConfig: customConfig.value
 }))
 
 const riskStatus = computed(() => checkRiskStatus({
   consecutiveLosses: betStore.consecutiveLosses,
   drawdown: statStore.drawdown,
-  riskLevel: config.riskTolerance
+  riskLevel: config.riskTolerance,
+  customConfig: customConfig.value
 }))
 
 const stakeRange = computed(() => {
   const b = bankroll.value
-  const low = calcRecommendedStake({ bankroll: b, odds: 1.7, confidence: 60, riskLevel: config.riskTolerance })
-  const high = calcRecommendedStake({ bankroll: b, odds: 2.1, confidence: 75, riskLevel: config.riskTolerance })
+  const low = calcRecommendedStake({ bankroll: b, odds: 1.7, confidence: 60, riskLevel: config.riskTolerance, customConfig: customConfig.value })
+  const high = calcRecommendedStake({ bankroll: b, odds: 2.1, confidence: 75, riskLevel: config.riskTolerance, customConfig: customConfig.value })
   return {
     min: low.amount,
     max: high.amount
@@ -200,13 +220,13 @@ const lossBarWidth = computed(() => {
 })
 
 const drawdownBarWidth = computed(() => {
-  const preset = getStrategyPreset(config.riskTolerance)
+  const preset = getStrategyPreset(config.riskTolerance, customConfig.value)
   const ratio = Math.abs(statStore.drawdown) / Math.abs(preset.maxDrawdown)
   return `${Math.min(ratio * 100, 100)}%`
 })
 
 const drawdownLevel = computed(() => {
-  const preset = getStrategyPreset(config.riskTolerance)
+  const preset = getStrategyPreset(config.riskTolerance, customConfig.value)
   const ratio = Math.abs(statStore.drawdown) / Math.abs(preset.maxDrawdown)
   if (ratio >= 1) return 'danger'
   if (ratio >= 0.6) return 'warning'

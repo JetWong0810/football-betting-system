@@ -1297,6 +1297,33 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
         # 返回实际使用的亚盘盘口值
         if match_info.get("handicap") is not None:
             match_formatted["handicap"] = match_info["handicap"]
+
+        # 保存预测记录(覆盖上次)，供赛后复盘使用
+        prediction = result["prediction"]
+        try:
+            import json as _json
+            from database import get_db as _get_db_pred
+            with _get_db_pred() as _conn_pred:
+                _conn_pred.cursor().execute("""
+                    INSERT INTO prediction_history
+                        (match_id, predict_type, direction, confidence, overall_reverse, handicap, factors_json, analysis)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        direction=VALUES(direction), confidence=VALUES(confidence),
+                        overall_reverse=VALUES(overall_reverse), handicap=VALUES(handicap),
+                        factors_json=VALUES(factors_json), analysis=VALUES(analysis),
+                        predicted_at=CURRENT_TIMESTAMP
+                """, (
+                    match_id, "normal", prediction.get("direction", "neutral"),
+                    prediction.get("confidence", 50),
+                    1 if prediction.get("overall_reverse") else 0,
+                    match_info.get("handicap"),
+                    _json.dumps(result["factors"], ensure_ascii=False),
+                    prediction.get("analysis", ""),
+                ))
+        except Exception as save_err:
+            logger.warning(f"[predict] 保存预测记录失败: {save_err}")
+
         return {
             "match": match_formatted,
             "factors": result["factors"],
@@ -1669,6 +1696,264 @@ def list_result_dates():
             dates.append({"date": sale_date, "count": r["cnt"]})
 
     return {"dates": dates}
+
+
+# ========== 复盘模块 ==========
+
+def _actual_cover(home_score, away_score, handicap):
+    """返回实际赢盘方向: 'upper'/'lower'/'push'。
+    系统盘口约定：负值=主队让球(主队=上盘)，正值=客队让球(客队=上盘)。
+    与 backtest.py 的 actual_cover 一致。"""
+    adjusted = (home_score - away_score) + float(handicap)
+    if abs(adjusted) < 1e-9:
+        return "push"
+    if float(handicap) <= 0:
+        return "upper" if adjusted > 0 else "lower"
+    else:
+        return "lower" if adjusted > 0 else "upper"
+
+
+@app.get("/api/review/{match_id}")
+def get_review(match_id: str):
+    """单场复盘：预测 vs 实际结果，含各因子事后判定"""
+    import time as _time
+    import json as _json
+    from database import get_db as _get_db
+
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+
+    # 比分回填：已结束但DB无比分时，从500.com抓取
+    ts = match.get("match_timestamp")
+    is_finished = ts and ts < int(_time.time())
+    if is_finished and match.get("home_score") is None:
+        try:
+            from repository import derive_sale_date
+            from odds500_service import fetch_match_score
+            sale_date = derive_sale_date(match) or match.get("match_date")
+            mcode = match.get("match_code")
+            if sale_date and mcode:
+                score = fetch_match_score(sale_date, mcode)
+                if score:
+                    match["home_score"], match["away_score"] = score[0], score[1]
+                    with _get_db() as _conn:
+                        _conn.cursor().execute(
+                            "UPDATE matches SET home_score=%s, away_score=%s, match_status='finished' "
+                            "WHERE match_id=%s", (score[0], score[1], match_id))
+        except Exception as e:
+            logger.warning(f"[review] 比分回填失败: {e}")
+
+    # 读取预测记录（优先 normal，回退 worldcup）
+    with _get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT predict_type, direction, confidence, overall_reverse,
+                   handicap, factors_json, analysis, predicted_at
+            FROM prediction_history
+            WHERE match_id = %s
+            ORDER BY FIELD(predict_type, 'normal', 'worldcup')
+            LIMIT 1
+        """, (match_id,))
+        pred = cur.fetchone()
+
+    if not pred:
+        return {
+            "match": format_match(match),
+            "prediction": None,
+            "actual": None,
+            "factorVerdict": [],
+            "odds": repo.get_wdl_odds(match_id),
+            "hasPrediction": False,
+        }
+
+    pred_handicap = float(pred["handicap"]) if pred["handicap"] is not None else None
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+
+    # 实际方向与命中判定
+    actual = None
+    if home_score is not None and away_score is not None and pred_handicap is not None:
+        actual_dir = _actual_cover(home_score, away_score, pred_handicap)
+        pred_dir = pred["direction"]
+        if actual_dir == "push" or pred_dir == "neutral":
+            hit = None
+        else:
+            hit = (pred_dir == actual_dir)
+        actual = {
+            "direction": actual_dir,
+            "homeScore": home_score,
+            "awayScore": away_score,
+            "hit": hit,
+        }
+    elif home_score is not None and away_score is not None:
+        actual = {
+            "direction": None,
+            "homeScore": home_score,
+            "awayScore": away_score,
+            "hit": None,
+        }
+
+    # 各因子事后判定
+    factor_verdict = []
+    factors = _json.loads(pred["factors_json"]) if pred["factors_json"] else []
+    actual_dir = actual["direction"] if actual else None
+    for f in factors:
+        fdir = f.get("direction")
+        if actual_dir is None or actual_dir == "push" or fdir == "neutral" or not fdir:
+            correct = None
+        else:
+            correct = (fdir == actual_dir)
+        factor_verdict.append({
+            "name": f.get("name"),
+            "direction": fdir,
+            "score": f.get("score"),
+            "correct": correct,
+            "reason": f.get("reason"),
+        })
+
+    return {
+        "match": format_match(match),
+        "prediction": {
+            "direction": pred["direction"],
+            "confidence": pred["confidence"],
+            "overallReverse": bool(pred["overall_reverse"]),
+            "handicap": pred_handicap,
+            "factors": factors,
+            "analysis": pred["analysis"],
+            "predictedAt": str(pred["predicted_at"]),
+            "predictType": pred["predict_type"],
+        },
+        "actual": actual,
+        "factorVerdict": factor_verdict,
+        "odds": repo.get_wdl_odds(match_id),
+        "hasPrediction": True,
+    }
+
+
+@app.get("/api/review-stats")
+def get_review_stats(days: int = 30, predict_type: str = "normal"):
+    """聚合预测准确率：按置信度/因子/逆向分层"""
+    import time as _time
+    import json as _json
+    from database import get_db as _get_db
+
+    since_ts = int(_time.time()) - days * 86400
+
+    with _get_db() as conn:
+        cur = conn.cursor()
+        if predict_type == "all":
+            cur.execute("""
+                SELECT p.match_id, p.direction, p.confidence, p.overall_reverse,
+                       p.handicap, p.factors_json, p.predicted_at,
+                       m.home_score, m.away_score
+                FROM prediction_history p
+                JOIN matches m ON m.match_id = p.match_id
+                WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+                  AND p.predicted_at >= FROM_UNIXTIME(%s)
+            """, (since_ts,))
+        else:
+            cur.execute("""
+                SELECT p.match_id, p.direction, p.confidence, p.overall_reverse,
+                       p.handicap, p.factors_json, p.predicted_at,
+                       m.home_score, m.away_score
+                FROM prediction_history p
+                JOIN matches m ON m.match_id = p.match_id
+                WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+                  AND p.predict_type = %s
+                  AND p.predicted_at >= FROM_UNIXTIME(%s)
+            """, (predict_type, since_ts))
+        rows = cur.fetchall()
+
+    total = len(rows)
+    hit = miss = push = neutral = 0
+    by_confidence = {"35-39": [0, 0], "40-49": [0, 0], "50-59": [0, 0], "60+": [0, 0]}
+    by_factor = {}
+    by_reverse = {"triggered": [0, 0], "normal": [0, 0]}
+
+    for r in rows:
+        hs, as_ = r["home_score"], r["away_score"]
+        hcap = r["handicap"]
+        pdir = r["direction"]
+        conf = r["confidence"] or 50
+
+        if hcap is None:
+            continue
+
+        actual_dir = _actual_cover(hs, as_, hcap)
+        if actual_dir == "push" or pdir == "neutral":
+            push += 1
+            is_hit = None
+        else:
+            is_hit = (pdir == actual_dir)
+            if is_hit:
+                hit += 1
+            else:
+                miss += 1
+
+        # 置信度分桶
+        if conf >= 60:
+            bucket = "60+"
+        elif conf >= 50:
+            bucket = "50-59"
+        elif conf >= 40:
+            bucket = "40-49"
+        else:
+            bucket = "35-39"
+        if is_hit is not None:
+            by_confidence[bucket][0] += 1
+            if is_hit:
+                by_confidence[bucket][1] += 1
+
+        # 整体逆向分桶
+        rev_key = "triggered" if r["overall_reverse"] else "normal"
+        if is_hit is not None:
+            by_reverse[rev_key][0] += 1
+            if is_hit:
+                by_reverse[rev_key][1] += 1
+
+        # 各因子分桶
+        factors = _json.loads(r["factors_json"]) if r["factors_json"] else []
+        for f in factors:
+            fname = f.get("name")
+            fdir = f.get("direction")
+            if not fname:
+                continue
+            if fname not in by_factor:
+                by_factor[fname] = [0, 0]
+            if is_hit is None or fdir == "neutral" or not fdir:
+                continue
+            by_factor[fname][0] += 1
+            if fdir == actual_dir:
+                by_factor[fname][1] += 1
+
+    def rate(t):
+        return round(t[1] / t[0], 4) if t[0] else None
+
+    return {
+        "total": total,
+        "hit": hit,
+        "miss": miss,
+        "push": push,
+        "neutral": neutral,
+        "hitRate": round(hit / (hit + miss), 4) if (hit + miss) else None,
+        "byConfidence": [
+            {"band": b, "total": by_confidence[b][0], "hit": by_confidence[b][1],
+             "hitRate": rate(by_confidence[b])}
+            for b in ["35-39", "40-49", "50-59", "60+"]
+        ],
+        "byFactor": [
+            {"name": n, "total": by_factor[n][0], "hit": by_factor[n][1],
+             "hitRate": rate(by_factor[n])}
+            for n in by_factor
+        ],
+        "byReverse": {
+            "triggered": {"total": by_reverse["triggered"][0], "hit": by_reverse["triggered"][1],
+                          "hitRate": rate(by_reverse["triggered"])},
+            "normal": {"total": by_reverse["normal"][0], "hit": by_reverse["normal"][1],
+                       "hitRate": rate(by_reverse["normal"])},
+        },
+    }
 
 
 class NLQueryRequest(BaseModel):

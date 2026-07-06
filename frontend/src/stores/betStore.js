@@ -48,8 +48,8 @@ export const useBetStore = defineStore("bet", () => {
   const totalProfit = computed(() => bets.value.filter((bet) => bet.status === "settled").reduce((sum, bet) => sum + Number(bet.profit || 0), 0));
 
   // 统计胜负场次（只统计已结算的）
-  const winCount = computed(() => bets.value.filter((bet) => bet.status === "settled" && bet.result === "win").length);
-  const loseCount = computed(() => bets.value.filter((bet) => bet.status === "settled" && bet.result === "lose").length);
+  const winCount = computed(() => bets.value.filter((bet) => bet.status === "settled" && (bet.result === "win" || bet.result === "half-win")).length);
+  const loseCount = computed(() => bets.value.filter((bet) => bet.status === "settled" && (bet.result === "lose" || bet.result === "half-lose")).length);
 
   // 胜率计算（只统计已结算的）
   const winningRate = computed(() => {
@@ -58,18 +58,22 @@ export const useBetStore = defineStore("bet", () => {
     return winCount.value / settledBets.length;
   });
 
+  // 统计当前连败场次（只统计已结算的，从最近一场往前数）
+  // half-lose 计为败（半输），half-win 计为胜（半赢）会中断连败，走水中性不累加
   const consecutiveLosses = computed(() => {
-    let streak = 0;
-    const settledBets = bets.value.filter((bet) => bet.status === "settled");
+    let streak = 0
+    const settledBets = bets.value.filter((bet) => bet.status === "settled")
     for (const bet of settledBets) {
-      if (bet.result === "lose") {
-        streak += 1;
-      } else if (bet.result === "win") {
-        break;
+      const r = bet.result
+      if (r === "lose" || r === "half-lose") {
+        streak += 1
+      } else if (r === "win" || r === "half-win") {
+        break
       }
+      // push/走水：中性，不累加也不中断
     }
-    return streak;
-  });
+    return streak
+  })
 
   // 当前余额 = 初始资金 + 已结算盈亏 - 投注中金额
   const bankroll = computed(() => {
@@ -147,6 +151,10 @@ export const useBetStore = defineStore("bet", () => {
     // 提取需要存储在 bet_data JSON 中的字段
     const betData = {
       id: bet.id, // 保留前端生成的ID（用于临时标识）
+      matchId: bet.matchId || null, // 关联比赛ID（来自预测页预填），用于结算闭环
+      predictedDirection: bet.predictedDirection || null, // 预测方向 upper/lower
+      predictionHit: bet.predictionHit === undefined ? null : bet.predictionHit, // 结算时回写：预测是否命中
+      actualDirection: bet.actualDirection || null, // 结算时回写：实际盘路方向
       matchName: bet.matchName,
       league: bet.league,
       betType: bet.betType,
@@ -463,6 +471,7 @@ export const useBetStore = defineStore("bet", () => {
 
   /**
    * 将投注记录从"投注中"结算（异步，保存到数据库）
+   * 若记录关联了比赛（matchId），自动调复盘接口回写预测命中信息
    */
   async function settleBet(id, result) {
     const bet = bets.value.find((b) => b.id === id);
@@ -473,10 +482,29 @@ export const useBetStore = defineStore("bet", () => {
       throw new Error("只能结算投注中的记录");
     }
 
-    await updateBet(id, {
+    const payload = {
       status: "settled",
       result: result || bet.result,
-    });
+    };
+
+    // 关联了比赛时，拉取复盘结果回写预测命中信息
+    if (bet.matchId) {
+      try {
+        const review = await request({
+          url: `/api/review/${bet.matchId}`,
+          method: "GET",
+        });
+        if (review && review.actual) {
+          payload.actualDirection = review.actual.direction || null;
+          payload.predictionHit = review.actual.hit; // true/false/null
+        }
+      } catch (e) {
+        // 复盘信息为可选附属，失败不阻塞结算
+        console.warn("结算时拉取复盘失败:", e);
+      }
+    }
+
+    await updateBet(id, payload);
   }
 
   /**

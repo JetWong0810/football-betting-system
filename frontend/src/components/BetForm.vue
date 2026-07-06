@@ -203,6 +203,8 @@ const getCurrentDate = () => dayjs().format("YYYY-MM-DD");
 
 const form = reactive({
   id: "",
+  matchId: "",
+  predictedDirection: "",
   stake: null,
   odds: null,
   result: "pending",
@@ -495,6 +497,8 @@ function createLeg(overrides = {}) {
 
 function hydrate(bet) {
   form.id = bet.id;
+  form.matchId = bet.matchId || "";
+  form.predictedDirection = bet.predictedDirection || "";
   form.stake = Number(bet.stake || 0);
   form.odds = Number(bet.odds || 1);
   form.result = bet.result || "pending";
@@ -566,6 +570,8 @@ function fillFromOcr(data) {
 function fillFromPredict(data) {
   if (!data) return;
   form.id = "";
+  form.matchId = data.matchId || "";
+  form.predictedDirection = data.predictedDirection || "";
   form.result = "pending";
   form.betTime = dayjs().format("YYYY-MM-DD HH:mm");
   form.stake = data.recommendedStake || null;
@@ -768,6 +774,8 @@ function normalizePayload(status) {
   const finalStatus = form.result && form.result !== "pending" ? "settled" : status;
   return {
     id: form.id || undefined,
+    matchId: form.matchId || undefined,
+    predictedDirection: form.predictedDirection || undefined,
     wagerType: form.legs.length > 1 ? "parlay" : "single",
     stake: form.stake ? Number(form.stake) : 0,
     odds: form.odds ? Number(form.odds) : 0,
@@ -784,6 +792,8 @@ function normalizePayload(status) {
 
 function reset() {
   form.id = "";
+  form.matchId = "";
+  form.predictedDirection = "";
   form.stake = null;
   form.odds = null;
   form.result = "pending";

@@ -77,9 +77,25 @@
       }
     },
     {
+      "path": "pages/review/detail",
+      "style": {
+        "navigationBarTitleText": "赛事复盘",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/profile/profile",
       "style": {
         "navigationBarTitleText": "我的",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/profile/edit",
+      "style": {
+        "navigationBarTitleText": "个人资料",
         "navigationBarBackgroundColor": "#0d9488",
         "navigationBarTextStyle": "white"
       }

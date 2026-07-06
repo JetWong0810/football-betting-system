@@ -49,25 +49,37 @@ export const useStatStore = defineStore('stats', () => {
     })
   })
 
+  // 按投注时间正序（旧→新）排列的已结算投注，用于时序类统计
+  const chronologicalSettled = computed(() =>
+    betStore.bets
+      .filter(bet => bet.status === 'settled')
+      .slice()
+      .sort((a, b) => String(a.betTime || '').localeCompare(String(b.betTime || '')))
+  )
+
   const maxConsecutiveLoss = computed(() => {
     let current = 0
     let max = 0
-    betStore.bets.forEach(bet => {
-      if (bet.result === 'lose') {
+    chronologicalSettled.value.forEach(bet => {
+      const r = bet.result
+      if (r === 'lose' || r === 'half-lose') {
         current += 1
         max = Math.max(max, current)
-      } else if (bet.result === 'win') {
+      } else if (r === 'win' || r === 'half-win') {
+        // 任何赢（含半赢）都中断连败
         current = 0
       }
+      // push/走水：中性，不累加也不重置
     })
     return max
   })
 
   const drawdown = computed(() => {
+    // 必须按时间正序计算权益曲线，否则 peak-to-trough 会算反
     let peak = Number(configStore.startingCapital)
     let maxDd = 0
     let equity = peak
-    betStore.bets.forEach(bet => {
+    chronologicalSettled.value.forEach(bet => {
       equity += Number(bet.profit)
       if (equity > peak) {
         peak = equity

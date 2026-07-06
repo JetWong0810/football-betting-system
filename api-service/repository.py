@@ -76,7 +76,12 @@ class OddsRepository:
         columns = ", ".join(fields)
         values = [match.get(f) for f in fields]
         placeholders = ", ".join([PLACEHOLDER] * len(fields))
-        update_placeholders = ", ".join([f"{f}=VALUES({f})" for f in fields if f != "match_id"])
+        # is_single 只升不降：单关是历史事实，停售后API返回0时不回退
+        update_placeholders = ", ".join(
+            "is_single=IF(VALUES(is_single)=1,1,is_single)" if f == "is_single"
+            else f"{f}=VALUES({f})"
+            for f in fields if f != "match_id"
+        )
         sql = f"""
             INSERT INTO matches ({columns}) VALUES ({placeholders})
             ON DUPLICATE KEY UPDATE {update_placeholders}, updated_at = CURRENT_TIMESTAMP
@@ -102,7 +107,7 @@ class OddsRepository:
                 win_support=VALUES(win_support),
                 draw_support=VALUES(draw_support),
                 lose_support=VALUES(lose_support),
-                is_single=VALUES(is_single),
+                is_single=IF(VALUES(is_single)=1,1,is_single),
                 updated_at=CURRENT_TIMESTAMP
         """
         

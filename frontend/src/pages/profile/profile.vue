@@ -148,7 +148,7 @@ function goToLogin() {
 }
 
 function handleEditProfile() {
-  uni.showToast({ title: "功能开发中", icon: "none" });
+  uni.navigateTo({ url: "/pages/profile/edit" });
 }
 
 function handleHelp() {

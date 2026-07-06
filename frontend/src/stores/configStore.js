@@ -4,6 +4,13 @@ import { request } from '@/utils/http'
 
 const STORAGE_KEY = 'frbt-config'
 
+// 与 strategyEngine.js 的 PRESETS 保持一致（避免循环依赖，这里内联）
+const PRESET_DEFAULTS = {
+  conservative: { minConfidence: 70, maxDrawdown: -0.10 },
+  balanced: { minConfidence: 60, maxDrawdown: -0.15 },
+  aggressive: { minConfidence: 50, maxDrawdown: -0.25 },
+}
+
 export const useConfigStore = defineStore('config', () => {
   const startingCapital = ref(10000)
   const fixedRatio = ref(0.03)
@@ -12,7 +19,20 @@ export const useConfigStore = defineStore('config', () => {
   const targetMonthlyReturn = ref(0.1)
   const theme = ref('light')
   const riskTolerance = ref('balanced')
+  // minConfidence / maxDrawdown 仅前端持久化（后端 user_configs 暂无对应列）
+  const minConfidence = ref(60)
+  const maxDrawdown = ref(-0.15)
   const loading = ref(false)
+
+  // 命名预设切换时，用预设默认值同步 minConfidence/maxDrawdown；custom 模式保留用户值
+  function syncPresetDefaults() {
+    if (riskTolerance.value === 'custom') return
+    const d = PRESET_DEFAULTS[riskTolerance.value]
+    if (d) {
+      minConfidence.value = d.minConfidence
+      maxDrawdown.value = d.maxDrawdown
+    }
+  }
 
   function hasAuthToken() {
     return !!uni.getStorageSync('token')
@@ -43,6 +63,8 @@ export const useConfigStore = defineStore('config', () => {
         theme.value = config.theme || theme.value
         riskTolerance.value = config.risk_tolerance || riskTolerance.value
       }
+      // 命名预设下，minConfidence/maxDrawdown 由预设派生；自定义模式保留本地值
+      syncPresetDefaults()
     } catch (error) {
       console.error('加载用户配置失败:', error)
       // 如果加载失败，尝试从本地存储加载（兼容旧数据）
@@ -65,7 +87,10 @@ export const useConfigStore = defineStore('config', () => {
       targetMonthlyReturn.value = Number(cache.targetMonthlyReturn ?? targetMonthlyReturn.value)
       theme.value = cache.theme || theme.value
       riskTolerance.value = cache.riskTolerance || riskTolerance.value
+      if (cache.minConfidence != null) minConfidence.value = Number(cache.minConfidence)
+      if (cache.maxDrawdown != null) maxDrawdown.value = Number(cache.maxDrawdown)
     }
+    syncPresetDefaults()
   }
 
   /**
@@ -111,7 +136,9 @@ export const useConfigStore = defineStore('config', () => {
       stopLossLimit: stopLossLimit.value,
       targetMonthlyReturn: targetMonthlyReturn.value,
       theme: theme.value,
-      riskTolerance: riskTolerance.value
+      riskTolerance: riskTolerance.value,
+      minConfidence: minConfidence.value,
+      maxDrawdown: maxDrawdown.value
     })
   }
 
@@ -133,7 +160,11 @@ export const useConfigStore = defineStore('config', () => {
     if (payload.targetMonthlyReturn !== undefined) targetMonthlyReturn.value = Number(payload.targetMonthlyReturn)
     if (payload.theme) theme.value = payload.theme
     if (payload.riskTolerance) riskTolerance.value = payload.riskTolerance
-    
+    if (payload.minConfidence !== undefined) minConfidence.value = Number(payload.minConfidence)
+    if (payload.maxDrawdown !== undefined) maxDrawdown.value = Number(payload.maxDrawdown)
+    // 命名预设切换时同步 minConfidence/maxDrawdown 默认值
+    if (payload.riskTolerance && payload.riskTolerance !== 'custom') syncPresetDefaults()
+
     // 保存到后端（如果已登录）或本地（如果未登录）
     await saveToServer()
   }
@@ -146,6 +177,8 @@ export const useConfigStore = defineStore('config', () => {
     targetMonthlyReturn,
     theme,
     riskTolerance,
+    minConfidence,
+    maxDrawdown,
     loading,
     bootstrap,
     updateConfig,

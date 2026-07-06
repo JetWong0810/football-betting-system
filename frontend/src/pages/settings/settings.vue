@@ -153,7 +153,10 @@ watch(
     form.targetMonthlyReturn = Number(value.targetMonthlyReturn) * 100;
     form.riskLevel = value.riskTolerance || 'balanced';
     const preset = getStrategyPreset(form.riskLevel);
-    form.minConfidence = preset.minConfidence;
+    // 自定义模式保留用户已设置的 minConfidence；命名预设用预设值
+    form.minConfidence = form.riskLevel === 'custom'
+      ? (config.minConfidence || preset.minConfidence)
+      : preset.minConfidence;
   },
   { immediate: true }
 );
@@ -167,6 +170,7 @@ async function handleSave() {
       stopLossLimit: form.stopLossLimit,
       targetMonthlyReturn: form.targetMonthlyReturn / 100,
       riskTolerance: form.riskLevel,
+      minConfidence: form.minConfidence,
     });
     uni.showToast({ title: "已保存", icon: "success" });
   } catch (error) {

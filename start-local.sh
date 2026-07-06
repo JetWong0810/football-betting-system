@@ -83,7 +83,6 @@ stop_all() {
     lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     
     print_message "$GREEN" "所有服务已停止"
-    exit 0
 }
 
 # Function: Check if port is in use
@@ -220,14 +219,17 @@ main() {
     case "${1:-}" in
         --stop)
             stop_all
+            exit 0
             ;;
         --status)
             show_status
+            exit 0
             ;;
         --restart)
             stop_all
             sleep 2
-            main
+            # 重新以默认（启动）模式调用，不走 stop 分支
+            main ""
             ;;
         *)
             print_message "$GREEN" "========================================="

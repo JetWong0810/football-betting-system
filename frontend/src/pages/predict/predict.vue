@@ -182,6 +182,9 @@
             </view>
             <view class="advice-detail">
               <text>Kelly ¥{{ recommendedStake.kelly }} / 固定 ¥{{ recommendedStake.fixed }}，取{{ recommendedStake.method }}</text>
+              <text class="advice-prob" v-if="recommendedStake.probability">
+                校准概率 {{ Math.round(recommendedStake.probability * 100) }}% · 预期 {{ (recommendedStake.edge * 100).toFixed(1) }}%
+              </text>
             </view>
           </view>
 
@@ -310,6 +313,7 @@ import { request } from '@/utils/http'
 import { useConfigStore } from '@/stores/configStore'
 import { useBetStore } from '@/stores/betStore'
 import { calcRecommendedStake, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
+import { loadCalibration } from '@/utils/calibration'
 
 const matchStatus = ref('not_started')
 const selectedMatch = ref(null)
@@ -332,26 +336,59 @@ const customStake = ref(null)
 const configStore = useConfigStore()
 const betStore = useBetStore()
 
-const bankroll = computed(() => {
-  const val = Number(configStore.startingCapital) + Number(betStore.totalProfit)
-  return Math.max(0, Math.round(val))
+// 可用余额：用 betStore.bankroll（已扣除投注中金额），避免推荐超额
+const bankroll = computed(() => Math.max(0, Math.round(betStore.bankroll)))
+
+// 校准数据（历史命中率分桶），用于把置信度校准为真实概率
+const calibrationData = ref(null)
+
+// 自定义策略配置（仅当 riskTolerance==='custom' 时使用）
+const customConfig = computed(() => {
+  if (configStore.riskTolerance !== 'custom') return null
+  return {
+    fixedRatio: configStore.fixedRatio,
+    kellyFactor: configStore.kellyFactor,
+    stopLossLimit: configStore.stopLossLimit,
+    maxDrawdown: configStore.maxDrawdown,
+    minConfidence: configStore.minConfidence,
+  }
 })
 
 const currentStrategyLabel = computed(() => {
-  const preset = getStrategyPreset(configStore.riskTolerance)
+  const preset = getStrategyPreset(configStore.riskTolerance, customConfig.value)
   return preset.label
 })
 
+/**
+ * 根据预测方向 + 亚盘盘口符号，从竞彩让球胜平负赔率取对应方向的真实投注赔率。
+ * 系统盘口约定：负值=主队让球(主队=上盘)，正值=客队让球(客队=上盘)。
+ */
+function computeBetOdds() {
+  const dir = prediction.value.direction
+  const hcap = selectedMatch.value?.handicap
+  const hhad = selectedMatch.value?.wdl?.hhad
+  if (!dir || dir === 'neutral' || hcap == null || !hhad) return null
+  const winO = Number(hhad.win_odds)
+  const loseO = Number(hhad.lose_odds)
+  if (!winO || !loseO) return null
+  const homeLet = Number(hcap) < 0 // 主队让球=主队上盘
+  if (dir === 'upper') return homeLet ? winO : loseO
+  return homeLet ? loseO : winO
+}
+
 const recommendedStake = computed(() => {
   if (!analysisComplete.value || !prediction.value.confidence) {
-    return { amount: 0, kelly: 0, fixed: 0, method: '-' }
+    return { amount: 0, kelly: 0, fixed: 0, method: '-', probability: 0, edge: 0 }
   }
-  const odds = selectedMatch.value?.handicap != null ? 1.9 : 1.85
+  // 真实赔率优先；缺失时回退到亚盘水位常见值 1.90
+  const odds = computeBetOdds() || (selectedMatch.value?.handicap != null ? 1.9 : 1.85)
   return calcRecommendedStake({
     bankroll: bankroll.value,
     odds,
     confidence: prediction.value.confidence,
-    riskLevel: configStore.riskTolerance
+    riskLevel: configStore.riskTolerance,
+    customConfig: customConfig.value,
+    calibration: calibrationData.value,
   })
 })
 
@@ -363,20 +400,32 @@ const confidenceClass = computed(() => {
 })
 
 const riskWarning = computed(() => {
-  const preset = getStrategyPreset(configStore.riskTolerance)
+  const preset = getStrategyPreset(configStore.riskTolerance, customConfig.value)
   const warnings = []
   if (prediction.value.confidence < preset.minConfidence) {
     warnings.push(`置信度${prediction.value.confidence}%低于策略门槛${preset.minConfidence}%，建议减小投注或跳过`)
   }
+  // 无正预期（edge<=0）时给出明确提示
+  if (recommendedStake.value.edge != null && recommendedStake.value.edge <= 0) {
+    warnings.push('校准概率×赔率无正向预期，建议跳过本场')
+  }
   const status = checkRiskStatus({
     consecutiveLosses: betStore.consecutiveLosses,
     drawdown: 0,
-    riskLevel: configStore.riskTolerance
+    riskLevel: configStore.riskTolerance,
+    customConfig: customConfig.value,
   })
   if (!status.safe) {
     warnings.push(status.reason + '，' + status.suggestedAction)
   }
   return warnings.join('；')
+})
+
+// 预测完成后异步加载校准数据，让 recommendedStake 用上命中率校准
+watch(analysisComplete, async (v) => {
+  if (v && !calibrationData.value) {
+    calibrationData.value = await loadCalibration()
+  }
 })
 
 onLoad((query) => {
@@ -681,6 +730,7 @@ function betWithAdvice() {
   if (!match) return
   const stake = customStake.value || recommendedStake.value.amount
   const data = {
+    matchId: match.matchId,
     matchName: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
     league: match.league,
     homeTeam: match.homeTeam.name,

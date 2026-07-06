@@ -13,6 +13,14 @@
       </view>
 
       <scroll-view class="dialog-body" scroll-y>
+        <!-- 结算时预测对比提示 -->
+        <view
+          v-if="isEditingBetting && settleHint"
+          class="settle-hint"
+          :class="settleHint.cls"
+        >
+          <text class="settle-hint-text">{{ settleHint.text }}</text>
+        </view>
         <BetForm ref="betFormRef" :editing-bet="editingBet" :is-editing-betting="isEditingBetting" :hide-submit-button="true" :ocr-loading="ocrLoading" @submit="handleSubmit" @cancelEdit="handleCancelEdit" />
       </scroll-view>
 
@@ -69,10 +77,39 @@ const emit = defineEmits(["update:visible", "success"]);
 
 const betFormRef = ref(null);
 const ocrLoading = ref(false);
+const settleHint = ref(null);
 
 const isEditingBetting = computed(() => {
   return props.settleMode && props.editingBet && props.editingBet.status === "betting";
 });
+
+const DIR_LABEL = { upper: "上盘", lower: "下盘", push: "走水", neutral: "中性" };
+
+async function loadSettleHint(bet) {
+  settleHint.value = null;
+  if (!bet || !bet.matchId) return;
+  try {
+    const review = await request({ url: `/api/review/${bet.matchId}`, method: "GET" });
+    if (!review || !review.prediction) return;
+    const predDir = review.prediction.direction;
+    const actual = review.actual;
+    if (!actual || actual.direction == null) {
+      settleHint.value = {
+        text: `预测：${DIR_LABEL[predDir] || predDir} · 比赛未完赛或无比分`,
+        cls: "hint-pending",
+      };
+      return;
+    }
+    const hitText = actual.hit === true ? "命中" : actual.hit === false ? "未中" : "走水";
+    const cls = actual.hit === true ? "hint-hit" : actual.hit === false ? "hint-miss" : "hint-pending";
+    settleHint.value = {
+      text: `预测：${DIR_LABEL[predDir] || predDir} · 实际：${DIR_LABEL[actual.direction] || actual.direction} · ${hitText}`,
+      cls,
+    };
+  } catch (e) {
+    // 静默失败，不影响结算
+  }
+}
 
 watch(
   () => props.visible,
@@ -85,6 +122,11 @@ watch(
           betStore.predictPrefill = null;
         }
       });
+    }
+    if (visible && isEditingBetting.value) {
+      loadSettleHint(props.editingBet);
+    } else if (!visible) {
+      settleHint.value = null;
     }
   }
 );
@@ -416,6 +458,38 @@ defineExpose({
   padding: 24rpx;
   overflow-y: auto;
   box-sizing: border-box;
+}
+
+.settle-hint {
+  padding: 14rpx 20rpx;
+  border-radius: 8rpx;
+  margin-bottom: 16rpx;
+  border-left: 6rpx solid #d1d5db;
+  background: #f9fafb;
+}
+
+.settle-hint-text {
+  font-size: 24rpx;
+  color: #374151;
+  font-weight: 500;
+}
+
+.settle-hint.hint-hit {
+  border-left-color: #059669;
+  background: #ecfdf5;
+  .settle-hint-text { color: #059669; }
+}
+
+.settle-hint.hint-miss {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+  .settle-hint-text { color: #dc2626; }
+}
+
+.settle-hint.hint-pending {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+  .settle-hint-text { color: #b45309; }
 }
 
 .dialog-footer {
