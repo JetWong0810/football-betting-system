@@ -119,6 +119,11 @@
                   </view>
                   <text class="bet-amount" v-if="bet.stake">¥{{ bet.stake }}</text>
                 </view>
+                <view class="bet-card-settled-row" v-if="bet.status === 'settled' && bet.profit != null">
+                  <text class="settled-profit" :class="{ win: Number(bet.profit) > 0, lose: Number(bet.profit) < 0 }">
+                    {{ Number(bet.profit) > 0 ? '+' : '' }}¥{{ parseFloat(Number(bet.profit).toFixed(2)) }}
+                  </text>
+                </view>
                 <view class="bet-card-actions" v-if="bet.status === 'betting'">
                   <text class="act-link settle" @tap.stop="() => startSettle(bet)">结算</text>
                   <text class="act-link edit" @tap.stop="() => startEdit(bet)">编辑</text>
@@ -879,6 +884,25 @@ function getParlayTypeLabel(b) {
   font-size: 28rpx;
   font-weight: 700;
   color: #1f2937;
+}
+
+.bet-card-settled-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12rpx;
+}
+
+.settled-profit {
+  font-size: 28rpx;
+  font-weight: 700;
+
+  &.win {
+    color: #10b981;
+  }
+
+  &.lose {
+    color: #ef4444;
+  }
 }
 
 .act-link {

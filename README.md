@@ -7,7 +7,7 @@
 ```
 用户 → https://fc.jetwong.top
        ↓
-VPS nginx → SSH 隧道 → 内网服务器 (mysql-backup)
+Cloudflare 边缘 → cloudflared 出站隧道 → 内网服务器 (mysql-backup)
        ↓
 ┌─────────────────────────────────────────────────────┐
 │  Docker Compose (football-net)                      │
@@ -48,7 +48,7 @@ bash deploy/deploy-remote.sh
 | 后端 | FastAPI + PyMySQL |
 | 数据库 | MySQL 8.0 |
 | 数据源 | 中国体育彩票 Sporttery API |
-| 部署 | Docker Compose + SSH 隧道 + Nginx |
+| 部署 | Docker Compose + Cloudflare Tunnel |
 
 ## 目录结构
 
@@ -61,12 +61,14 @@ bash deploy/deploy-remote.sh
 │   ├── deploy-remote.sh
 │   └── ...
 ├── docs/                 # 文档
-│   ├── deploy.md         # 部署指南
-│   └── ocr-feature.md   # OCR 功能说明
+│   ├── deploy.md              # 部署指南
+│   ├── cloudflare-tunnel.md   # Cloudflare Tunnel 公网接入
+│   └── ocr-feature.md         # OCR 功能说明
 └── start-local.sh        # 本地开发启动脚本
 ```
 
 ## 文档
 
 - [部署指南](./docs/deploy.md) — 服务器部署、管理、故障排查
+- [Cloudflare Tunnel](./docs/cloudflare-tunnel.md) — 公网接入（替代旧 VPS 穿透方案）
 - [OCR 功能](./docs/ocr-feature.md) — 投注截图识别功能说明

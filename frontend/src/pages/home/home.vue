@@ -207,9 +207,11 @@ const weekStats = computed(() => {
     (b.status === 'betting' || b.status === 'settled') &&
     dayjs(b.betTime).format('YYYY-MM-DD') >= startOfWeek
   )
+  const stake = thisWeek.reduce((s, b) => s + Number(b.stake || 0), 0)
+  const profit = thisWeek.filter(b => b.status === 'settled').reduce((s, b) => s + Number(b.profit || 0), 0)
   return {
-    stake: thisWeek.reduce((s, b) => s + Number(b.stake || 0), 0),
-    profit: thisWeek.filter(b => b.status === 'settled').reduce((s, b) => s + Number(b.profit || 0), 0),
+    stake: parseFloat(stake.toFixed(2)),
+    profit: parseFloat(profit.toFixed(2)),
     count: thisWeek.length
   }
 })
