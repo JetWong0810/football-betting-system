@@ -65,7 +65,8 @@
               <text class="filter-tab" :class="{ active: betFilter === 'unsettled' }" @tap="betFilter = 'unsettled'">未结算</text>
               <text class="filter-tab" :class="{ active: betFilter === 'settled' }" @tap="betFilter = 'settled'">已结算</text>
             </view>
-            <text class="add-link" @tap="showFormDialog">+ 新增</text>
+            <text v-if="!controlStore.isPaused" class="add-link" @tap="showFormDialog">+ 新增</text>
+            <text v-else class="add-link" style="color:#9ca3af;">已暂停</text>
           </view>
 
           <view v-if="displayedBets.length === 0 && !betStore.loading" class="empty-state">
@@ -138,6 +139,7 @@
 
     <BetRecordDialog v-model:visible="showDialog" :editing-bet="editingBet" :settle-mode="settleMode" @success="handleRecordSuccess" />
     <ConfirmDialog />
+    <CoolDownAlert />
   </view>
 </template>
 
@@ -145,8 +147,10 @@
 import dayjs from "dayjs";
 import BetRecordDialog from "@/components/BetRecordDialog.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import CoolDownAlert from "@/components/CoolDownAlert.vue";
 import MescrollBody from "mescroll-uni/mescroll-body.vue";
 import { useBetStore } from "@/stores/betStore";
+import { useControlStore } from "@/stores/controlStore";
 import { showConfirm } from "@/utils/confirm";
 import { request } from "@/utils/http";
 import { ref, computed, onMounted, watch } from "vue";
@@ -154,6 +158,7 @@ import { onShow } from "@dcloudio/uni-app";
 import { requireAuth } from "@/utils/auth";
 
 const betStore = useBetStore();
+const controlStore = useControlStore();
 const editingBet = ref(null);
 const settleMode = ref(false);
 const activeTab = ref("saved");
@@ -354,7 +359,14 @@ const displayedBets = computed(() => {
   return bettingList;
 });
 
-function showFormDialog() { editingBet.value = null; showDialog.value = true; }
+function showFormDialog() {
+  if (controlStore.isPaused) {
+    uni.showToast({ title: "下注已暂停,请先冷静恢复", icon: "none" });
+    return;
+  }
+  editingBet.value = null;
+  showDialog.value = true;
+}
 function handleRecordSuccess(payload) {
   editingBet.value = null;
   if (payload && payload.status === "betting") {

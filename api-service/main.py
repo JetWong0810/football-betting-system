@@ -181,6 +181,11 @@ class UpdateConfigRequest(BaseModel):
     target_monthly_return: Optional[float] = None
     theme: Optional[str] = None
     risk_tolerance: Optional[str] = None
+    profit_aggressive_ratio: Optional[float] = None
+    withdraw_threshold: Optional[float] = None
+    withdraw_ratio: Optional[float] = None
+    realized_withdraw: Optional[float] = None
+    cool_hours: Optional[int] = None
 
 
 class CreateBetRequest(BaseModel):
@@ -928,7 +933,12 @@ def get_user_config(user_id: int = Depends(require_auth)):
         "stop_loss_limit": int(config.get("stop_loss_limit", 3)),
         "target_monthly_return": float(config.get("target_monthly_return", 0.1)),
         "theme": config.get("theme", "light"),
-        "risk_tolerance": config.get("risk_tolerance", "balanced")
+        "risk_tolerance": config.get("risk_tolerance", "balanced"),
+        "profit_aggressive_ratio": float(config.get("profit_aggressive_ratio", 0.5)),
+        "withdraw_threshold": float(config.get("withdraw_threshold", 0.3)),
+        "withdraw_ratio": float(config.get("withdraw_ratio", 0.5)),
+        "realized_withdraw": float(config.get("realized_withdraw", 0)),
+        "cool_hours": int(config.get("cool_hours", 2))
     }
 
 

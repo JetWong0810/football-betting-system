@@ -8,7 +8,9 @@ const PRESETS = {
     kellyFactor: 0.25,
     stopLossLimit: 2,
     maxDrawdown: -0.10,
-    minConfidence: 70
+    minConfidence: 70,
+    // 信心档比例:低/中/高,高档 = maxRatio 封顶
+    tierRatios: { low: 0.015, mid: 0.025, high: 0.03 }
   },
   balanced: {
     label: '稳健',
@@ -16,7 +18,8 @@ const PRESETS = {
     kellyFactor: 0.5,
     stopLossLimit: 3,
     maxDrawdown: -0.15,
-    minConfidence: 60
+    minConfidence: 60,
+    tierRatios: { low: 0.02, mid: 0.035, high: 0.05 }
   },
   aggressive: {
     label: '激进',
@@ -24,7 +27,8 @@ const PRESETS = {
     kellyFactor: 0.75,
     stopLossLimit: 5,
     maxDrawdown: -0.25,
-    minConfidence: 50
+    minConfidence: 50,
+    tierRatios: { low: 0.03, mid: 0.05, high: 0.08 }
   }
 }
 
@@ -33,13 +37,23 @@ const PRESETS = {
  * customConfig 形如 { fixedRatio, kellyFactor, stopLossLimit, maxDrawdown, minConfidence }
  */
 function resolveCustomPreset(customConfig) {
+  const maxRatio = Number(customConfig?.fixedRatio ?? 0.05)
+  // 自定义档的 tierRatios:用户显式指定则用,否则按 maxRatio 派生(低=50%/中=75%/高=100%)
+  const tierRatios = customConfig?.tierRatios
+    ? {
+        low: Number(customConfig.tierRatios.low ?? maxRatio * 0.5),
+        mid: Number(customConfig.tierRatios.mid ?? maxRatio * 0.75),
+        high: Number(customConfig.tierRatios.high ?? maxRatio)
+      }
+    : { low: maxRatio * 0.5, mid: maxRatio * 0.75, high: maxRatio }
   return {
     label: '自定义',
-    maxRatio: Number(customConfig?.fixedRatio ?? 0.05),
+    maxRatio,
     kellyFactor: Number(customConfig?.kellyFactor ?? 0.5),
     stopLossLimit: Number(customConfig?.stopLossLimit ?? 3),
     maxDrawdown: Number(customConfig?.maxDrawdown ?? -0.15),
-    minConfidence: Number(customConfig?.minConfidence ?? 55)
+    minConfidence: Number(customConfig?.minConfidence ?? 55),
+    tierRatios
   }
 }
 
@@ -50,6 +64,37 @@ export function getStrategyPreset(riskLevel, customConfig = null) {
 
 export function getAllPresets() {
   return PRESETS
+}
+
+/**
+ * 信心档金额计算(方案A:主观信心档 × 固定比例,绕开置信度/EV/凯利作主决策)
+ * @param {object} opts
+ * @param {number} opts.effectiveBankroll 有效资金(本金 + 盈利金×计入系数)
+ * @param {'low'|'mid'|'high'} opts.tier 信心档
+ * @param {string} [opts.riskLevel] 预设名
+ * @param {object} [opts.customConfig] 自定义配置
+ * @returns {{amount:number, tierRatio:number}}
+ */
+export function calcTieredStake({ effectiveBankroll, tier, riskLevel = 'balanced', customConfig = null }) {
+  const preset = (riskLevel === 'custom' && customConfig)
+    ? resolveCustomPreset(customConfig)
+    : (PRESETS[riskLevel] || PRESETS.balanced)
+  const ratio = Number(preset.tierRatios?.[tier])
+  const bank = Math.max(Number(effectiveBankroll) || 0, 0)
+  const amount = Number.isFinite(ratio) && ratio > 0 ? Math.round(bank * ratio) : 0
+  return { amount, tierRatio: Number.isFinite(ratio) ? ratio : 0 }
+}
+
+/**
+ * 一次性算出三档金额
+ * @returns {{low:{amount,tierRatio}, mid:{amount,tierRatio}, high:{amount,tierRatio}}}
+ */
+export function calcTieredStakes({ effectiveBankroll, riskLevel = 'balanced', customConfig = null }) {
+  return {
+    low: calcTieredStake({ effectiveBankroll, tier: 'low', riskLevel, customConfig }),
+    mid: calcTieredStake({ effectiveBankroll, tier: 'mid', riskLevel, customConfig }),
+    high: calcTieredStake({ effectiveBankroll, tier: 'high', riskLevel, customConfig })
+  }
 }
 
 /**
@@ -181,4 +226,29 @@ export function checkRiskStatus({ consecutiveLosses = 0, drawdown = 0, riskLevel
     reason: '',
     suggestedAction: ''
   }
+}
+
+/**
+ * 连不中控手告警(信心档挂钩阈值)
+ * 高信心档最早触发(高3/中4/低5把 → strong 弹窗;再+1 → pause 隐藏入口)
+ * @param {object} opts
+ * @param {number} [opts.consecutiveLosses] 当前连不中数
+ * @param {'low'|'mid'|'high'} [opts.lastTier] 最近一注的信心档
+ * @param {object} [opts.tierThresholds] {high, mid, low} 各档触发 strong 的连不中数
+ * @returns {{level:'normal'|'strong'|'pause', message:string, hideEntry:boolean, strongAt:number, pauseAt:number}}
+ */
+export function checkControlAlert({
+  consecutiveLosses = 0,
+  lastTier = 'mid',
+  tierThresholds = { high: 3, mid: 4, low: 5 }
+}) {
+  const strongAt = Number(tierThresholds?.[lastTier]) || 4
+  const pauseAt = strongAt + 1
+  if (consecutiveLosses >= pauseAt) {
+    return { level: 'pause', message: `连不中 ${consecutiveLosses} 把，已隐藏下注入口，请冷静后再战`, hideEntry: true, strongAt, pauseAt }
+  }
+  if (consecutiveLosses >= strongAt) {
+    return { level: 'strong', message: `连不中 ${consecutiveLosses} 把，建议冷静，确认后继续`, hideEntry: false, strongAt, pauseAt }
+  }
+  return { level: 'normal', message: '', hideEntry: false, strongAt, pauseAt }
 }

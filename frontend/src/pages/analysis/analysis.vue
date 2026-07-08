@@ -52,6 +52,23 @@
         </view>
       </block>
     </view>
+
+    <!-- 信心档命中率(复盘主观信心) -->
+    <view class="section">
+      <text class="section-title">信心档命中率</text>
+      <view v-if="tierTotal === 0" class="empty">暂无已结算的信心档记录</view>
+      <view v-else class="factor-list">
+        <view v-for="t in tierRows" :key="t.key" class="factor-row">
+          <text class="factor-name">{{ t.label }}</text>
+          <view class="factor-bar-wrap">
+            <view class="factor-bar" :style="{ width: t.pct + '%', background: t.color }"></view>
+          </view>
+          <text class="factor-pct" :style="{ color: t.color }">{{ t.pct }}%</text>
+          <text class="factor-sample">{{ t.hit }}/{{ t.total }}</text>
+        </view>
+      </view>
+      <text class="field-hint">对比你主观选的信心档与实际命中率,检验主观信心是否准确</text>
+    </view>
   </scroll-view>
 </template>
 
@@ -115,6 +132,26 @@ const weekList = computed(() => {
   return Object.entries(statStore.periodStats)
     .map(([week, payload]) => ({ week, ...payload }))
     .sort((a, b) => a.week.localeCompare(b.week))
+})
+
+// 信心档命中率(低/中/高),用于复盘主观信心准不准
+const tierRows = computed(() => {
+  const ta = statStore.tierAccuracy
+  const rows = [
+    { key: 'low', label: '低信心' },
+    { key: 'mid', label: '中信心' },
+    { key: 'high', label: '高信心' },
+  ]
+  return rows.map(r => {
+    const t = ta[r.key] || { hit: 0, total: 0, hitRate: 0 }
+    const pct = t.total > 0 ? Math.round(t.hitRate * 100) : 0
+    const color = t.total === 0 ? '#d1d5db' : (pct >= 60 ? '#0d9488' : pct >= 50 ? '#f59e0b' : '#ef4444')
+    return { ...r, hit: t.hit, total: t.total, pct, color }
+  })
+})
+const tierTotal = computed(() => {
+  const ta = statStore.tierAccuracy
+  return (ta.low?.total || 0) + (ta.mid?.total || 0) + (ta.high?.total || 0)
 })
 </script>
 
@@ -244,5 +281,12 @@ const weekList = computed(() => {
   color: #aaa;
   width: 90rpx;
   text-align: right;
+}
+
+.field-hint {
+  font-size: 22rpx;
+  color: #9ca3af;
+  margin-top: 12rpx;
+  display: block;
 }
 </style>

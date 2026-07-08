@@ -229,6 +229,11 @@ class UserRepository:
             "target_monthly_return": "target_monthly_return",
             "theme": "theme",
             "risk_tolerance": "risk_tolerance",
+            "profit_aggressive_ratio": "profit_aggressive_ratio",
+            "withdraw_threshold": "withdraw_threshold",
+            "withdraw_ratio": "withdraw_ratio",
+            "realized_withdraw": "realized_withdraw",
+            "cool_hours": "cool_hours",
         }
 
         for key, field in field_map.items():
@@ -267,6 +272,11 @@ class UserRepository:
                         "target_monthly_return": 0.1000,
                         "theme": "light",
                         "risk_tolerance": "balanced",
+                        "profit_aggressive_ratio": 0.5000,
+                        "withdraw_threshold": 0.3000,
+                        "withdraw_ratio": 0.5000,
+                        "realized_withdraw": 0.00,
+                        "cool_hours": 2,
                     }
                     
                     for key, field in field_map.items():

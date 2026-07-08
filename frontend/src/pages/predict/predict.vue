@@ -177,13 +177,25 @@
               <text class="advice-value">¥{{ bankroll }}</text>
             </view>
             <view class="advice-row highlight">
-              <text class="advice-label">建议金额</text>
-              <text class="advice-value amount">¥{{ recommendedStake.amount }}</text>
+              <text class="advice-label">三档金额</text>
+              <view class="advice-tiers">
+                <view class="tier-pill" :class="{ active: selectedTier === 'low' }" @tap="selectTierOnPredict('low')">
+                  <text class="tier-k">低</text>
+                  <text class="tier-v">¥{{ tieredStakes.low.amount }}</text>
+                </view>
+                <view class="tier-pill" :class="{ active: selectedTier === 'mid' }" @tap="selectTierOnPredict('mid')">
+                  <text class="tier-k">中</text>
+                  <text class="tier-v">¥{{ tieredStakes.mid.amount }}</text>
+                </view>
+                <view class="tier-pill" :class="{ active: selectedTier === 'high' }" @tap="selectTierOnPredict('high')">
+                  <text class="tier-k">高</text>
+                  <text class="tier-v">¥{{ tieredStakes.high.amount }}</text>
+                </view>
+              </view>
             </view>
             <view class="advice-detail">
-              <text>Kelly ¥{{ recommendedStake.kelly }} / 固定 ¥{{ recommendedStake.fixed }}，取{{ recommendedStake.method }}</text>
               <text class="advice-prob" v-if="recommendedStake.probability">
-                校准概率 {{ Math.round(recommendedStake.probability * 100) }}% · 预期 {{ (recommendedStake.edge * 100).toFixed(1) }}%
+                系统凯利参考 ¥{{ recommendedStake.kelly }}(仅供参考) · 校准概率 {{ Math.round(recommendedStake.probability * 100) }}% · 预期 {{ (recommendedStake.edge * 100).toFixed(1) }}%
               </text>
             </view>
           </view>
@@ -312,7 +324,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 import { useConfigStore } from '@/stores/configStore'
 import { useBetStore } from '@/stores/betStore'
-import { calcRecommendedStake, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
+import { calcRecommendedStake, calcTieredStakes, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
 import { loadCalibration } from '@/utils/calibration'
 
 const matchStatus = ref('not_started')
@@ -382,8 +394,9 @@ const recommendedStake = computed(() => {
   }
   // 真实赔率优先；缺失时回退到亚盘水位常见值 1.90
   const odds = computeBetOdds() || (selectedMatch.value?.handicap != null ? 1.9 : 1.85)
+  // 凯利参考(基于有效资金,仅供参考,不作主决策)
   return calcRecommendedStake({
-    bankroll: bankroll.value,
+    bankroll: betStore.effectiveBankroll,
     odds,
     confidence: prediction.value.confidence,
     riskLevel: configStore.riskTolerance,
@@ -391,6 +404,21 @@ const recommendedStake = computed(() => {
     calibration: calibrationData.value,
   })
 })
+
+// 三档信心金额(方案A 主决策:有效资金 × 信心档比例)
+const tieredStakes = computed(() => {
+  if (!analysisComplete.value) return { low: { amount: 0 }, mid: { amount: 0 }, high: { amount: 0 } }
+  return calcTieredStakes({
+    effectiveBankroll: betStore.effectiveBankroll,
+    riskLevel: configStore.riskTolerance,
+    customConfig: customConfig.value,
+  })
+})
+
+const selectedTier = ref('mid')
+function selectTierOnPredict(tier) {
+  selectedTier.value = tier
+}
 
 const confidenceClass = computed(() => {
   const c = prediction.value.confidence
@@ -721,14 +749,15 @@ async function startAnalysis() {
 }
 
 function adjustStake() {
-  customStake.value = recommendedStake.value.amount
+  customStake.value = tieredStakes.value[selectedTier.value]?.amount ?? recommendedStake.value.amount
   uni.showToast({ title: '可在投注时修改金额', icon: 'none' })
 }
 
 function betWithAdvice() {
   const match = selectedMatch.value
   if (!match) return
-  const stake = customStake.value || recommendedStake.value.amount
+  const tiers = tieredStakes.value
+  const stake = customStake.value || tiers[selectedTier.value]?.amount || recommendedStake.value.amount
   const data = {
     matchId: match.matchId,
     matchName: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
@@ -739,6 +768,8 @@ function betWithAdvice() {
     handicap: match.handicap,
     predictedDirection: prediction.value.direction,
     confidence: prediction.value.confidence,
+    selectedTier: selectedTier.value,
+    recommendedTiers: { low: tiers.low, mid: tiers.mid, high: tiers.high },
     recommendedStake: stake
   }
   uni.setStorageSync('predict-bet-prefill', data)
@@ -1412,6 +1443,47 @@ onShow(() => {
     padding-top: 16rpx;
     border-top: 1px solid #f3f4f6;
   }
+}
+
+.advice-tiers {
+  display: flex;
+  gap: 10rpx;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.tier-pill {
+  flex: 0 0 96rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rpx;
+  padding: 8rpx 0;
+  border-radius: 6rpx;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s;
+
+  &.active {
+    background: #0d9488;
+    border-color: #0d9488;
+
+    .tier-k,
+    .tier-v {
+      color: #fff;
+    }
+  }
+}
+
+.tier-k {
+  font-size: 22rpx;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.tier-v {
+  font-size: 24rpx;
+  color: #0d9488;
+  font-weight: 600;
 }
 
 .advice-detail {

@@ -2,6 +2,8 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import dayjs from "dayjs";
 import { useConfigStore } from "./configStore";
+import { computeBankrollLayer } from "@/utils/bankrollLayer";
+import { useControlStore } from "./controlStore";
 import { request } from "@/utils/http";
 import { getURLSearchParams } from "@/utils/url";
 
@@ -22,6 +24,7 @@ const defaultBet = () => ({
   tags: [],
   note: "",
   legs: [],
+  confidenceTier: "mid", // 信心档: low | mid | high(方案A 主观信心,用于金额计算与控手阈值)
 });
 
 export const useBetStore = defineStore("bet", () => {
@@ -75,11 +78,33 @@ export const useBetStore = defineStore("bet", () => {
     return streak
   })
 
-  // 当前余额 = 初始资金 + 已结算盈亏 - 投注中金额
+  // 当前余额 = 初始资金 + 已结算盈亏 - 投注中金额(总资金,展示用)
   const bankroll = computed(() => {
     const configStore = useConfigStore();
     const bettingStake = bets.value.filter((bet) => bet.status === "betting").reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
     return Number(configStore.startingCapital) + totalProfit.value - bettingStake;
+  });
+
+  // 有效资金 = 本金 + 盈利金 × 计入系数(仓位计算用,抑制盈利滚进本金放大仓位)
+  const effectiveBankroll = computed(() => bankrollLayer.value.effectiveBankroll);
+
+  // 资金分层详情(本金/盈利金/有效资金,展示与出金阀用)
+  const bankrollLayer = computed(() => {
+    const configStore = useConfigStore();
+    return computeBankrollLayer({
+      startingCapital: configStore.startingCapital,
+      totalProfit: totalProfit.value,
+      realizedWithdraw: configStore.realizedWithdraw,
+      profitAggressiveRatio: configStore.profitAggressiveRatio,
+    });
+  });
+
+  // 最近一场已结算投注的信心档(控手阈值挂钩用)
+  const lastTier = computed(() => {
+    for (const bet of bets.value) {
+      if (bet.status === "settled") return bet.confidenceTier || "mid";
+    }
+    return "mid";
   });
 
   function recalculateSnapshots() {
@@ -164,6 +189,7 @@ export const useBetStore = defineStore("bet", () => {
       tags: bet.tags || [],
       note: bet.note || "",
       legs: bet.legs || [],
+      confidenceTier: bet.confidenceTier || "mid",
     };
 
     return {
@@ -507,6 +533,14 @@ export const useBetStore = defineStore("bet", () => {
     }
 
     await updateBet(id, payload);
+
+    // 通知控手 store:结算完成,若处于降档锁则按结果升级档位(赢一把解锁更高档)
+    try {
+      const controlStore = useControlStore();
+      controlStore.onSettled(payload.result);
+    } catch (e) {
+      // 控手 store 不可用时忽略
+    }
   }
 
   /**
@@ -528,6 +562,9 @@ export const useBetStore = defineStore("bet", () => {
     winningRate,
     consecutiveLosses,
     bankroll,
+    effectiveBankroll,
+    bankrollLayer,
+    lastTier,
     // 分页相关
     page,
     pageSize,

@@ -104,6 +104,29 @@ export const useStatStore = defineStore('stats', () => {
     return grouped
   })
 
+  // 按信心档分组的命中率(复盘校准主观信心准不准;走水不计入分母)
+  const tierAccuracy = computed(() => {
+    const tiers = { low: { hit: 0, total: 0 }, mid: { hit: 0, total: 0 }, high: { hit: 0, total: 0 } }
+    chronologicalSettled.value.forEach(bet => {
+      const tier = bet.confidenceTier && tiers[bet.confidenceTier] ? bet.confidenceTier : 'mid'
+      const r = bet.result
+      if (r === 'win' || r === 'half-win' || r === 'lose' || r === 'half-lose') {
+        tiers[tier].total += 1
+        if (r === 'win' || r === 'half-win') tiers[tier].hit += 1
+      }
+    })
+    const result = {}
+    Object.keys(tiers).forEach(k => {
+      const t = tiers[k]
+      result[k] = {
+        hit: t.hit,
+        total: t.total,
+        hitRate: t.total > 0 ? t.hit / t.total : 0,
+      }
+    })
+    return result
+  })
+
   return {
     betCount,
     averageStake,
@@ -115,6 +138,7 @@ export const useStatStore = defineStore('stats', () => {
     trendSeries,
     maxConsecutiveLoss,
     drawdown,
-    periodStats
+    periodStats,
+    tierAccuracy
   }
 })

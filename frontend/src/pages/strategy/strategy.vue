@@ -30,7 +30,7 @@
               <text class="odds-cell">¥{{ row.c80 }}</text>
             </view>
           </view>
-          <text class="recommend-hint">基于余额 ¥{{ bankroll }} 和{{ currentPreset.label }}策略计算</text>
+          <text class="recommend-hint">基于有效资金 ¥{{ betStore.effectiveBankroll }} 和{{ currentPreset.label }}策略计算(凯利参考,主决策用信心档三档金额)</text>
         </view>
       </view>
 
@@ -114,6 +114,10 @@
           <view class="param-row">
             <text class="param-label">最低置信度</text>
             <text class="param-value">{{ currentPreset.minConfidence }}%</text>
+          </view>
+          <view class="param-row">
+            <text class="param-label">信心档(低/中/高)</text>
+            <text class="param-value">{{ (currentPreset.tierRatios.low * 100).toFixed(1) }}% / {{ (currentPreset.tierRatios.mid * 100).toFixed(1) }}% / {{ (currentPreset.tierRatios.high * 100).toFixed(1) }}%</text>
           </view>
         </view>
       </view>

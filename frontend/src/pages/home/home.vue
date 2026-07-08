@@ -7,6 +7,7 @@
           <view class="hero-main">
             <text class="hero-caption">可用资金</text>
             <text class="hero-balance">{{ formatCurrency(bankroll) }}</text>
+            <text class="hero-sub">有效资金 {{ formatCurrency(betStore.effectiveBankroll) }}(仓位基准)</text>
           </view>
           <view class="hero-badge">
             <text class="badge-label">{{ strategyLabel }}</text>
@@ -37,6 +38,15 @@
         <text class="progress-text">月目标进度 {{ formatPercent(targetProgress) }}</text>
       </view>
 
+      <!-- 出金阀提示 -->
+      <view v-if="withdrawInfo.trigger" class="withdraw-card" @tap="doWithdraw">
+        <view class="withdraw-main">
+          <text class="withdraw-title">盈利出金提示</text>
+          <text class="withdraw-desc">盈利金已达本金 {{ formatPercent(config.withdrawThreshold) }},建议提取 ¥{{ withdrawInfo.amount }} 落袋</text>
+        </view>
+        <text class="withdraw-action">提取</text>
+      </view>
+
       <!-- 系统建议 -->
       <view class="advice-card" :class="advice.warning ? 'warning' : ''">
         <view class="advice-header">
@@ -45,8 +55,8 @@
         </view>
         <text class="advice-text">{{ advice.text }}</text>
         <view class="advice-stake" v-if="!advice.warning">
-          <text class="stake-label">下一注推荐区间</text>
-          <text class="stake-range">¥{{ stakeRange.min }} ~ ¥{{ stakeRange.max }}</text>
+          <text class="stake-label">三档金额(低/中/高)</text>
+          <text class="stake-range">¥{{ tieredStakes.low.amount }} / ¥{{ tieredStakes.mid.amount }} / ¥{{ tieredStakes.high.amount }}</text>
         </view>
       </view>
 
@@ -107,11 +117,26 @@
             </view>
             <text class="risk-num">{{ formatPercent(statStore.drawdown) }}</text>
           </view>
+          <view class="risk-item" v-if="controlStore.controlAlert.level !== 'normal'">
+            <text class="risk-label">控手</text>
+            <view class="risk-bar-wrap">
+              <view class="risk-bar" :style="{ width: controlBarWidth }" :class="controlStore.controlAlert.level"></view>
+            </view>
+            <text class="risk-num">{{ betStore.consecutiveLosses }}/{{ controlStore.controlAlert.strongAt }}</text>
+          </view>
+          <view class="risk-item" v-if="controlStore.isPaused">
+            <text class="risk-label">冷静</text>
+            <view class="risk-bar-wrap">
+              <view class="risk-bar pause" :style="{ width: '100%' }"></view>
+            </view>
+            <text class="risk-num">暂停中</text>
+          </view>
         </view>
       </view>
     </scroll-view>
 
     <BetRecordDialog v-model:visible="showDialog" @success="handleRecordSuccess" />
+    <CoolDownAlert />
 
     <!-- 数据查询助手 -->
     <DataQueryFab @open="showQueryPanel = true" />
@@ -134,12 +159,16 @@ import DataQueryFab from '@/components/DataQueryFab.vue'
 import DataQueryPanel from '@/components/DataQueryPanel.vue'
 import QuickRecordFab from '@/components/QuickRecordFab.vue'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
-import { getStrategyPreset, generateAdvice, checkRiskStatus, calcRecommendedStake } from '@/utils/strategyEngine'
+import { getStrategyPreset, generateAdvice, checkRiskStatus, calcTieredStakes } from '@/utils/strategyEngine'
+import { suggestWithdraw } from '@/utils/bankrollLayer'
+import CoolDownAlert from '@/components/CoolDownAlert.vue'
+import { useControlStore } from '@/stores/controlStore'
 import dayjs from 'dayjs'
 
 const betStore = useBetStore()
 const config = useConfigStore()
 const statStore = useStatStore()
+const controlStore = useControlStore()
 const showDialog = ref(false)
 const showQueryPanel = ref(false)
 
@@ -191,14 +220,28 @@ const riskStatus = computed(() => checkRiskStatus({
   customConfig: customConfig.value
 }))
 
-const stakeRange = computed(() => {
-  const b = bankroll.value
-  const low = calcRecommendedStake({ bankroll: b, odds: 1.7, confidence: 60, riskLevel: config.riskTolerance, customConfig: customConfig.value })
-  const high = calcRecommendedStake({ bankroll: b, odds: 2.1, confidence: 75, riskLevel: config.riskTolerance, customConfig: customConfig.value })
-  return {
-    min: low.amount,
-    max: high.amount
-  }
+const tieredStakes = computed(() => calcTieredStakes({
+  effectiveBankroll: betStore.effectiveBankroll,
+  riskLevel: config.riskTolerance,
+  customConfig: customConfig.value,
+}))
+
+// 出金阀:盈利金达本金阈值时提示提取
+const withdrawInfo = computed(() => {
+  const layer = betStore.bankrollLayer
+  return suggestWithdraw({
+    profitPool: layer.profitPool,
+    principal: layer.principal,
+    threshold: config.withdrawThreshold,
+    ratio: config.withdrawRatio,
+  })
+})
+
+// 控手进度条宽度(连不中 / strongAt 阈值)
+const controlBarWidth = computed(() => {
+  const a = controlStore.controlAlert
+  const ratio = a.strongAt > 0 ? betStore.consecutiveLosses / a.strongAt : 0
+  return `${Math.min(ratio * 100, 100)}%`
 })
 
 const weekStats = computed(() => {
@@ -240,7 +283,26 @@ function goPredict() {
 }
 
 function goRecord() {
+  if (controlStore.isPaused) {
+    uni.showToast({ title: '下注已暂停,请先冷静恢复', icon: 'none' })
+    return
+  }
   showDialog.value = true
+}
+
+function doWithdraw() {
+  const info = withdrawInfo.value
+  if (!info.trigger) return
+  uni.showModal({
+    title: '盈利出金提示',
+    content: `盈利金已达本金 ${(config.withdrawThreshold * 100).toFixed(0)}%,建议提取 ¥${info.amount} 落袋。确认后已提取盈利增加,有效资金与仓位回落。`,
+    success: (res) => {
+      if (res.confirm) {
+        config.updateConfig({ realizedWithdraw: Number(config.realizedWithdraw) + info.amount })
+        uni.showToast({ title: `已记录出金 ¥${info.amount}`, icon: 'none' })
+      }
+    },
+  })
 }
 
 function handleRecordSuccess() {
@@ -293,6 +355,55 @@ onShow(() => {
   font-weight: 700;
   margin-top: 4rpx;
   display: block;
+}
+
+.hero-sub {
+  font-size: 20rpx;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 6rpx;
+  display: block;
+}
+
+/* 出金阀提示 */
+.withdraw-card {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.withdraw-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.withdraw-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.withdraw-desc {
+  font-size: 22rpx;
+  color: #b45309;
+}
+
+.withdraw-action {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #fff;
+  background: #f59e0b;
+  padding: 10rpx 24rpx;
+  border-radius: 6rpx;
+  flex-shrink: 0;
 }
 
 .hero-badge {
@@ -552,6 +663,8 @@ onShow(() => {
   &.safe { background: #0d9488; }
   &.warning { background: #f59e0b; }
   &.danger { background: #ef4444; }
+  &.strong { background: #f59e0b; }
+  &.pause { background: #ef4444; }
 }
 
 .risk-num {

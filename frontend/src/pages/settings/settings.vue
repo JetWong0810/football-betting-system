@@ -54,6 +54,42 @@
         </view>
       </view>
 
+      <!-- 资金分层与控手 -->
+      <view class="section">
+        <text class="section-title">资金分层与控手</text>
+        <view class="form-card">
+          <view class="field">
+            <text class="field-label">盈利金计入系数 (%)</text>
+            <input type="number" v-model.number="form.profitAggressiveRatio" />
+            <text class="field-hint">盈利金按此比例计入有效资金(50=半数,越低越保守,抑制仓位雪球)</text>
+          </view>
+          <view class="field">
+            <text class="field-label">出金阀阈值 (%)</text>
+            <input type="number" v-model.number="form.withdrawThreshold" />
+            <text class="field-hint">盈利金达本金此比例时提示出金落袋</text>
+          </view>
+          <view class="field">
+            <text class="field-label">出金提取比例 (%)</text>
+            <input type="number" v-model.number="form.withdrawRatio" />
+            <text class="field-hint">触发出金时建议提取盈利金的比例</text>
+          </view>
+          <view class="field">
+            <text class="field-label">冷静时长 (小时)</text>
+            <input type="number" v-model.number="form.coolHours" />
+            <text class="field-hint">连不中暂停后需冷静多久才能恢复下注</text>
+          </view>
+          <view class="field">
+            <text class="field-label">控手阈值 (高/中/低 信心档连不中把数)</text>
+            <view class="tier-thresholds">
+              <input type="number" v-model.number="form.tierThresholdHigh" placeholder="高" />
+              <input type="number" v-model.number="form.tierThresholdMid" placeholder="中" />
+              <input type="number" v-model.number="form.tierThresholdLow" placeholder="低" />
+            </view>
+            <text class="field-hint">高信心档最早触发(默认 3/4/5,再+1 把隐藏下注入口)</text>
+          </view>
+        </view>
+      </view>
+
       <!-- 高级参数 -->
       <view class="section">
         <view class="section-header" @tap="showAdvanced = !showAdvanced">
@@ -125,6 +161,14 @@ const form = reactive({
   targetMonthlyReturn: 10,
   minConfidence: 60,
   riskLevel: 'balanced',
+  // 资金分层与控手(百分比/数值)
+  profitAggressiveRatio: 50,
+  withdrawThreshold: 30,
+  withdrawRatio: 50,
+  coolHours: 2,
+  tierThresholdHigh: 3,
+  tierThresholdMid: 4,
+  tierThresholdLow: 5,
 });
 
 function selectRiskLevel(level) {
@@ -157,6 +201,13 @@ watch(
     form.minConfidence = form.riskLevel === 'custom'
       ? (config.minConfidence || preset.minConfidence)
       : preset.minConfidence;
+    form.profitAggressiveRatio = Number(config.profitAggressiveRatio) * 100;
+    form.withdrawThreshold = Number(config.withdrawThreshold) * 100;
+    form.withdrawRatio = Number(config.withdrawRatio) * 100;
+    form.coolHours = Number(config.coolHours);
+    form.tierThresholdHigh = config.tierThresholds?.high ?? 3;
+    form.tierThresholdMid = config.tierThresholds?.mid ?? 4;
+    form.tierThresholdLow = config.tierThresholds?.low ?? 5;
   },
   { immediate: true }
 );
@@ -171,6 +222,11 @@ async function handleSave() {
       targetMonthlyReturn: form.targetMonthlyReturn / 100,
       riskTolerance: form.riskLevel,
       minConfidence: form.minConfidence,
+      profitAggressiveRatio: form.profitAggressiveRatio / 100,
+      withdrawThreshold: form.withdrawThreshold / 100,
+      withdrawRatio: form.withdrawRatio / 100,
+      coolHours: form.coolHours,
+      tierThresholds: { high: form.tierThresholdHigh, mid: form.tierThresholdMid, low: form.tierThresholdLow },
     });
     uni.showToast({ title: "已保存", icon: "success" });
   } catch (error) {
@@ -341,6 +397,16 @@ onShow(() => {
   color: #9ca3af;
   margin-top: 12rpx;
   display: block;
+}
+
+.tier-thresholds {
+  display: flex;
+  gap: 12rpx;
+
+  input {
+    flex: 1;
+    text-align: center;
+  }
 }
 
 input {

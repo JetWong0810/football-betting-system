@@ -82,6 +82,26 @@
       </scroll-view>
     </view>
 
+    <!-- 信心档选择(方案A:主观信心决定下注金额) -->
+    <view v-if="!isFieldsDisabled" class="field">
+      <text class="label">信心档(决定下注金额)</text>
+      <view class="tier-selector">
+        <view
+          v-for="t in [{ key: 'low', name: '低' }, { key: 'mid', name: '中' }, { key: 'high', name: '高' }]"
+          :key="t.key"
+          class="tier-option"
+          :class="{ active: form.confidenceTier === t.key, disabled: tierDisabled(t.key) }"
+          @tap="() => selectTier(t.key)"
+        >
+          <text class="tier-name">{{ t.name }}</text>
+          <text class="tier-amount">¥{{ tieredStakes[t.key].amount }}</text>
+        </view>
+      </view>
+      <view v-if="kellyReference" class="kelly-ref">
+        系统凯利参考 ¥{{ kellyReference.amount }}(仅供参考)
+      </view>
+    </view>
+
     <view v-if="!isFieldsDisabled" class="field inline">
       <view class="inline-item">
         <text class="label">下注金额 (¥)</text>
@@ -142,6 +162,10 @@ import dayjs from "dayjs";
 import { computed, reactive, ref, watch } from "vue";
 import ActionPicker from "@/components/ActionPicker.vue";
 import DatePicker from "@/components/DatePicker.vue";
+import { useBetStore } from "@/stores/betStore";
+import { useConfigStore } from "@/stores/configStore";
+import { useControlStore } from "@/stores/controlStore";
+import { calcTieredStakes, calcRecommendedStake } from "@/utils/strategyEngine";
 
 const props = defineProps({
   editingBet: {
@@ -205,6 +229,8 @@ const form = reactive({
   id: "",
   matchId: "",
   predictedDirection: "",
+  predictedConfidence: null, // 预测页预填的置信度(仅用于凯利参考展示)
+  confidenceTier: "mid",     // 信心档: low | mid | high(方案A 主决策依据)
   stake: null,
   odds: null,
   result: "pending",
@@ -219,6 +245,52 @@ const hasAttemptedSubmit = ref(false);
 const isEditing = computed(() => Boolean(form.id));
 const isParlay = computed(() => form.legs.length > 1);
 const resultLabel = computed(() => resultDict[form.result] || "进行中");
+
+const betStore = useBetStore();
+const configStore = useConfigStore();
+const controlStore = useControlStore();
+
+// 自定义策略配置(当 riskTolerance==='custom' 时传给策略引擎)
+const customConfig = computed(() => ({
+  fixedRatio: configStore.fixedRatio,
+  kellyFactor: configStore.kellyFactor,
+  stopLossLimit: configStore.stopLossLimit,
+  maxDrawdown: configStore.maxDrawdown,
+  minConfidence: configStore.minConfidence,
+}));
+
+// 三档信心金额(方案A:有效资金 × 信心档比例,绕开置信度作主决策)
+const tieredStakes = computed(() => calcTieredStakes({
+  effectiveBankroll: betStore.effectiveBankroll,
+  riskLevel: configStore.riskTolerance,
+  customConfig: customConfig.value,
+}));
+
+// 系统凯利参考(基于置信度+赔率,仅供参考,不作主决策)
+const kellyReference = computed(() => {
+  const odds = Number(form.odds) || 0;
+  const conf = Number(form.predictedConfidence);
+  if (!odds || !conf) return null;
+  return calcRecommendedStake({
+    bankroll: betStore.effectiveBankroll,
+    odds,
+    confidence: conf,
+    riskLevel: configStore.riskTolerance,
+    customConfig: customConfig.value,
+    calibration: null,
+  });
+});
+
+// 档位是否禁用(恢复期降档起步:高于 recoveryLock 的档位禁用)
+function tierDisabled(tier) {
+  return controlStore.isTierLocked(tier);
+}
+
+function selectTier(tier) {
+  if (tierDisabled(tier)) return;
+  form.confidenceTier = tier;
+  form.stake = tieredStakes.value[tier].amount;
+}
 
 // 全部赛事连乘赔率（仅供参考）
 const combinedOdds = computed(() => {
@@ -499,6 +571,8 @@ function hydrate(bet) {
   form.id = bet.id;
   form.matchId = bet.matchId || "";
   form.predictedDirection = bet.predictedDirection || "";
+  form.predictedConfidence = bet.predictedConfidence || null;
+  form.confidenceTier = bet.confidenceTier || "mid";
   form.stake = Number(bet.stake || 0);
   form.odds = Number(bet.odds || 1);
   form.result = bet.result || "pending";
@@ -586,9 +660,12 @@ function fillFromPredict(data) {
   form.id = "";
   form.matchId = data.matchId || "";
   form.predictedDirection = data.predictedDirection || "";
+  form.predictedConfidence = data.confidence || null;
+  form.confidenceTier = data.selectedTier || "mid";
   form.result = "pending";
   form.betTime = dayjs().format("YYYY-MM-DD HH:mm");
-  form.stake = data.recommendedStake || null;
+  // 优先用三档金额的选中档;回退到单值 recommendedStake
+  form.stake = data.recommendedTiers?.[form.confidenceTier]?.amount ?? data.recommendedStake ?? null;
   form.parlayType = "2_1";
 
   const directionMap = { upper: '上盘', lower: '下盘' };
@@ -790,6 +867,8 @@ function normalizePayload(status) {
     id: form.id || undefined,
     matchId: form.matchId || undefined,
     predictedDirection: form.predictedDirection || undefined,
+    predictedConfidence: form.predictedConfidence || undefined,
+    confidenceTier: form.confidenceTier,
     wagerType: form.legs.length > 1 ? "parlay" : "single",
     stake: form.stake ? Number(form.stake) : 0,
     odds: form.odds ? Number(form.odds) : 0,
@@ -808,6 +887,8 @@ function reset() {
   form.id = "";
   form.matchId = "";
   form.predictedDirection = "";
+  form.predictedConfidence = null;
+  form.confidenceTier = "mid";
   form.stake = null;
   form.odds = null;
   form.result = "pending";
@@ -1039,6 +1120,57 @@ input:disabled {
   font-size: 20rpx;
   color: #0d9488;
   font-weight: 400;
+}
+
+.tier-selector {
+  display: flex;
+  gap: 10rpx;
+}
+
+.tier-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 12rpx 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8rpx;
+  transition: all 0.2s;
+
+  &.active {
+    background: #0d9488;
+    border-color: #0d9488;
+
+    .tier-name,
+    .tier-amount {
+      color: #fff;
+    }
+  }
+
+  &.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+}
+
+.tier-name {
+  font-size: 22rpx;
+  color: #666;
+  font-weight: 500;
+}
+
+.tier-amount {
+  font-size: 24rpx;
+  color: #0d9488;
+  font-weight: 600;
+}
+
+.kelly-ref {
+  font-size: 20rpx;
+  color: #999;
+  margin-top: 4rpx;
 }
 
 .odds-info-row {
