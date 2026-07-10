@@ -131,6 +131,7 @@ class SportterySyncService:
                     self.stats["matches"] += 1
                     for odds in self.build_had_hhad(match_data, single_flags):
                         self.repository.upsert_odds_wdl(odds)
+                        self.repository.append_odds_history(odds)
                         self.stats["odds"] += 1
                 elif pool_name == "crs":
                     items = self.build_crs(match_data)

@@ -23,6 +23,7 @@ from predict_service import (
     generate_analysis,
     build_ai_prompt,
     call_deepseek_factors,
+    calc_factor_jczq_odds,
 )
 from wc_similar_odds import find_similar
 
@@ -44,65 +45,6 @@ WC_FACTOR_WEIGHTS = {
     "历史同赔": 1.5,
     "单关修正": 1.5,
 }
-
-
-def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
-    """F5 竞彩赔率: 分析竞彩官方初盘→终盘的低赔变动方向
-
-    逻辑:
-    - 找初盘中最低的赔率（低赔 = 热门方向）
-    - 判断该低赔从初盘到终盘的变动方向
-    - 低赔↓(降): 市场持续看好热门 → upper, score=7
-    - 低赔↑(升): 市场对热门信心减弱 → lower, score=7
-    - 不变(±0.02): neutral, score=5
-    """
-    if not jczq_company:
-        return {"name": "竞彩赔率", "score": 5, "direction": "neutral",
-                "reason": "无竞彩赔率数据", "details": []}
-
-    initial = jczq_company.get("initial", {})
-    current = jczq_company.get("current", {})
-
-    open_win = initial.get("win")
-    open_draw = initial.get("draw")
-    open_loss = initial.get("lose")
-    close_win = current.get("win")
-    close_draw = current.get("draw")
-    close_loss = current.get("lose")
-
-    if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
-        return {"name": "竞彩赔率", "score": 5, "direction": "neutral",
-                "reason": "竞彩赔率数据不完整", "details": []}
-
-    odds_list = [
-        ("胜", open_win, close_win),
-        ("平", open_draw, close_draw),
-        ("负", open_loss, close_loss),
-    ]
-    low_label, low_open, low_close = min(odds_list, key=lambda x: x[1])
-    diff = low_close - low_open
-
-    details = [
-        {"name": "初盘", "desc": f"胜{open_win:.2f}/平{open_draw:.2f}/负{open_loss:.2f}"},
-        {"name": "终盘", "desc": f"胜{close_win:.2f}/平{close_draw:.2f}/负{close_loss:.2f}"},
-        {"name": "低赔位置", "desc": f"{low_label}赔 {low_open:.2f}→{low_close:.2f} ({diff:+.2f})"},
-    ]
-
-    if diff < -0.02:
-        direction = "upper"
-        score = 7
-        reason = f"竞彩{low_label}赔(低赔)下降{diff:.2f}，市场持续看好热门→偏上盘"
-    elif diff > 0.02:
-        direction = "lower"
-        score = 7
-        reason = f"竞彩{low_label}赔(低赔)上升{diff:+.2f}，市场对热门信心减弱→偏下盘"
-    else:
-        direction = "neutral"
-        score = 5
-        reason = f"竞彩{low_label}赔(低赔)变动极小({diff:+.2f})，方向不明"
-
-    return {"name": "竞彩赔率", "score": score, "direction": direction,
-            "reason": reason, "details": details}
 
 
 def calc_factor_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:

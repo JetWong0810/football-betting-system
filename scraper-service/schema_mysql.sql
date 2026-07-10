@@ -95,3 +95,19 @@ CREATE TABLE IF NOT EXISTS sync_status (
     total_matches INT DEFAULT 0,
     total_odds INT DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS jczq_odds_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    match_id VARCHAR(100) NOT NULL,
+    odds_type VARCHAR(20) NOT NULL COMMENT 'spf(had)/nspf(hhad)',
+    odds_win DECIMAL(8,2) NOT NULL,
+    odds_draw DECIMAL(8,2) NOT NULL,
+    odds_loss DECIMAL(8,2) NOT NULL,
+    direction_win TINYINT DEFAULT 0,
+    direction_draw TINYINT DEFAULT 0,
+    direction_loss TINYINT DEFAULT 0,
+    change_time DATETIME NOT NULL,
+    UNIQUE KEY uk_match_type_time (match_id, odds_type, change_time),
+    INDEX idx_match (match_id),
+    FOREIGN KEY (match_id) REFERENCES matches(match_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

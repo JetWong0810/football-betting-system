@@ -1,12 +1,15 @@
-"""预测服务模块 - 6因子亚盘方向预测
+"""预测服务模块 - 7因子亚盘方向预测 (与世界杯体系对齐)
 
 因子体系:
   F1 近期状态 (权重1.5) - 量化子因素投票(场均分/赢盘率/主客场) + AI辅助1票
-  F2 交锋历史 (权重1.0) - 量化子因素(有效性/赢盘率/盘口变化) + AI辅助
-  F3 实力定位 (权重1.0) - 量化子因素(排名匹配) + AI底蕴判断(3次投票)
-  F4 市场信号 (权重2.0) - 初盘分析 + 亚盘变动 + 欧赔变动 + 亚欧一致性验证
-  F5 市场热度 (权重2.0) - 纯量化：多公司水位一致性/用户手动输入
-  F6 单关修正 (权重1.5) - 结合F5的单关逆向规则
+  F2 实力定位 (权重1.0) - 量化子因素(排名匹配) + AI底蕴判断(3次投票)
+  F3 市场信号 (权重2.0) - 初盘分析 + 亚盘变动 + 欧赔变动 + 亚欧一致性验证
+  F4 市场热度 (权重2.0) - 纯量化：多公司水位一致性/用户手动输入
+  F5 竞彩赔率 (权重1.5) - 竞彩nspf初盘→终盘低赔变动方向
+  F6 历史同赔 (权重1.5) - 匹配竞彩历史nspf同赔率比赛结果分布
+  F7 单关修正 (权重1.5) - 结合F4的单关逆向规则
+
+注: calc_factor2(交锋历史) 保留供 backtest_factors.py 回测，不进 live 因子集。
 """
 import json
 import logging
@@ -14,6 +17,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
+
+from jczq_similar_odds import find_similar_nspf, get_match_nspf_odds
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +28,11 @@ DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 FACTOR_WEIGHTS = {
     "近期状态": 1.5,
-    "交锋历史": 1.0,
     "实力定位": 1.0,
     "市场信号": 2.0,   # 升级：初盘+亚盘变动+欧赔变动+亚欧一致性
     "市场热度": 2.0,
+    "竞彩赔率": 1.5,   # nspf初盘→终盘低赔变动方向(与世界杯对齐)
+    "历史同赔": 1.5,   # 竞彩nspf历史同赔匹配(与世界杯对齐,nspf口径)
     "单关修正": 1.5,
 }
 
@@ -1968,6 +1974,180 @@ def generate_analysis(factors: List[Dict], prediction: Dict, match_info: Dict) -
     return "。".join(parts)
 
 
+def _fmt_handicap(v):
+    """格式化盘口数值：0显示为0，正数加+号"""
+    if v == 0 or v == -0.0:
+        return "0"
+    return f"+{v}" if v > 0 else str(v)
+
+
+def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
+    """F5 竞彩赔率: 竞彩nspf初盘→终盘的低赔变动方向
+
+    逻辑(与世界杯一致):
+    - 找初盘中最低的赔率（低赔 = 热门方向）
+    - 低赔↓(降): 市场持续看好热门 → upper, score=7
+    - 低赔↑(升): 市场对热门信心减弱 → lower, score=7
+    - 不变(±0.02): neutral, score=5
+    """
+    if not jczq_company:
+        return {"name": "竞彩赔率", "score": 5, "direction": "neutral",
+                "reason": "无竞彩nspf赔率数据", "details": []}
+
+    initial = jczq_company.get("initial", {})
+    current = jczq_company.get("current", {})
+
+    open_win = initial.get("win")
+    open_draw = initial.get("draw")
+    open_loss = initial.get("lose")
+    close_win = current.get("win")
+    close_draw = current.get("draw")
+    close_loss = current.get("lose")
+
+    if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
+        return {"name": "竞彩赔率", "score": 5, "direction": "neutral",
+                "reason": "竞彩nspf赔率数据不完整", "details": []}
+
+    odds_list = [
+        ("胜", open_win, close_win),
+        ("平", open_draw, close_draw),
+        ("负", open_loss, close_loss),
+    ]
+    low_label, low_open, low_close = min(odds_list, key=lambda x: x[1])
+    diff = low_close - low_open
+
+    details = [
+        {"name": "初盘", "desc": f"胜{open_win:.2f}/平{open_draw:.2f}/负{open_loss:.2f}"},
+        {"name": "终盘", "desc": f"胜{close_win:.2f}/平{close_draw:.2f}/负{close_loss:.2f}"},
+        {"name": "低赔位置", "desc": f"{low_label}赔 {low_open:.2f}→{low_close:.2f} ({diff:+.2f})"},
+    ]
+
+    if diff < -0.02:
+        direction = "upper"
+        score = 7
+        reason = f"竞彩{low_label}赔(低赔)下降{diff:.2f}，市场持续看好热门→偏上盘"
+    elif diff > 0.02:
+        direction = "lower"
+        score = 7
+        reason = f"竞彩{low_label}赔(低赔)上升{diff:+.2f}，市场对热门信心减弱→偏下盘"
+    else:
+        direction = "neutral"
+        score = 5
+        reason = f"竞彩{low_label}赔(低赔)变动极小({diff:+.2f})，方向不明"
+
+    return {"name": "竞彩赔率", "score": score, "direction": direction,
+            "reason": reason, "details": details}
+
+
+def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
+    """F6 历史同赔: 匹配竞彩历史nspf中赔率相近且变动方向一致的比赛
+
+    匹配条件: 初盘低赔±0.05 + 低赔变动方向一致
+    判定(与世界杯一致):
+    - 匹配 < 3场: neutral, score=5
+    - 低赔命中率 > 65%: upper, score=7
+    - 低赔命中率 < 40%: lower, score=7
+    - 其他: neutral, score=5
+    """
+    if not jczq_company:
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": "无竞彩nspf赔率，无法匹配历史同赔", "details": []}
+
+    initial = jczq_company.get("initial", {})
+    current = jczq_company.get("current", {})
+
+    open_win = initial.get("win")
+    open_draw = initial.get("draw")
+    open_loss = initial.get("lose")
+    close_win = current.get("win")
+    close_draw = current.get("draw")
+    close_loss = current.get("lose")
+
+    if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": "竞彩nspf赔率不完整，无法匹配", "details": []}
+
+    try:
+        result = find_similar_nspf(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
+    except Exception as e:
+        logger.warning(f"历史同赔查询失败: {e}")
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": f"查询异常: {e}", "details": []}
+
+    stats = result.get("stats", {})
+    matches = result.get("matches", [])
+    query = result.get("query", {})
+    total = stats.get("total", 0)
+
+    if total < 3:
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": f"匹配到{total}场历史比赛，样本不足(需≥3场)",
+                "details": [{"name": "匹配条件", "desc": f"低赔{query.get('low_open', 0):.2f}±0.05 方向{query.get('direction', '')}"}]}
+
+    low_hit_pct = stats.get("low_hit_pct", 50)
+
+    details = [
+        {"name": "匹配条件", "desc": f"低赔{query.get('low_open', 0):.2f}({query.get('low_position', '')})±0.05 方向{query.get('direction', '')}"},
+        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(nspf)"},
+        {"name": "低赔命中", "desc": f"{stats.get('low_hit', 0)}/{total} ({low_hit_pct:.0f}%)"},
+        {"name": "胜平负分布", "desc": f"主胜{stats.get('wins', 0)} 平{stats.get('draws', 0)} 客胜{stats.get('losses', 0)}"},
+    ]
+    if stats.get("ah_total", 0) > 0:
+        details.append({"name": "亚盘分布", "desc": f"上盘{stats.get('ah_upper', 0)} 下盘{stats.get('ah_lower', 0)} (共{stats['ah_total']}场)"})
+
+    # 添加匹配比赛摘要(前5场)
+    for m in matches[:5]:
+        score_str = f"{m['home_score']}-{m['away_score']}"
+        details.append({
+            "name": f"{m.get('match_date', '')} {m.get('league_name', '')}",
+            "desc": f"{m.get('home_team_cn', '')} {score_str} {m.get('away_team_cn', '')}"
+        })
+
+    if low_hit_pct > 65:
+        direction = "upper"
+        score = 7
+        reason = f"历史同赔{total}场中低赔命中{low_hit_pct:.0f}%，热门稳定打出→偏上盘"
+    elif low_hit_pct < 40:
+        direction = "lower"
+        score = 7
+        reason = f"历史同赔{total}场中低赔命中仅{low_hit_pct:.0f}%，冷门频出→偏下盘"
+    else:
+        direction = "neutral"
+        score = 5
+        reason = f"历史同赔{total}场低赔命中{low_hit_pct:.0f}%，无明确倾向"
+
+    # 构建详细比赛列表(用于前端弹窗展示)
+    similar_matches = []
+    for m in matches:
+        hs, aws = m.get("home_score", 0), m.get("away_score", 0)
+        hc = m.get("handicap")
+        ah_result = None
+        if hc is not None:
+            adjusted = (hs - aws) + hc  # 负=主让,主队上盘
+            if abs(adjusted) < 1e-9:
+                ah_result = "走水"
+            elif adjusted > 0:
+                ah_result = "上盘"
+            else:
+                ah_result = "下盘"
+        similar_matches.append({
+            "similarity": m.get("similarity", 0),
+            "date": m.get("match_date", ""),
+            "league": m.get("league_name", ""),
+            "homeTeam": m.get("home_team_cn", ""),
+            "awayTeam": m.get("away_team_cn", ""),
+            "score": f"{hs}-{aws}",
+            "result": {"H": "主胜", "D": "平局", "A": "客胜"}.get(m.get("result"), ""),
+            "handicap": _fmt_handicap(hc) if hc is not None else "",
+            "ahResult": ah_result,
+            "openOdds": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
+            "closeOdds": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
+        })
+
+    return {"name": "历史同赔", "score": score, "direction": direction,
+            "reason": reason, "details": details, "matches": similar_matches}
+
+
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
                   asian_data: Optional[List] = None,
                   euro_data: Optional[Dict] = None) -> Dict[str, Any]:
@@ -1986,19 +2166,26 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     is_home_let = handicap is not None and float(handicap) < 0
     is_single = bool(match_info.get("is_single"))
 
-    # F4 市场信号：初盘+亚盘变动+欧赔变动+亚欧一致性
-    f4 = calc_factor4(asian_data or [], is_home_let, euro_data)
-    # F5 市场热度：纯量化（多公司水位一致性）+ 用户手动输入优先
-    f5 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"))
+    # F3 市场信号：初盘+亚盘变动+欧赔变动+亚欧一致性
+    f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
+    f3["name"] = "市场信号"
+    # F4 市场热度：纯量化（多公司水位一致性）+ 用户手动输入优先
+    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"))
+    f4["name"] = "市场热度"
 
-    # F1/F2/F3: DeepSeek推理(3次调用取多数，并行加速)
+    # F5 竞彩赔率 & F6 历史同赔: 从 jczq_odds_history 取本场 nspf 初/终盘
+    jczq_company = get_match_nspf_odds(match_info.get("match_id")) if match_info.get("match_id") else None
+    f5 = calc_factor_jczq_odds(jczq_company)
+    f6 = calc_factor_jczq_similar_odds(jczq_company)
+
+    # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
+    # 与世界杯一致: 不再投交锋历史票
     prompt = build_ai_prompt(match_info, match_data)
 
     ai_f1_list = []
-    ai_f2_list = []
     ai_f3_list = []
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     def _safe_call(_prompt):
         try:
@@ -2014,26 +2201,22 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
             ai_f1 = next((f for f in ai_factors if f["name"] == "近期状态"), None)
             if ai_f1:
                 ai_f1_list.append(ai_f1)
-            ai_f2 = next((f for f in ai_factors if f["name"] == "交锋历史"), None)
-            if ai_f2:
-                ai_f2_list.append(ai_f2)
             ai_f3 = next((f for f in ai_factors if f["name"] == "实力定位"), None)
             if ai_f3:
                 ai_f3_list.append(ai_f3)
 
     f1 = calc_factor1(match_data, match_info, ai_f1_list or None)
-    f2 = calc_factor2(match_data, match_info, ai_f2_list or None)
-    f3 = calc_factor3(match_info, ai_f3_list or None)
+    f2 = calc_factor3(match_info, ai_f3_list or None)
+    f2["name"] = "实力定位"
 
-    # F6: 单关修正（基于F5结果）
-    f6 = calc_factor6(is_single, f5["direction"], f5["score"])
+    # F7: 单关修正（基于F4市场热度结果）
+    f7 = calc_factor6(is_single, f4["direction"], f4["score"])
 
-    # 组装所有因子(保持原顺序: F1近期状态 F2交锋 F3实力 F4赔率 F5热度 F6单关)
-    all_factors = [f1, f2, f3, f4, f5, f6]
+    # 组装7因子(与世界杯对齐: F1近期 F2实力 F3市场信号 F4市场热度 F5竞彩赔率 F6历史同赔 F7单关)
+    all_factors = [f1, f2, f3, f4, f5, f6, f7]
 
-    # 综合计算(不使用盘口先验：竞彩整数盘的走水偏差不适用于真实亚盘小数盘口，
-    # 会对每场比赛施加固定下盘推力，导致系统性偏向下盘)
-    prediction = calc_prediction(all_factors)
+    # 综合计算(7因子权重, 不使用盘口先验：竞彩整数盘的走水偏差不适用于真实亚盘小数盘口)
+    prediction = calc_prediction(all_factors, FACTOR_WEIGHTS)
 
     # 生成分析文本
     analysis = generate_analysis(all_factors, prediction, match_info)

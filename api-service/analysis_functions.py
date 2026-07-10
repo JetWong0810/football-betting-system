@@ -66,18 +66,104 @@ def fetch_initial_odds(fid: str) -> Optional[Dict]:
 # 分析函数定义
 # ============================================================
 
+def find_match_by_question(question: str) -> Optional[Dict]:
+    """按问题文本直接搜 matches 表: 找主客队名都出现在问题中的比赛(顺序无关)。
+
+    用于竞彩队名(不在 KNOWN_TEAMS 里)的匹配。
+    """
+    import pymysql
+    import settings
+    conn = pymysql.connect(**settings.MYSQL_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT match_id, fid_500, home_team_name, away_team_name FROM matches
+                   WHERE CHAR_LENGTH(home_team_name) >= 2 AND CHAR_LENGTH(away_team_name) >= 2
+                     AND %s LIKE CONCAT('%%', home_team_name, '%%')
+                     AND %s LIKE CONCAT('%%', away_team_name, '%%')
+                   ORDER BY match_date DESC LIMIT 1""",
+                (question, question),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return row
+
+
+def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
+    """竞彩 nspf 历史同赔: 取本场初/终盘, 匹配 jczq_odds_history 全量池。"""
+    from jczq_similar_odds import get_match_nspf_odds, find_similar_nspf
+
+    jc = get_match_nspf_odds(match_id)
+    if not jc:
+        return None
+    init, cur = jc["initial"], jc["current"]
+    res = find_similar_nspf(
+        init["win"], init["draw"], init["lose"],
+        cur["win"], cur["draw"], cur["lose"],
+    )
+    matches = res.get("matches", [])
+    stats = res.get("stats", {})
+    if not matches or stats.get("total", 0) == 0:
+        return None
+
+    rows = []
+    for m in matches[:20]:
+        hs, aws = m.get("home_score", 0), m.get("away_score", 0)
+        hc = m.get("handicap")
+        if hc is not None:
+            adj = (hs - aws) + hc
+            ah = "上盘" if adj > 0 else ("走水" if abs(adj) < 1e-9 else "下盘")
+        else:
+            ah = "-"
+        rows.append({
+            "日期": m.get("match_date", ""),
+            "联赛": m.get("league_name", ""),
+            "主队": m.get("home_team_cn", ""),
+            "客队": m.get("away_team_cn", ""),
+            "比分": f"{hs}-{aws}",
+            "让球胜平负": {"H": "主胜", "D": "平", "A": "客胜"}.get(m.get("result"), "-"),
+            "初盘": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
+            "终盘": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
+            "盘口结果": ah,
+            "相似度": f"{m.get('similarity', 0)}%",
+        })
+
+    q = res.get("query", {})
+    return {
+        "source": "竞彩(同赔)",
+        "text": (f"竞彩nspf初盘 {init['win']:.2f}/{init['draw']:.2f}/{init['lose']:.2f} → "
+                 f"终盘 {cur['win']:.2f}/{cur['draw']:.2f}/{cur['lose']:.2f}，"
+                 f"低赔{q.get('low_open', 0):.2f}({q.get('low_position', '')}) 方向{q.get('direction', '')} | "
+                 f"匹配{stats.get('total', 0)}场 低赔命中{stats.get('low_hit_pct', 0)}%"),
+        "sql": "",
+        "rows": rows,
+    }
+
+
 def similar_odds(question: str, **kwargs) -> Optional[Dict[str, Any]]:
-    """同赔匹配：找出历史上竞彩初盘低赔接近的比赛"""
-    teams = extract_teams(question)
-    if len(teams) < 2:
-        return None
-
-    match = find_match_fid(teams[0], teams[1])
+    """同赔匹配：找出历史上赔率相近的比赛。优先竞彩nspf池，回退世界杯库。"""
+    # 优先: 按问题文本直接搜竞彩比赛(竞彩队名不在 KNOWN_TEAMS)
+    match = find_match_by_question(question)
     if not match:
-        return None
+        # 回退: 世界杯队名提取
+        teams = extract_teams(question)
+        if len(teams) < 2:
+            return None
+        match = find_match_fid(teams[0], teams[1])
+        if not match:
+            return None
 
-    fid = str(match.get("fid_500", "")) if match.get("fid_500") else None
     match_id = str(match.get("match_id", ""))
+
+    # 优先: 竞彩 nspf 历史同赔池 (jczq_odds_history 全量)
+    if match_id.startswith("jczq_"):
+        jc_res = _jczq_similar_rows(match_id)
+        if jc_res:
+            return jc_res
+
+    # 回退: 世界杯同赔 (SQLite)
+    fid = str(match.get("fid_500", "")) if match.get("fid_500") else None
 
     # 获取竞彩初盘
     win_odds = draw_odds = lose_odds = None

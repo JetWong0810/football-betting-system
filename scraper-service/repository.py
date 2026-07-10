@@ -94,6 +94,57 @@ class OddsRepository:
         with get_db() as conn:
             _execute(conn, sql, values)
 
+    def append_odds_history(self, item: Dict[str, Any]) -> None:
+        """记录竞彩赔率变动到 jczq_odds_history。
+
+        与同场同类型最后一条对比；有变动(任一差值>0.005)或首条则 append。
+        direction_*=新-旧的符号(-1/0/+1)。earliest=初盘, latest=终盘。
+        odds_type 映射 had->spf / hhad->nspf 与历史导入口径一致。
+        """
+        match_id = item.get("match_id")
+        # had/hhad(竞彩) -> spf/nspf(jczq_odds_history 约定)
+        _TYPE_MAP = {"had": "spf", "hhad": "nspf"}
+        odds_type = _TYPE_MAP.get(item.get("odds_type"))
+        if not match_id or not odds_type:
+            return
+        try:
+            win = float(item.get("win_odds") or 0)
+            draw = float(item.get("draw_odds") or 0)
+            lose = float(item.get("lose_odds") or 0)
+        except (TypeError, ValueError):
+            return
+        if win <= 0 and draw <= 0 and lose <= 0:
+            return
+
+        now = datetime.utcnow().replace(microsecond=0)
+        with get_db() as conn:
+            cur = _execute(
+                conn,
+                """SELECT odds_win, odds_draw, odds_loss FROM jczq_odds_history
+                   WHERE match_id=%s AND odds_type=%s
+                   ORDER BY change_time DESC LIMIT 1""",
+                (match_id, odds_type),
+            )
+            prev = cur.fetchone()
+            if prev:
+                pw, pd, pl = float(prev["odds_win"]), float(prev["odds_draw"]), float(prev["odds_loss"])
+                # 赔率无变化则跳过(避免每10分钟写一条无意义记录)
+                if abs(win - pw) < 0.005 and abs(draw - pd) < 0.005 and abs(lose - pl) < 0.005:
+                    return
+                dw = 0 if abs(win - pw) < 0.005 else (1 if win > pw else -1)
+                dd = 0 if abs(draw - pd) < 0.005 else (1 if draw > pd else -1)
+                dl = 0 if abs(lose - pl) < 0.005 else (1 if lose > pl else -1)
+            else:
+                dw = dd = dl = 0
+            _execute(
+                conn,
+                """INSERT IGNORE INTO jczq_odds_history
+                   (match_id, odds_type, odds_win, odds_draw, odds_loss,
+                    direction_win, direction_draw, direction_loss, change_time)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (match_id, odds_type, win, draw, lose, dw, dd, dl, now),
+            )
+
     def upsert_odds_score_bulk(self, match_id: str, rows: Iterable[Dict[str, Any]]) -> None:
         rows = list(rows)
         if not rows:

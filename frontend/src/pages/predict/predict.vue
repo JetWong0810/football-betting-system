@@ -77,6 +77,10 @@
                 <text class="sub-desc">{{ sub.desc }}</text>
               </view>
             </view>
+            <!-- 历史同赔详情入口 -->
+            <view v-if="step.status === 'done' && step.matches && step.matches.length > 0" class="detail-action" @tap="showSimilarModal = true">
+              <text class="detail-action-text">查看详细同赔数据 ▸</text>
+            </view>
           </view>
         </view>
       </view>
@@ -287,6 +291,48 @@
       </view>
     </view>
 
+    <!-- 历史同赔详情弹窗 -->
+    <view class="similar-mask" v-if="showSimilarModal" @tap="showSimilarModal = false"></view>
+    <view class="similar-modal" :class="{ show: showSimilarModal }">
+      <view class="similar-header">
+        <text class="similar-title">历史同赔详情</text>
+        <text class="similar-close" @tap="showSimilarModal = false">✕</text>
+      </view>
+      <scroll-view class="similar-body" scroll-y scroll-x>
+        <view class="similar-table">
+          <view class="similar-row similar-thead">
+            <text class="col-sim">相似度</text>
+            <text class="col-date">日期</text>
+            <text class="col-league">联赛</text>
+            <text class="col-team">主队</text>
+            <text class="col-score">比分</text>
+            <text class="col-team">客队</text>
+            <text class="col-result">结果</text>
+            <text class="col-odds">初盘</text>
+            <text class="col-odds">终盘</text>
+            <text class="col-handicap">让球</text>
+            <text class="col-ah-result">盘路</text>
+          </view>
+          <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
+            <text class="col-sim">{{ m.similarity }}%</text>
+            <text class="col-date">{{ m.date }}</text>
+            <text class="col-league">{{ m.league }}</text>
+            <text class="col-team">{{ m.homeTeam }}</text>
+            <text class="col-score">{{ m.score }}</text>
+            <text class="col-team">{{ m.awayTeam }}</text>
+            <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
+            <text class="col-odds">{{ m.openOdds }}</text>
+            <text class="col-odds">{{ m.closeOdds }}</text>
+            <text class="col-handicap">{{ m.handicap || '-' }}</text>
+            <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
+          </view>
+          <view v-if="similarMatches.length === 0" class="similar-empty">
+            <text>暂无历史同赔数据</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
     <!-- 日期选择弹窗 -->
     <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
     <view class="cal-panel" :class="{ visible: showCalendar }">
@@ -338,6 +384,8 @@ const analysisComplete = ref(false)
 const analysisSteps = ref([])
 const prediction = ref({ direction: '', confidence: 0, overallReverse: false })
 const aiAnalysis = ref('')
+const showSimilarModal = ref(false)
+const similarMatches = ref([])
 
 const allMatches = ref([])
 const loadingMatches = ref(false)
@@ -637,7 +685,7 @@ const predictionHit = computed(() => {
   return actualDirection.value === prediction.value.direction
 })
 
-const factorNames = ['近期状态', '交锋历史', '实力定位', '市场信号', '市场热度', '单关修正']
+const factorNames = ['近期状态', '实力定位', '市场信号', '市场热度', '竞彩赔率', '历史同赔', '单关修正']
 
 function selectMatch(match) {
   selectedMatch.value = match
@@ -666,6 +714,7 @@ async function startAnalysis() {
     dirLabel: '中性',
     dirClass: 'neutral',
     details: [],
+    matches: [],
     status: 'pending'
   }))
 
@@ -700,6 +749,10 @@ async function startAnalysis() {
       analysisSteps.value[i].dirLabel = factor.direction === 'upper' ? '上盘' : factor.direction === 'lower' ? '下盘' : '中性'
       analysisSteps.value[i].dirClass = factor.direction || 'neutral'
       analysisSteps.value[i].details = factor.details || []
+      analysisSteps.value[i].matches = factor.matches || []
+      if (factor.matches && factor.matches.length > 0) {
+        similarMatches.value = factor.matches
+      }
       analysisSteps.value[i].status = 'done'
     }
 
@@ -781,6 +834,20 @@ function formatHandicap(v) {
   if (v === undefined || v === null) return ''
   const num = Number(v)
   return num > 0 ? `+${num}` : `${num}`
+}
+
+function resultClass(result) {
+  if (result === '主胜') return 'r-win'
+  if (result === '平局') return 'r-draw'
+  if (result === '客胜') return 'r-loss'
+  return ''
+}
+
+function ahResultClass(ah) {
+  if (ah === '上盘') return 'ah-upper'
+  if (ah === '下盘') return 'ah-lower'
+  if (ah === '走水') return 'ah-push'
+  return ''
 }
 
 function pickLeagueColor(league) {
@@ -1177,6 +1244,88 @@ onShow(() => {
     }
   }
 }
+
+/* 历史同赔详情入口按钮 */
+.detail-action {
+  margin-top: 10rpx;
+  align-self: flex-start;
+  padding: 6rpx 16rpx;
+  background: #f0fdf9;
+  border: 1rpx solid #99f6e4;
+  border-radius: 6rpx;
+}
+.detail-action-text {
+  font-size: 20rpx;
+  color: #0d9488;
+}
+
+/* 历史同赔详情弹窗 */
+.similar-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 200; }
+.similar-modal {
+  position: fixed;
+  top: 5vh;
+  left: 3vw;
+  right: 3vw;
+  bottom: 5vh;
+  background: #fff;
+  border-radius: 16rpx;
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  transform: scale(0.9);
+  opacity: 0;
+  transition: all 0.25s;
+  pointer-events: none;
+
+  &.show { transform: scale(1); opacity: 1; pointer-events: auto; }
+}
+.similar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20rpx 24rpx;
+  border-bottom: 1rpx solid #e2e8f0;
+  flex-shrink: 0;
+}
+.similar-title { font-size: 28rpx; font-weight: 600; color: #1e293b; }
+.similar-close { font-size: 32rpx; color: #94a3b8; padding: 8rpx; }
+.similar-body { flex: 1; overflow: auto; }
+.similar-table { min-width: 1300rpx; padding: 0 16rpx 24rpx; }
+.similar-row {
+  display: flex;
+  align-items: center;
+  padding: 14rpx 0;
+  border-bottom: 1rpx solid #f1f5f9;
+  gap: 4rpx;
+}
+.similar-thead {
+  position: sticky;
+  top: 0;
+  background: #f8fafb;
+  font-weight: 600;
+  color: #64748b;
+  font-size: 20rpx;
+  z-index: 1;
+}
+.similar-row:not(.similar-thead) { font-size: 20rpx; color: #334155; }
+.similar-empty { text-align: center; padding: 60rpx; color: #94a3b8; font-size: 24rpx; }
+
+.col-sim { width: 90rpx; text-align: center; }
+.col-date { width: 110rpx; text-align: center; }
+.col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-team { width: 130rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-score { width: 70rpx; text-align: center; font-weight: 600; }
+.col-result { width: 70rpx; text-align: center; font-weight: 500; }
+.col-odds { width: 170rpx; text-align: center; }
+.col-handicap { width: 70rpx; text-align: center; }
+.col-ah-result { width: 70rpx; text-align: center; font-weight: 500; }
+
+.r-win { color: #dc2626; }
+.r-draw { color: #d97706; }
+.r-loss { color: #059669; }
+.ah-upper { color: #dc2626; }
+.ah-lower { color: #059669; }
+.ah-push { color: #64748b; }
 
 /* ===== 分析结果 ===== */
 .analysis-result {

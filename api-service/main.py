@@ -1193,6 +1193,7 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
 
     # 构建比赛信息
     match_info = {
+        "match_id": match_id,
         "league": match.get("league_name"),
         "home_team": match.get("home_team_name"),
         "away_team": match.get("away_team_name"),
@@ -1543,6 +1544,20 @@ def worldcup_similar_odds(
 
     result = find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
     return result
+
+
+@app.get("/api/similar-odds")
+def jczq_similar_odds(
+    open_win: float = None, open_draw: float = None, open_loss: float = None,
+    close_win: float = None, close_draw: float = None, close_loss: float = None,
+):
+    """竞彩历史同赔独立查询接口(nspf口径, 2018-2026全量池)"""
+    from jczq_similar_odds import find_similar_nspf
+
+    if None in (open_win, open_draw, open_loss, close_win, close_draw, close_loss):
+        raise HTTPException(status_code=400, detail="请填写完整的初盘和终盘赔率")
+
+    return find_similar_nspf(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
 
 
 @app.get("/api/match-results")
