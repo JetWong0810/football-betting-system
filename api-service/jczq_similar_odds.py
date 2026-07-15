@@ -23,6 +23,7 @@ RESULT_MAP = {"win": "H", "draw": "D", "loss": "A"}
 
 # 历史池缓存: 2018-2025 静态数据，进程内只加载一次
 _pool_cache: Optional[List[Dict]] = None
+_spf_pool_cache: Optional[List[Dict]] = None
 
 
 def _get_conn():
@@ -170,22 +171,22 @@ def _calc_stats(matches: List[Dict]) -> Dict:
     }
 
 
-def get_match_nspf_odds(match_id: str) -> Optional[Dict]:
-    """取某场竞彩比赛的 nspf 初盘/终盘, 组装成 jczq_company dict。
+def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict]:
+    """取某场竞彩比赛指定口径的初盘/终盘, 组装成 jczq_company dict。
 
-    供 calc_factor_jczq_odds / calc_factor_jczq_similar_odds 使用。
-    initial=最早变动行, current=最晚变动行。变动<1行返回 None。
+    odds_type: 'nspf'(让球胜平负, 供F6历史同赔匹配历史池) 或 'spf'(胜平负, 供F5竞彩赔率, 同世界杯口径)。
+    initial=最早变动行, current=最晚变动行。无记录返回 None。
     """
     sql = """
         SELECT odds_win, odds_draw, odds_loss, change_time
         FROM jczq_odds_history
-        WHERE match_id = %s AND odds_type = 'nspf'
+        WHERE match_id = %s AND odds_type = %s
         ORDER BY change_time
     """
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (match_id,))
+            cur.execute(sql, (match_id, odds_type))
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -198,13 +199,97 @@ def get_match_nspf_odds(match_id: str) -> Optional[Dict]:
     }
 
 
+def get_match_nspf_odds(match_id: str) -> Optional[Dict]:
+    """让球胜平负(nspf)初终盘 — 供 F6 历史同赔匹配 nspf 历史池。"""
+    return get_match_jczq_odds(match_id, "nspf")
+
+
+def get_match_spf_odds(match_id: str) -> Optional[Dict]:
+    """胜平负(spf)初终盘 — 供 F5 竞彩赔率因子, 与世界杯口径一致。"""
+    return get_match_jczq_odds(match_id, "spf")
+
+
 def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
                       close_win: float, close_draw: float, close_loss: float,
                       tolerance: float = TOLERANCE) -> Dict:
-    """核心匹配: 初盘低赔±tolerance + 低赔变动方向一致。
+    """核心匹配(让球胜平负 nspf 口径): 初盘低赔±tolerance + 低赔变动方向一致。
 
     Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
     """
+    return _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
+                         tolerance, pool_loader=get_nspf_pool)
+
+
+def get_spf_pool() -> List[Dict]:
+    """spf(胜平负)历史同赔池: 每场初盘+终盘+比分+盘口, 结果按raw比分算(主胜/平/客胜)。
+
+    过滤: spf 变动≥2 + 已完赛 + hhad盘口存在。口径与世界杯一致。
+    """
+    global _spf_pool_cache
+    if _spf_pool_cache is not None:
+        return _spf_pool_cache
+    sql = """
+        SELECT
+            m.match_id, m.match_date, m.league_name,
+            m.home_team_name, m.away_team_name,
+            m.home_score, m.away_score,
+            COALESCE(o.handicap, 0) AS handicap,
+            f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
+            l.odds_win  AS close_win, l.odds_draw  AS close_draw, l.odds_loss  AS close_loss
+        FROM (
+            SELECT match_id, MIN(change_time) mn, MAX(change_time) mx
+            FROM jczq_odds_history
+            WHERE odds_type = 'spf'
+            GROUP BY match_id
+            HAVING COUNT(*) >= 2
+        ) t
+        JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'spf' AND f.change_time = t.mn
+        JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'spf' AND l.change_time = t.mx
+        JOIN matches m ON m.match_id = t.match_id
+        LEFT JOIN odds_win_draw_lose o ON o.match_id = t.match_id AND o.odds_type = 'hhad'
+        WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+    """
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    pool = []
+    for r in rows:
+        # spf 结果按 raw 比分(不用让球)
+        try:
+            diff = int(r["home_score"]) - int(r["away_score"])
+        except (TypeError, ValueError):
+            continue
+        if diff > 0:
+            result = "H"
+        elif diff == 0:
+            result = "D"
+        else:
+            result = "A"
+        pool.append({
+            "match_id": r["match_id"],
+            "match_date": str(r["match_date"]) if r["match_date"] else "",
+            "league_name": r["league_name"] or "",
+            "home_team": r["home_team_name"] or "",
+            "away_team": r["away_team_name"] or "",
+            "home_score": int(r["home_score"]),
+            "away_score": int(r["away_score"]),
+            "handicap": float(r["handicap"]),
+            "result": result,
+            "open_win": float(r["open_win"]), "open_draw": float(r["open_draw"]), "open_loss": float(r["open_loss"]),
+            "close_win": float(r["close_win"]), "close_draw": float(r["close_draw"]), "close_loss": float(r["close_loss"]),
+        })
+    _spf_pool_cache = pool
+    return pool
+
+
+def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
+                  tolerance: float, pool_loader) -> Dict:
+    """共享匹配逻辑: 初盘低赔±tolerance + 低赔变动方向一致。"""
     input_low_key, input_low_open, input_direction = _get_low_odds_info(
         open_win, open_draw, open_loss, close_win, close_draw, close_loss
     )
@@ -212,7 +297,7 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
         return {"query": {}, "matches": [], "stats": {}}
 
     low_label = LOW_LABEL[input_low_key]
-    pool = get_nspf_pool()
+    pool = pool_loader()
 
     matched = []
     for m in pool:
@@ -249,6 +334,17 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
         "matches": matched,
         "stats": stats,
     }
+
+
+def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
+                    close_win: float, close_draw: float, close_loss: float,
+                    tolerance: float = TOLERANCE) -> Dict:
+    """核心匹配(胜平负 spf 口径): 初盘低赔±tolerance + 低赔变动方向一致。
+
+    Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
+    """
+    return _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
+                         tolerance, pool_loader=get_spf_pool)
 
 
 if __name__ == "__main__":

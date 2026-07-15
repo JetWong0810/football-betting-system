@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-from jczq_similar_odds import find_similar_nspf, get_match_nspf_odds
+from jczq_similar_odds import find_similar_spf, get_match_nspf_odds, get_match_spf_odds
 
 logger = logging.getLogger(__name__)
 
@@ -2040,7 +2040,7 @@ def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
 
 
 def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
-    """F6 历史同赔: 匹配竞彩历史nspf中赔率相近且变动方向一致的比赛
+    """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.05 + 低赔变动方向一致
     判定(与世界杯一致):
@@ -2051,7 +2051,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any
     """
     if not jczq_company:
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "无竞彩nspf赔率，无法匹配历史同赔", "details": []}
+                "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": []}
 
     initial = jczq_company.get("initial", {})
     current = jczq_company.get("current", {})
@@ -2065,10 +2065,10 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any
 
     if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "竞彩nspf赔率不完整，无法匹配", "details": []}
+                "reason": "竞彩spf赔率不完整，无法匹配", "details": []}
 
     try:
-        result = find_similar_nspf(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
+        result = find_similar_spf(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
@@ -2088,7 +2088,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict]) -> Dict[str, Any
 
     details = [
         {"name": "匹配条件", "desc": f"低赔{query.get('low_open', 0):.2f}({query.get('low_position', '')})±0.05 方向{query.get('direction', '')}"},
-        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(nspf)"},
+        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf)"},
         {"name": "低赔命中", "desc": f"{stats.get('low_hit', 0)}/{total} ({low_hit_pct:.0f}%)"},
         {"name": "胜平负分布", "desc": f"主胜{stats.get('wins', 0)} 平{stats.get('draws', 0)} 客胜{stats.get('losses', 0)}"},
     ]
@@ -2174,9 +2174,11 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     f4["name"] = "市场热度"
 
     # F5 竞彩赔率 & F6 历史同赔: 从 jczq_odds_history 取本场 nspf 初/终盘
-    jczq_company = get_match_nspf_odds(match_info.get("match_id")) if match_info.get("match_id") else None
-    f5 = calc_factor_jczq_odds(jczq_company)
-    f6 = calc_factor_jczq_similar_odds(jczq_company)
+    # F5竞彩赔率 & F6历史同赔 均用 spf(胜平负)口径(与世界杯一致, 用户预期)
+    _mid = match_info.get("match_id")
+    jczq_company_spf = get_match_spf_odds(_mid) if _mid else None
+    f5 = calc_factor_jczq_odds(jczq_company_spf)
+    f6 = calc_factor_jczq_similar_odds(jczq_company_spf)
 
     # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
     # 与世界杯一致: 不再投交锋历史票

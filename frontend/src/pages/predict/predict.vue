@@ -78,7 +78,7 @@
               </view>
             </view>
             <!-- 历史同赔详情入口 -->
-            <view v-if="step.status === 'done' && step.matches && step.matches.length > 0" class="detail-action" @tap="showSimilarModal = true">
+            <view v-if="step.status === 'done' && step.matches && step.matches.length > 0" class="detail-action" @tap="openSimilarModal">
               <text class="detail-action-text">查看详细同赔数据 ▸</text>
             </view>
           </view>
@@ -292,11 +292,11 @@
     </view>
 
     <!-- 历史同赔详情弹窗 -->
-    <view class="similar-mask" v-if="showSimilarModal" @tap="showSimilarModal = false"></view>
+    <view class="similar-mask" v-if="showSimilarModal" @tap="closeSimilarModal"></view>
     <view class="similar-modal" :class="{ show: showSimilarModal }">
       <view class="similar-header">
         <text class="similar-title">历史同赔详情</text>
-        <text class="similar-close" @tap="showSimilarModal = false">✕</text>
+        <text class="similar-close" @tap="closeSimilarModal">✕</text>
       </view>
       <scroll-view class="similar-body" scroll-y scroll-x>
         <view class="similar-table">
@@ -386,6 +386,48 @@ const prediction = ref({ direction: '', confidence: 0, overallReverse: false })
 const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
 const similarMatches = ref([])
+
+// 横屏全屏展示同赔表格(安卓H5): 打开时进全屏+锁横屏, 关闭时还原
+const _lockLandscape = async () => {
+  if (typeof document === 'undefined') return
+  try {
+    const el = document.documentElement
+    if (el.requestFullscreen && !document.fullscreenElement) {
+      await el.requestFullscreen()
+    }
+  } catch (e) { /* 忽略 */ }
+  try {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.lock === 'function') {
+      await screen.orientation.lock('landscape')
+    }
+  } catch (e) { /* 静默失败:退回竖屏弹窗 */ }
+}
+const _exitFullscreen = async () => {
+  try {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.unlock === 'function') {
+      screen.orientation.unlock()
+    }
+  } catch (e) { /* 忽略 */ }
+  if (typeof document !== 'undefined' && document.fullscreenElement) {
+    try { await document.exitFullscreen() } catch (e) { /* 忽略 */ }
+  }
+}
+const openSimilarModal = async () => {
+  showSimilarModal.value = true
+  await _lockLandscape()
+}
+const closeSimilarModal = async () => {
+  showSimilarModal.value = false
+  await _exitFullscreen()
+}
+// 用户按ESC退出全屏时同步关闭弹窗
+if (typeof document !== 'undefined') {
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && showSimilarModal.value) {
+      showSimilarModal.value = false
+    }
+  })
+}
 
 const allMatches = ref([])
 const loadingMatches = ref(false)

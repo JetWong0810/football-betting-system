@@ -91,14 +91,14 @@ def find_match_by_question(question: str) -> Optional[Dict]:
 
 
 def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
-    """竞彩 nspf 历史同赔: 取本场初/终盘, 匹配 jczq_odds_history 全量池。"""
-    from jczq_similar_odds import get_match_nspf_odds, find_similar_nspf
+    """竞彩 spf(胜平负)历史同赔: 取本场初/终盘, 匹配 jczq_odds_history 全量 spf 池。"""
+    from jczq_similar_odds import get_match_spf_odds, find_similar_spf
 
-    jc = get_match_nspf_odds(match_id)
+    jc = get_match_spf_odds(match_id)
     if not jc:
         return None
     init, cur = jc["initial"], jc["current"]
-    res = find_similar_nspf(
+    res = find_similar_spf(
         init["win"], init["draw"], init["lose"],
         cur["win"], cur["draw"], cur["lose"],
     )
@@ -122,7 +122,7 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
             "主队": m.get("home_team_cn", ""),
             "客队": m.get("away_team_cn", ""),
             "比分": f"{hs}-{aws}",
-            "让球胜平负": {"H": "主胜", "D": "平", "A": "客胜"}.get(m.get("result"), "-"),
+            "胜平负": {"H": "主胜", "D": "平", "A": "客胜"}.get(m.get("result"), "-"),
             "初盘": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
             "终盘": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
             "盘口结果": ah,
@@ -132,7 +132,7 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
     q = res.get("query", {})
     return {
         "source": "竞彩(同赔)",
-        "text": (f"竞彩nspf初盘 {init['win']:.2f}/{init['draw']:.2f}/{init['lose']:.2f} → "
+        "text": (f"竞彩spf初盘 {init['win']:.2f}/{init['draw']:.2f}/{init['lose']:.2f} → "
                  f"终盘 {cur['win']:.2f}/{cur['draw']:.2f}/{cur['lose']:.2f}，"
                  f"低赔{q.get('low_open', 0):.2f}({q.get('low_position', '')}) 方向{q.get('direction', '')} | "
                  f"匹配{stats.get('total', 0)}场 低赔命中{stats.get('low_hit_pct', 0)}%"),
