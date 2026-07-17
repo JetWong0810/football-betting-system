@@ -31,7 +31,10 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 def fetch_url(zid, date):
-    return (f"{BASE_URL}?step=readpl&zxid={zid}&date={date}&wtype=spf&rnd={int(time.time()*1000)}")
+    # readpl wtype 语义反转(已用 jczq_46754 与 DB 'spf' 精确比对验证):
+    #   wtype=nspf -> 返回 胜平负(raw 1x2, 即 spf);  wtype=spf -> 返回 让球胜平负(nspf)。
+    # 抓 spf 必须用 wtype=nspf, 否则会把让球胜平负误标为 spf 污染历史池。
+    return (f"{BASE_URL}?step=readpl&zxid={zid}&date={date}&wtype=nspf&rnd={int(time.time()*1000)}")
 
 
 def parse_rows(items, match_id: str) -> List[Tuple]:

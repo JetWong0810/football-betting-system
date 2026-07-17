@@ -1134,6 +1134,76 @@ def list_predict_matches(
     return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
 
+@app.get("/api/predict/batch-similar")
+def batch_similar(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD, 默认今天"),
+    status: str = Query(default="not_started", description="not_started 或 finished"),
+):
+    """批量历史同赔(F6)分析: 所选日期全部在售(not_started)竞彩比赛逐场跑 F6。
+
+    仅 F6(纯历史同赔,无 AI 调用);池(45038场)进程内缓存,~20场 <1s。
+    返回 {date, summary, items:[{...match, hasMove, f6:{direction,score,reason,details}}]}。
+    """
+    import time as _time
+    from predict_service import calc_factor_jczq_similar_odds
+    from jczq_similar_odds import get_match_spf_odds
+
+    if not date:
+        date = _time.strftime("%Y-%m-%d", _time.localtime())
+
+    now_ts = int(_time.time())
+    where = ["match_id NOT LIKE 'jczq%%'"]
+    params: List = []
+    if status == "finished":
+        where.append("match_timestamp IS NOT NULL AND match_timestamp < %s")
+        params.append(now_ts)
+    else:
+        where.append("(match_timestamp IS NULL OR match_timestamp >= %s)")
+        params.append(now_ts)
+    where.append("match_date = %s")
+    params.append(date)
+    where_clause = "WHERE " + " AND ".join(where)
+    order = "ORDER BY match_time ASC"
+
+    from database import get_db
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM matches {where_clause} {order}", params)
+        rows = cur.fetchall()
+
+    match_ids = [r["match_id"] for r in rows]
+    odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
+
+    items = []
+    for row in rows:
+        mid = row["match_id"]
+        item = format_match(row)
+        wdl = odds_map.get(mid, {})
+        if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
+            item["handicap"] = float(wdl["hhad"]["handicap"])
+        # F6 历史同赔
+        spf = get_match_spf_odds(mid)
+        has_move = bool(spf and spf["initial"] != spf["current"])
+        if spf:
+            f6 = calc_factor_jczq_similar_odds(spf, league=item.get("league"), exclude_match_id=mid)
+        else:
+            f6 = {"name": "历史同赔", "direction": "neutral", "score": 5,
+                  "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": []}
+        item["spf"] = spf  # 本场初盘/终盘(胜平负), 供对比展示
+        item["hasMove"] = has_move
+        item["f6"] = f6
+        items.append(item)
+
+    summary = {
+        "total": len(items),
+        "upper": sum(1 for it in items if it["f6"].get("direction") == "upper"),
+        "lower": sum(1 for it in items if it["f6"].get("direction") == "lower"),
+        "neutral": sum(1 for it in items if it["f6"].get("direction") == "neutral"),
+    }
+    return {"date": date, "summary": summary, "items": items}
+
+
+
 @app.get("/api/predict/dates")
 def list_predict_dates(
     status: str = Query(default="finished", description="not_started 或 finished"),

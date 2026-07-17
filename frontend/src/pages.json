@@ -27,6 +27,16 @@
       }
     },
     {
+      "path": "pages/predict/batch-analysis",
+      "style": {
+        "navigationBarTitleText": "同赔批量分析",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
       "path": "pages/worldcup/predict",
       "style": {
         "navigationBarTitleText": "世界杯预测",

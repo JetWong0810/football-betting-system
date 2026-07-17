@@ -226,6 +226,9 @@
         <view class="sheet-handle"></view>
         <view class="sheet-header">
           <text class="sheet-title">选择赛事</text>
+          <view v-if="matchStatus === 'not_started'" class="sheet-batch-btn" @tap="goBatchSimilar">
+            <text>同赔分析</text>
+          </view>
           <view class="sheet-close" @tap="showPicker = false"><text>✕</text></view>
         </view>
 
@@ -316,7 +319,7 @@
           <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
             <text class="col-sim">{{ m.similarity }}%</text>
             <text class="col-date">{{ m.date }}</text>
-            <text class="col-league">{{ m.league }}</text>
+            <text class="col-league" :class="{ 'league-same': m.sameLeague }">{{ m.league }}</text>
             <text class="col-team">{{ m.homeTeam }}</text>
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
@@ -737,6 +740,14 @@ function selectMatch(match) {
   prediction.value = { direction: '', confidence: 0, overallReverse: false }
   aiAnalysis.value = ''
   uni.removeStorageSync('predict-last-result')
+}
+
+function goBatchSimilar() {
+  // 一键批量历史同赔分析: 跳新页, 取当前所选日期(或今天)
+  const today = new Date().toISOString().slice(0, 10)
+  const d = (filterDate.value && filterDate.value !== 'all') ? filterDate.value : today
+  showPicker.value = false
+  uni.navigateTo({ url: `/pages/predict/batch-analysis?date=${d}` })
 }
 
 async function startAnalysis() {
@@ -1355,6 +1366,7 @@ onShow(() => {
 .col-sim { width: 90rpx; text-align: center; }
 .col-date { width: 110rpx; text-align: center; }
 .col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-league.league-same { color: #2979ff; font-weight: 600; }
 .col-team { width: 130rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-score { width: 70rpx; text-align: center; font-weight: 600; }
 .col-result { width: 70rpx; text-align: center; font-weight: 500; }
@@ -1769,6 +1781,15 @@ onShow(() => {
   padding: 20rpx 28rpx 12rpx;
 
   .sheet-title { font-size: 30rpx; font-weight: 700; color: #1e293b; }
+  .sheet-batch-btn {
+    margin-left: auto;
+    margin-right: 16rpx;
+    padding: 8rpx 20rpx;
+    border-radius: 6rpx;
+    border: 1rpx solid #0d9488;
+    background: #0d9488;
+    text { font-size: 24rpx; color: #ffffff; white-space: nowrap; }
+  }
   .sheet-close {
     width: 48rpx; height: 48rpx;
     display: flex; align-items: center; justify-content: center;

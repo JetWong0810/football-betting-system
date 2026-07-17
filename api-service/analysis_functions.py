@@ -92,7 +92,7 @@ def find_match_by_question(question: str) -> Optional[Dict]:
 
 def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
     """竞彩 spf(胜平负)历史同赔: 取本场初/终盘, 匹配 jczq_odds_history 全量 spf 池。"""
-    from jczq_similar_odds import get_match_spf_odds, find_similar_spf
+    from jczq_similar_odds import get_match_spf_odds, find_similar_spf, _ah_outcome
 
     jc = get_match_spf_odds(match_id)
     if not jc:
@@ -101,6 +101,7 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
     res = find_similar_spf(
         init["win"], init["draw"], init["lose"],
         cur["win"], cur["draw"], cur["lose"],
+        exclude_match_id=match_id,
     )
     matches = res.get("matches", [])
     stats = res.get("stats", {})
@@ -111,11 +112,9 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
     for m in matches[:20]:
         hs, aws = m.get("home_score", 0), m.get("away_score", 0)
         hc = m.get("handicap")
-        if hc is not None:
-            adj = (hs - aws) + hc
-            ah = "上盘" if adj > 0 else ("走水" if abs(adj) < 1e-9 else "下盘")
-        else:
-            ah = "-"
+        out = _ah_outcome(hs, aws, hc, m.get("hist_low_key"))
+        ah = out[0] if out else "-"
+        hcap = ("0" if hc == 0 else f"{hc:+.2f}") if hc is not None else "-"
         rows.append({
             "日期": m.get("match_date", ""),
             "联赛": m.get("league_name", ""),
@@ -125,6 +124,7 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
             "胜平负": {"H": "主胜", "D": "平", "A": "客胜"}.get(m.get("result"), "-"),
             "初盘": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
             "终盘": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
+            "让球": hcap,
             "盘口结果": ah,
             "相似度": f"{m.get('similarity', 0)}%",
         })
@@ -135,7 +135,8 @@ def _jczq_similar_rows(match_id: str) -> Optional[Dict[str, Any]]:
         "text": (f"竞彩spf初盘 {init['win']:.2f}/{init['draw']:.2f}/{init['lose']:.2f} → "
                  f"终盘 {cur['win']:.2f}/{cur['draw']:.2f}/{cur['lose']:.2f}，"
                  f"低赔{q.get('low_open', 0):.2f}({q.get('low_position', '')}) 方向{q.get('direction', '')} | "
-                 f"匹配{stats.get('total', 0)}场 低赔命中{stats.get('low_hit_pct', 0)}%"),
+                 f"匹配{stats.get('total', 0)}场, 其中{stats.get('ah_total', 0)}场有亚盘: "
+                 f"上盘{stats.get('ah_upper_pct', 0)}% 下盘{stats.get('ah_lower_pct', 0)}%"),
         "sql": "",
         "rows": rows,
     }
