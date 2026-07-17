@@ -10,13 +10,14 @@
         <view class="chip upper"><text>↑ 上盘 {{ summary.upper }}</text></view>
         <view class="chip lower"><text>↓ 下盘 {{ summary.lower }}</text></view>
         <view class="chip neutral"><text>− 中性 {{ summary.neutral }}</text></view>
+        <view v-if="isFinished && summary.hitTotal" class="chip hit"><text>命中 {{ summary.hitRate }}% ({{ summary.hitTotal }}场)</text></view>
       </view>
     </view>
 
     <!-- 加载态 -->
     <view v-if="loading" class="state-hint"><text>批量同赔分析中…</text></view>
     <!-- 空态 -->
-    <view v-else-if="items.length === 0" class="state-hint"><text>该日无在售竞彩比赛</text></view>
+    <view v-else-if="items.length === 0" class="state-hint"><text>该日无{{ isFinished ? '已结束' : '在售' }}竞彩比赛</text></view>
     <!-- 列表 -->
     <scroll-view v-else class="card-list" scroll-y>
       <view
@@ -64,6 +65,24 @@
           <view class="move-tag" :class="it.hasMove ? 'move-yes' : 'move-no'">
             <text>{{ it.hasMove ? '有变动' : '无变动' }}</text>
           </view>
+        </view>
+
+        <!-- 实际比分/结果/盘路(已结束回测) -->
+        <view class="actual-box" v-if="isFinished && it.actualScore">
+          <view class="actual-cell">
+            <text class="ac-label">比分</text>
+            <text class="ac-val score-val">{{ it.actualScore }}</text>
+          </view>
+          <view class="actual-cell">
+            <text class="ac-label">结果</text>
+            <text class="ac-val" :class="resultClass(it.actualResult)">{{ it.actualResult || '-' }}</text>
+          </view>
+          <view class="actual-cell">
+            <text class="ac-label">盘路</text>
+            <text class="ac-val" :class="ahResultClass(it.actualAh)">{{ it.actualAh || '无亚盘' }}</text>
+          </view>
+          <view class="hit-tag" v-if="it.hit === true"><text>命中</text></view>
+          <view class="hit-tag miss" v-else-if="it.hit === false"><text>未中</text></view>
         </view>
 
         <!-- 盘路统计摘要 -->
@@ -129,11 +148,14 @@ import { onLoad } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 
 const date = ref('')
+const status = ref('not_started')
 const loading = ref(true)
 const items = ref([])
 const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
 const showSimilar = ref(false)
 const similarMatches = ref([])
+
+const isFinished = computed(() => status.value === 'finished')
 
 const DIR_ORDER = { upper: 0, lower: 1, neutral: 2 }
 const sortedItems = computed(() => {
@@ -187,7 +209,7 @@ function closeSimilar() {
 async function loadBatch() {
   loading.value = true
   try {
-    const data = await request({ url: '/api/predict/batch-similar', data: { date: date.value } })
+    const data = await request({ url: '/api/predict/batch-similar', data: { date: date.value, status: status.value } })
     items.value = data?.items || []
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
   } catch (e) {
@@ -200,6 +222,7 @@ async function loadBatch() {
 onLoad((options) => {
   const today = new Date().toISOString().slice(0, 10)
   date.value = options?.date || today
+  status.value = options?.status || 'not_started'
   loadBatch()
 })
 </script>
@@ -297,6 +320,23 @@ onLoad((options) => {
   margin-bottom: 8rpx;
   .stat-desc { font-size: 22rpx; color: #475569; }
 }
+
+/* 实际结果(回测) */
+.actual-box {
+  display: flex; align-items: center; gap: 20rpx;
+  padding: 14rpx 16rpx; background: #fffbeb; border-radius: 8rpx;
+  margin-bottom: 14rpx; border: 1rpx solid #fde68a;
+  .actual-cell { display: flex; flex-direction: column; gap: 4rpx; }
+  .ac-label { font-size: 18rpx; color: #94a3b8; }
+  .ac-val { font-size: 24rpx; color: #334155; font-weight: 500; }
+  .score-val { font-size: 26rpx; font-weight: 700; color: #1e293b; }
+  .hit-tag {
+    margin-left: auto; padding: 6rpx 16rpx; border-radius: 6rpx;
+    background: #ecfdf5; text { font-size: 20rpx; color: #059669; font-weight: 600; }
+    &.miss { background: #fef2f2; text { color: #dc2626; } }
+  }
+}
+
 .reason-row {
   margin-bottom: 14rpx;
   text { font-size: 22rpx; color: #334155; line-height: 1.5; }

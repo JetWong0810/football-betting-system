@@ -226,7 +226,7 @@
         <view class="sheet-handle"></view>
         <view class="sheet-header">
           <text class="sheet-title">选择赛事</text>
-          <view v-if="matchStatus === 'not_started'" class="sheet-batch-btn" @tap="goBatchSimilar">
+          <view class="sheet-batch-btn" @tap="goBatchSimilar">
             <text>同赔分析</text>
           </view>
           <view class="sheet-close" @tap="showPicker = false"><text>✕</text></view>
@@ -743,11 +743,11 @@ function selectMatch(match) {
 }
 
 function goBatchSimilar() {
-  // 一键批量历史同赔分析: 跳新页, 取当前所选日期(或今天)
+  // 一键批量历史同赔分析: 跳新页, 取当前所选日期(或今天) + 当前状态(未开始/已结束)
   const today = new Date().toISOString().slice(0, 10)
   const d = (filterDate.value && filterDate.value !== 'all') ? filterDate.value : today
   showPicker.value = false
-  uni.navigateTo({ url: `/pages/predict/batch-analysis?date=${d}` })
+  uni.navigateTo({ url: `/pages/predict/batch-analysis?date=${d}&status=${matchStatus.value}` })
 }
 
 async function startAnalysis() {

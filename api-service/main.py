@@ -1139,14 +1139,16 @@ def batch_similar(
     date: Optional[str] = Query(default=None, description="YYYY-MM-DD, 默认今天"),
     status: str = Query(default="not_started", description="not_started 或 finished"),
 ):
-    """批量历史同赔(F6)分析: 所选日期全部在售(not_started)竞彩比赛逐场跑 F6。
+    """批量历史同赔(F6)分析: 所选日期竞彩比赛逐场跑 F6。
 
+    status=not_started(在售) 或 finished(已结束, 回测视角)。
     仅 F6(纯历史同赔,无 AI 调用);池(45038场)进程内缓存,~20场 <1s。
-    返回 {date, summary, items:[{...match, hasMove, f6:{direction,score,reason,details}}]}。
+    已结束场额外返回 actualScore/actualResult/actualAh/handicap(亚盘)/hit(命中),
+    供对比 F6 方向与实际盘路(回测)。
     """
     import time as _time
     from predict_service import calc_factor_jczq_similar_odds
-    from jczq_similar_odds import get_match_spf_odds
+    from jczq_similar_odds import get_match_spf_odds, _ah_outcome, _get_low_odds_info
 
     if not date:
         date = _time.strftime("%Y-%m-%d", _time.localtime())
@@ -1157,11 +1159,16 @@ def batch_similar(
     if status == "finished":
         where.append("match_timestamp IS NOT NULL AND match_timestamp < %s")
         params.append(now_ts)
+        # 已结束按售卖期号(match_number前缀)查, 与预测页finished picker一致(显示整个售卖期, 跨凌晨场也含)
+        date_prefix = date[2:].replace("-", "")
+        where.append("match_number LIKE %s")
+        params.append(f"{date_prefix}%")
     else:
         where.append("(match_timestamp IS NULL OR match_timestamp >= %s)")
         params.append(now_ts)
-    where.append("match_date = %s")
-    params.append(date)
+        # 未开始按match_date查(picker按matchDate过滤)
+        where.append("match_date = %s")
+        params.append(date)
     where_clause = "WHERE " + " AND ".join(where)
     order = "ORDER BY match_time ASC"
 
@@ -1170,6 +1177,24 @@ def batch_similar(
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM matches {where_clause} {order}", params)
         rows = cur.fetchall()
+        # 批量取本场亚盘让球(jczq_ah_history.close_handicap, 标准亚盘负=主让)用于实际盘路
+        ah_map = {}
+        if rows:
+            mids = [r["match_id"] for r in rows]
+            cur.execute(
+                "SELECT match_id, close_handicap FROM jczq_ah_history WHERE match_id IN (%s)"
+                % ",".join(["%s"] * len(mids)), mids)
+            for ar in cur.fetchall():
+                if ar.get("close_handicap") is not None:
+                    ah_map[ar["match_id"]] = float(ar["close_handicap"])
+        # 兜底1: matches.asian_handicap(500.com原值正=主让, 取反为负=主让; 由赛果页/回填脚本写入)
+        for r in rows:
+            if r["match_id"] not in ah_map and r.get("asian_handicap") is not None:
+                try:
+                    ah_map[r["match_id"]] = -float(r["asian_handicap"])
+                except (TypeError, ValueError):
+                    pass
+        # 注: 仍缺亚盘的已结束场(如近期未回填) actualAh 留 None/"无亚盘"; 由 backfill_ah_500.py 补 jczq_ah_history
 
     match_ids = [r["match_id"] for r in rows]
     odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
@@ -1192,6 +1217,34 @@ def batch_similar(
         item["spf"] = spf  # 本场初盘/终盘(胜平负), 供对比展示
         item["hasMove"] = has_move
         item["f6"] = f6
+
+        # 已结束: 实际比分/结果/盘路(回测)
+        if status == "finished":
+            hs, aws = row.get("home_score"), row.get("away_score")
+            item["actualScore"] = (f"{hs}-{aws}" if hs is not None and aws is not None else None)
+            if hs is not None and aws is not None:
+                diff = int(hs) - int(aws)
+                item["actualResult"] = "主胜" if diff > 0 else ("平局" if diff == 0 else "客胜")
+            ahc = ah_map.get(mid)  # 亚盘让球(负=主让)
+            item["ahHandicap"] = ahc
+            actual_ah = None
+            if hs is not None and aws is not None and ahc is not None:
+                low_key = None
+                if spf:
+                    lk = _get_low_odds_info(
+                        spf["initial"]["win"], spf["initial"]["draw"], spf["initial"]["lose"],
+                        spf["current"]["win"], spf["current"]["draw"], spf["current"]["lose"])
+                    low_key = lk[0]
+                out = _ah_outcome(int(hs), int(aws), ahc, low_key)
+                actual_ah = out[0] if out else None
+            item["actualAh"] = actual_ah
+            # 命中: F6方向(upper=上盘/lower=下盘) 与 实际盘路(上盘/半上=upper, 下盘/半下=lower) 是否一致
+            ah_to_dir = {"上盘": "upper", "半上": "upper", "下盘": "lower", "半下": "lower"}
+            f6dir = f6.get("direction")
+            if f6dir in ("upper", "lower") and actual_ah in ah_to_dir:
+                item["hit"] = ah_to_dir[actual_ah] == f6dir
+            else:
+                item["hit"] = None
         items.append(item)
 
     summary = {
@@ -1200,7 +1253,11 @@ def batch_similar(
         "lower": sum(1 for it in items if it["f6"].get("direction") == "lower"),
         "neutral": sum(1 for it in items if it["f6"].get("direction") == "neutral"),
     }
-    return {"date": date, "summary": summary, "items": items}
+    if status == "finished":
+        hits = [it for it in items if it.get("hit") is not None]
+        summary["hitRate"] = round(sum(1 for h in hits if h["hit"]) * 100 / len(hits), 1) if hits else 0
+        summary["hitTotal"] = len(hits)
+    return {"date": date, "status": status, "summary": summary, "items": items}
 
 
 
