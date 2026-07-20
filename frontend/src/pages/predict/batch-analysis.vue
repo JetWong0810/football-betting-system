@@ -129,8 +129,8 @@
             <text class="reason">{{ it.f6?.reason || '暂无同赔样本' }}</text>
           </view>
 
-          <!-- 亚盘盘口(在售也可有) -->
-          <view class="row-ah" v-if="it.ahHandicap != null || (isFinished && it.actualScore)">
+          <!-- 亚盘盘口: 在售/已结束都常显; 无数据时显示「无数据」 -->
+          <view class="row-ah">
             <text class="ah-lab">亚盘</text>
             <text v-if="it.ahHandicap != null" class="ah-num">{{ fmtAh(it.ahHandicap) }}</text>
             <text v-else class="ah-miss">无数据</text>
@@ -691,13 +691,14 @@ onLoad((options) => {
   position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 200;
 }
 .similar-modal {
-  position: fixed; top: 6vh; left: 3vw; right: 3vw; bottom: 6vh;
+  position: fixed; top: 50%; left: 3vw; right: 3vw; bottom: auto;
+  max-height: 88vh; height: auto;
   background: #fff; border-radius: 12rpx; z-index: 201;
   display: flex; flex-direction: column;
-  transform: scale(0.96); opacity: 0;
+  transform: translateY(-50%) scale(0.96); opacity: 0;
   transition: transform 0.2s ease, opacity 0.2s ease;
   pointer-events: none;
-  &.show { transform: scale(1); opacity: 1; pointer-events: auto; }
+  &.show { transform: translateY(-50%) scale(1); opacity: 1; pointer-events: auto; }
 }
 .similar-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -707,7 +708,10 @@ onLoad((options) => {
   .similar-ref { font-size: 22rpx; color: #64748b; font-variant-numeric: tabular-nums; }
   .similar-close { font-size: 24rpx; color: $frbt-primary; padding: 8rpx 4rpx; }
 }
-.similar-body { flex: 1; overflow: auto; }
+.similar-body {
+  flex: 0 1 auto; overflow: auto; min-height: 0;
+  max-height: calc(88vh - 100rpx);
+}
 .similar-table { min-width: 1300rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex; align-items: center; padding: 14rpx 0;

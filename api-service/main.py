@@ -1164,8 +1164,8 @@ def batch_similar(
 
     status=not_started(在售) 或 finished(已结束, 回测视角)。
     仅 F6(纯历史同赔,无 AI 调用);池(45038场)进程内缓存,~20场 <1s。
-    已结束场额外返回 actualScore/actualResult/actualAh/handicap(亚盘)/hit(命中),
-    供对比 F6 方向与实际盘路(回测)。
+    在售/已结束均返回 ahHandicap(亚盘,缺则懒抓500.com); 已结束额外返回
+    actualScore/actualResult/actualAh/hit, 供对比 F6 方向与实际盘路(回测)。
     """
     import time as _time
     from predict_service import calc_factor_jczq_similar_odds
@@ -1215,13 +1215,10 @@ def batch_similar(
                 except (TypeError, ValueError):
                     pass
 
-    # 已结束且仍缺亚盘: 与赛果页同逻辑,从 500.com 懒抓并缓存到 matches.asian_handicap
-    # (jczq_ah_history 主要挂 jczq_* 历史 ID,体彩在售 ID 通常不在其中)
-    if status == "finished" and rows:
-        need_asian = [
-            r for r in rows
-            if r["match_id"] not in ah_map and r.get("home_score") is not None
-        ]
+    # 在售/已结束缺亚盘: 与赛果页同逻辑,从 500.com 懒抓并缓存到 matches.asian_handicap
+    # (jczq_ah_history 主要挂 jczq_* 历史 ID,体彩场通常不在其中; 在售同样需要懒抓才能展示)
+    if rows:
+        need_asian = [r for r in rows if r["match_id"] not in ah_map]
         if need_asian:
             try:
                 from repository import derive_sale_date as _derive_sale_ah

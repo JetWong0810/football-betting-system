@@ -1366,21 +1366,23 @@ onShow(async () => {
 .similar-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 200; }
 .similar-modal {
   position: fixed;
-  top: 5vh;
+  top: 50%;
   left: 3vw;
   right: 3vw;
-  bottom: 5vh;
+  bottom: auto;
+  max-height: 88vh;
+  height: auto;
   background: #fff;
   border-radius: 16rpx;
   z-index: 201;
   display: flex;
   flex-direction: column;
-  transform: scale(0.9);
+  transform: translateY(-50%) scale(0.9);
   opacity: 0;
-  transition: all 0.25s;
+  transition: transform 0.25s, opacity 0.25s;
   pointer-events: none;
 
-  &.show { transform: scale(1); opacity: 1; pointer-events: auto; }
+  &.show { transform: translateY(-50%) scale(1); opacity: 1; pointer-events: auto; }
 }
 .similar-header {
   display: flex;
@@ -1392,7 +1394,12 @@ onShow(async () => {
 }
 .similar-title { font-size: 28rpx; font-weight: 600; color: #1e293b; }
 .similar-close { font-size: 32rpx; color: #94a3b8; padding: 8rpx; }
-.similar-body { flex: 1; overflow: auto; }
+.similar-body {
+  flex: 0 1 auto;
+  overflow: auto;
+  min-height: 0;
+  max-height: calc(88vh - 100rpx);
+}
 .similar-table { min-width: 1300rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex;
