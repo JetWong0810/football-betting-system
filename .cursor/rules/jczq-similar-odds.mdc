@@ -1,0 +1,66 @@
+---
+description: 竞彩7因子预测+历史同赔匹配(spf口径)的完整逻辑、过滤条件、盘路算法、readpl/spf回填坑、批量同赔分析
+globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-service/analysis_functions.py, api-service/main.py, api-service/backfill_spf_history.py, api-service/backfill_ah_500.py, api-service/backfill_ah_history.py, api-service/seed_live_spf_from_had.py, frontend/src/pages/predict/predict.vue, frontend/src/pages/predict/batch-analysis.vue
+---
+
+# 竞彩 7 因子 + 历史同赔(F6)
+
+## 7 因子(对齐世界杯,2026-07-10 定稿)
+`predict_service.predict_match` 从原 6 因子改为世界杯同构 7 因子,**去掉交锋历史**(live 因子集):
+- F1 近期状态 / F2 实力定位 / F3 市场信号 / F4 市场热度 / F5 竞彩赔率 / F6 历史同赔 / F7 单关修正。
+- 权重(FACTOR_WEIGHTS):F5/F6 各 1.5。
+- F1/F2 走 DeepSeek(`deepseek-v4-flash`,temp 0.3,3 次调用取多数,并行)。F3-F7 纯量化。
+- `calc_factor2`(交锋)保留供 backtest_factors,不进 live。
+
+## 历史同赔(F6)— `jczq_similar_odds.py`
+**口径 spf(胜平负 raw 1x2)**。池 `get_spf_pool()`:45038 场已完赛(2018-2026,world-cup 经 readpl `wtype=nspf` 抓取)+ spf 变动≥2 + 有比分 + LEFT JOIN jczq_ah_history 取 close_handicap。结果按 raw 比分算(主胜/平/客胜)。进程内缓存。
+
+`get_match_spf_odds(match_id)`:取本场初盘(最早 change_time)/终盘(最晚)。
+
+### 匹配过滤(`_find_similar`,find_similar_spf 共用)
+1. 剔除自身(`exclude_match_id`,避免回溯预测自匹配)。
+2. 低赔方(初盘三项最小=上盘球队/favorite)有值 + 有方向。
+3. **同侧**:历史低赔方 == 本场低赔方(同为胜/平/负某一项)。
+4. **初盘低赔 ±0.03**(TOLERANCE)。
+5. **终盘低赔 ±0.03**。
+6. **初盘高赔方 ±0.1**(高赔=三项最大值=underdog,新增严格过滤)。
+7. **终盘高赔方 ±0.1**。
+8. **方向一致**:初→终盘低赔变动方向(升/降/平)。**方向降级**:本场仅 1 条 spf 快照(open==current,无变动)时 `require_direction=False`,跳过方向过滤(此时方向恒"平"是数据缺失非真稳定),仅按初/终盘接近+同侧匹配。details 显"方向不限(无变动)"。
+
+相似度=(低赔初盘接近度+低赔终盘接近度)/2 × 100。排序:同联赛优先 + 相似度降序。
+
+### 盘路算法 `_ah_outcome(home, away, hc, low_key)`
+标准亚盘(负=主让)。`Net=(主-客)+hc`。
+- 上盘=让球方:hc<0 主让→主队上盘;hc>0 客让→客队上盘;**hc=0 平手盘退用 low_key**(win=主/loss=客,市场 favorite)作上盘。
+- |Net|<1e-9→走水;|Net|≈0.25→半(半上/半下);其余全(上盘/下盘)。
+- 返回 (label, stat):label∈上盘/下盘/走水/半上/半下,stat∈upper/lower/push/half_up/half_down。
+
+### 统计 `_calc_stats`
+- 胜平负分布 + 低赔命中(参考,不主导方向)。
+- **盘路纯亚盘口径**:仅对 handicap 非None 场统计。**半上归上盘、半下归下盘(各计1,不再拆给两边)**,走水单列。保留 full_up/half_up/full_down/half_down/push 子计数。上盘+下盘+走水=ah_total。
+- F6 方向:`ah_total<3`→neutral;`ah_upper_pct>65`→upper(score 7);`<40`→lower(score 7);否则 neutral(score 5)。
+
+### F6 details(predict_service.calc_factor_jczq_similar_odds)
+匹配条件(低赔初/终±0.03 + 高赔初/终±0.1 + 方向)+ 匹配场次 + 盘路分布(上盘X(全a半b) 下盘Y(全c半d) 走水Z)+ 上下盘命中 + 走水 + 样本场。返回 `matches`(similar_matches 列表,供弹窗:相似度/日期/联赛/队/比分/结果/初盘/终盘/让球/盘路)。
+
+## readpl wtype 反转(关键坑)
+见 [[data-conventions]]。抓 spf 用 `wtype=nspf`。`backfill_spf_history.py` 历史曾误用 `wtype=spf` 抓成 nspf 标 spf,已修正为 `wtype=nspf`。DB 'spf' 45038 场=真 spf(已验证 jczq_46754 精确比对)。
+
+## 在售场 spf 补种(seed_live_spf_from_had.py)
+sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 0 条 spf→F6 无数据。`seed_live_spf_from_had.py` 从 `odds_win_draw_lose.had`(=raw spf)当前值补种 1 条 spf 快照(initial==current),配合 F6 方向降级让在售场有数据可匹配。27 场竞彩未开盘 had(只有 hhad)无法补。
+
+## 亚盘回填
+- `backfill_ah_history.py`:football-data.co.uk CSV 回填(欧联,~34% 池,标准亚盘符号)。
+- `backfill_ah_500.py`:500.com 亚盘变动回填(覆盖率 99.4%,符号取反存标准)。近期已完赛日期未回填则 actualAh="无亚盘",跑 `DATES=YYYY-MM-DD python3 backfill_ah_500.py` 补(写 jczq_ah_history,需同意)。
+
+## 批量同赔分析
+- `GET /api/predict/batch-similar?date=&status=not_started|finished`(main.py)。
+- status=not_started:按 `match_date=date` 查(picker 按 matchDate 过滤)。finished:按 `match_number LIKE date前缀`(售卖期,picker 显示整个售卖期,含跨凌晨场)。
+- finished 额外返回 actualScore/actualResult/actualAh(亚盘)/hit(F6方向 vs 实际盘路)/summary.hitRate。亚盘来源:jczq_ah_history → matches.asian_handicap(取反),纯读不写。缺则"无亚盘"。
+- 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
+
+## 同赔弹窗(predict.vue / batch-analysis.vue)
+表头:相似度/日期/联赛/主队/比分/客队/结果/初盘/终盘/让球/盘路。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动(min-width 1300rpx)。
+
+## NL 查询(analysis_functions.similar_odds)
+优先竞彩 spf 池(`find_match_by_question` 按问题文本搜队名,绕过 KNOWN_TEAMS),回退世界杯 SQLite。`_jczq_similar_rows` 用 `_ah_outcome` 算盘口结果 + 亚盘让球列。

@@ -1,0 +1,43 @@
+---
+description: 本地启动开发环境、部署到服务器、Docker/Cloudflare 运维
+globs: start-local.sh,deploy/**,docker-compose*,Dockerfile
+---
+
+# 开发与部署
+
+## 本地开发
+`./start-local.sh` 管理所有服务:
+- 启动:`./start-local.sh`(起 API:7001 + Frontend:5173)
+- 重启:`./start-local.sh --restart`(报错时优先用,别手动杀进程)
+- 停止:`./start-local.sh --stop`
+- 状态:`./start-local.sh --status`
+- 日志:`logs/api-service.log`、`logs/frontend.log`
+
+API:`python3 -m uvicorn main:app --host 0.0.0.0 --port 7001`(api-service 目录,main.py 无 __main__ 入口)。
+Frontend:`npm run dev:h5`(5173,proxy 到 7001)。
+
+**注意**:本地连的是生产 MySQL(10.130.130.139:3321),DB 写直接影响线上。
+
+## 部署
+`deploy/deploy-remote.sh`:
+1. 推代码到 GitHub(JetWong0810/football-betting-system,main 分支)。
+2. ssh mysql-backup → `cd /opt/football-betting-system && git pull origin main` → `cd deploy && docker-compose up -d --build`。
+3. 四容器:football-api / football-scraper / football-frontend / football-mysql。
+
+前提:必须先 push 到 GitHub(部署脚本从 GitHub 拉,不从本地)。
+
+## 公网访问
+`fc.jetwong.top` 经 Cloudflare Tunnel(cloudflared 出站,命名隧道 football)→ 本机 :8088(nginx)。无 VPS/公网 IP。Universal SSL 首次签发可能要几分钟~1h。
+
+## 运维命令
+- 日志:`ssh mysql-backup 'cd /opt/football-betting-system/deploy && docker-compose logs -f'`
+- 状态:`ssh mysql-backup 'cd /opt/football-betting-system/deploy && docker-compose ps'`
+- 隧道:`ssh mysql-backup 'systemctl status cloudflared'` / `journalctl -u cloudflared -f`
+
+## scraper-service 改动
+scraper-service Dockerfile 构建上下文是项目根,COPY scraper-service/ 后再 COPY deploy/scraper-service/entrypoint.py 覆盖(循环模式)。改 scraper 代码后需重新部署才生效。
+
+## 规则
+- 仅在用户要求时 commit/push。
+- 部署须在 main 分支。
+- MYSQL_ROOT_PASSWORD 读 deploy/.env,勿暴露在命令行。

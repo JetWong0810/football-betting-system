@@ -1,0 +1,40 @@
+---
+description: 项目核心数据口径与符号约定(spf/nspf、亚盘符号、readpl反转、共享DB警示)
+alwaysApply: true
+---
+
+# 核心数据约定(易踩坑,改任何数据/抓取/盘口代码前必读)
+
+## spf vs nspf
+- **spf = 胜平负(raw 1x2)**,三项赔率主胜/平/客胜,不让球。
+- **nspf = 让球胜平负(handicapped 1x2)**,加上竞彩让球后的胜平负。
+- 两套口径不可混。竞彩预测 7 因子的 F5(竞彩赔率)/F6(历史同赔)均用 **spf** 口径(与世界杯一致)。
+
+## 500.com readpl 接口 wtype 反转(关键坑)
+`zx.500.com/jczq/kaijiang.php?step=readpl&zxid={zid}&date={date}&wtype=X` 的 wtype 语义与竞彩术语**相反**:
+- `wtype=nspf` → 返回 **真 spf(胜平负 raw 1x2)**
+- `wtype=spf` → 返回 **nspf(让球胜平负)**
+
+抓 spf 必须用 `wtype=nspf`,抓 nspf 用 `wtype=spf`。搞反会把 nspf 误标为 spf 污染历史池。已用 jczq_46754 精确比对验证。
+
+## 亚盘让球符号
+- 系统统一 **负=主让**(标准亚盘约定,正=主受让/主 underdog)。
+- `jczq_ah_history.close_handicap` 存标准值(负=主让)。
+- `matches.asian_handicap` 存 500.com **原值(正=主让)**,读取时须**取反**成负=主让。
+- 500.com 原始亚盘(`fetch_asian_handicap` 返回)是正=主让,predict 路径用 `-median` 取反后写 `match_info["handicap"]`。
+
+## 竞彩让球 ≠ 亚盘让球
+- 竞彩让球(`odds_win_draw_lose.handicap`,hhad)= **整数** ±1/±2/±3,正=主受让、负=主让。用于让球胜平负玩法。
+- 亚盘让球(500.com)= **小数** 0/±0.25/±0.5/±0.75/±1...,真实反映实力差。
+- 预测系统 `match_info["handicap"]` 必须用亚盘中位数(main.py 已实现),不能用竞彩 hhad 整数。展示让球也用亚盘(竞彩整数无意义)。
+- 例:曼城vs维拉 竞彩-2.00 → 亚盘-1.25;埃尔夫斯堡vs赫根 竞彩+1.00 → 亚盘0(平手)。
+
+## 共享生产 MySQL 警示
+- **本地开发 MySQL(10.130.130.139:3321)= 生产 MySQL**,共享 football-mysql 容器。本地直连即写生产。
+- 对共享表(jczq_odds_history / matches / jczq_ah_history 等)的 UPDATE/DELETE/批量 INSERT 需**用户显式同意**(auto-mode classifier 也会拦)。
+- `.env` 含 DB 密码,已 gitignore,勿提交勿外泄。
+
+## 让球数据来源(live 在售场)
+- `get_fid_for_match(sale_date, match_code)` 取 500.com fid(从 `yazhi_jczq_{date}.shtml` 列表页反查,缓存 matches.fid_500)。
+- `fetch_asian_handicap(fid)` 抓各公司即时盘,predict 取主流公司(Bet365/澳门/皇冠/威廉希尔/立博/Pinnacle)中位数。
+- 久远历史日期列表页失效→部分场拿不到 fid→用竞彩整数盘或显示"无亚盘"(用户同意历史不管)。

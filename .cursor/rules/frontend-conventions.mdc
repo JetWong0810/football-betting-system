@@ -1,0 +1,22 @@
+---
+description: 前端 UI 约定:不用 emoji、小圆角
+alwaysApply: true
+globs: frontend/**
+---
+
+# 前端 UI 约定
+
+## 不使用 emoji 图标
+所有需要 icon 的地方,优先用**简短文字**(如"赛果"、"选择日期"、"同赔分析")或**纯 CSS 绘制的简单形状**,不使用任何 emoji 字符(📅📋⚽ 等)。
+
+理由:用户不喜欢 emoji 风格,认为不精致、不符合项目简约风格。
+
+## 小圆角
+标签(chip/tab)、按钮的 `border-radius` 用 **6rpx**,不要用 20rpx+ 的大圆角 pill 形状。
+
+理由:用户明确审美偏好,小圆角更简约。
+
+## 应用
+- 所有筛选标签、按钮、badge、tag 用 6rpx 圆角。
+- 装饰用 CSS(色块、边框、渐变)而非 emoji。
+- 方向色:上盘 upper=红(#dc2626)、下盘 lower=绿(#059669)、中性 neutral=灰(#64748b),与 predict 页一致。

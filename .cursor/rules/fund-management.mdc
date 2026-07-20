@@ -1,0 +1,33 @@
+---
+description: 资金管理(信心档×比例+本金盈利分层+出金阀+控手),凯利降级为参考
+globs: "**/strategyEngine*", "**/bankrollLayer*", "**/controlStore*", "**/betStore*", frontend/src/pages/strategy/**, frontend/src/components/BetForm*, frontend/src/components/CoolDownAlert*
+---
+
+# 资金管理(2026-07 改造)
+
+## 背景
+6 因子置信度不准不稳(校准样本少、85 折拍脑袋),p 不可靠 → 凯利/EV 建立在不可靠概率上。改方案 A:**信心档作主决策,绕开置信度/EV/凯利**。
+
+## 主决策:信心档 × 固定比例
+信心档(低/中/高)× 比例,金额 = 有效资金 × 比例:
+- 激进 3/5/8% / 稳健 2/3.5/5% / 保守 1.5/2.5/3%
+- 三档比例在 `strategyEngine.PRESETS.tierRatios`。
+
+## 本金/盈利分层
+`effectiveBankroll = 本金 + 盈利金 × profitAggressiveRatio(默认 0.5)`。抑制盈利滚进本金放大仓位(3 万高信心 2400→1600)。
+
+## 出金阀
+盈利金/本金 ≥ 30% → 提示提取 50% 落袋(realizedWithdraw)。
+
+## 控手
+信心档挂钩阈值(高 3/中 4/低 5 把)→ 3 把 strong 弹窗 / 4 把 pause 隐藏入口。冷却 2h + 确认 + 降档起步恢复(recoveryLock:首注低档,赢一把解锁中,再赢解锁高)。
+
+## 凯利/EV 代码保留
+`calcRecommendedStake` 保留,降级为"系统凯利参考"小字,等校准质量上来可切回。
+
+## 关键文件
+`utils/bankrollLayer.js`、`utils/strategyEngine.js`(calcTieredStakes/checkControlAlert/PRESETS.tierRatios)、`stores/controlStore.js`、`stores/betStore.js`(effectiveBankroll/bankrollLayer/lastTier)、`components/BetForm.vue`(信心档选择器)、`components/CoolDownAlert.vue`。
+5 个资金/控手标量已同步后端 user_configs(profit_aggressive_ratio/withdraw_threshold/withdraw_ratio/realized_withdraw/cool_hours)。
+
+## 应用
+资金建议先看 bankrollLayer/strategyEngine 的信心档逻辑,不要假设凯利是主决策。改三档比例改 PRESETS.tierRatios。

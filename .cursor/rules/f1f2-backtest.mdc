@@ -1,0 +1,30 @@
+---
+description: F1/F2 历史回测的本地基本面重建、数据契约、settle_ah、五大联赛回测结论
+globs: api-service/backtest_factors.py, api-service/sync_team_history.py, api-service/local_match_data.py
+---
+
+# F1/F2 历史回测(2026-07-09 完成)
+
+让 F1(近期状态)/F2(交锋历史)脱离 500.com 实时抓取、在历史比赛上回测。
+
+## 数据源
+MySQL `team_history_matches` 表(从 world-cup `team_matches.db` football-data.co.uk 导入),五大联赛国家(英超/英冠/西甲/西乙/意甲/意乙/德甲/德乙/法甲/法乙)39430 场,含亚盘(closing)+b365/avg/max 欧赔+角球射门统计+半场比分。队名经 `team_name_mapping`(440 条)映射成竞彩中文名(五大联赛顶级 96-100% 映射)。
+
+## 关键文件
+- `sync_team_history.py` — 导入(executemany 批量)。
+- `local_match_data.py` — `build_local_match_data(home_cn,away_cn,date)` 重建 homeRecent/awayRecent/h2h + `settle_ah()` 亚盘结算(quarter 球拆半盘)。
+- `backtest_factors.py` — F1/F2 历史回测。
+
+## 数据契约(必须严格匹配,否则 F1/F2 静默失效)
+- recent 记录:match(中文队名+比分)/result(焦点=列表 owner,胜平负)/handicap(负=主让,直接用 asian_handicap)/asianResult(焦点 owner 视角)。
+- h2h 记录:match/date/handicap(**正=主让,与 recent 相反!用 -asian_handicap 翻号**)/asianResult(焦点=当前主队视角)。
+- `settle_ah(home_handicap,hs,as,focus_is_home)`:先算主队 AH 结果(diff+L,quarter 拆 L±0.25 两半盘合并),焦点=客则翻转。已单测覆盖。
+
+## 回测结论(14326 场五大联赛)
+- 上盘基准赢盘率仅 32.6%(下盘 67.4%)——命中率基准≠50%!
+- F1 命中率 45.9%,但方向 80% 偏 upper,按方向混合无技能期望≈39.6%,故 F1 微弱技能但不足以翻上盘先天劣势。
+- F2 命中率 35.3%(≈上盘基准),基本无增量;2018 早期 h2h 历史不足致 F2 大量 neutral。
+- **评估口径缺陷**:命中率非合适指标,应改 ROI 或"vs 方向先验的增量"。backtest_factors.py 当前用命中率,待优化。
+
+## 缺口
+team_matches 无大小球/比分/半全场赔率(只有结果),且只覆盖五大联赛国家;小联赛基本面仍无源。

@@ -1,0 +1,34 @@
+---
+description: 预测因子体系架构、各因子数据来源、置信度算法(6因子原版+7因子竞彩版)
+globs: api-service/predict_service.py, api-service/wc_predict_service.py, api-service/backtest_factors.py
+---
+
+# 预测因子体系
+
+## 竞彩 7 因子(predict_service.predict_match)
+见 [[jczq-similar-odds]]。F1/F2 AI,F3-F7 量化。去掉交锋历史(live)。
+
+## 6 因子原版(世界杯 wc_predict_service)
+预测核心,亚盘方向预测(上盘=让球方赢盘/下盘=受让方赢盘):
+- **F1 近期状态(1.5)** AI:`build_form_metrics()` 算近10场积分(胜3平1负0)/主客场场均分/不败场次/赢盘率/样本量喂 prompt。
+- **F2 交锋历史(1.0)** AI:看 asianResult 赢盘记录。
+- **F3 实力定位(2.0)** AI:`_avg_abs_handicap()` 算上盘方近期平均盘口深度,本场盘口深于均值→高估上盘→偏下盘。
+- **F4 赔率变动(1.5)** 量化 `calc_factor4()`:500网亚盘盘口+水位,盘口变化优先于水位,升盘+升水=诱盘偏上盘。
+- **F5 市场热度(2.0)** 量化 `calc_factor5()`:多公司上盘水位一致性(变动公司中降水占比≥0.6→上盘热→逆向下盘),支持用户手动输入覆盖(`market_heat_desc`)。
+- **F6 单关修正(1.5)** 量化 `calc_factor6()`:放大 F5,与 F5 同向时 calc_prediction 权重打 5 折避免重复计权。
+
+## AI 模型
+DeepSeek `deepseek-v4-flash`(非推理),temp 0.3。F1/F2/F3 一次调用出 3 因子(竞彩版并行 3 次取多数)。
+
+## 置信度 calc_prediction()(三维度,勿用旧 net_ratio 单比值)
+- **一致性 consistency** = 主导方向权重/有方向因子总权重(0.5~1.0),主导 base 50~85。
+- **强度 avg_intensity** = 主导因子平均强度,加成 0~12。
+- **参与度 participation** = 有方向因子/全部因子,防少数弱因子骗高分(penalty 最多 -15)。
+- 数据缺失惩罚:仅对 reason 含"无/缺失/不足"的中性因子(每个 -4 最多 -10)。
+- 范围 35~95%,方向冲突抵消或全中性返回 neutral。
+
+## 已废弃
+盘口先验(handicap_priors 表 / build_priors.py / load_handicap_prior):竞彩整数盘走水偏差污染,对每场施加固定下盘推力致系统性偏下盘,已从 predict_match 移除(代码还在但不调用)。
+
+## 实际方向判定(前端 predict.vue)
+`adjusted=(home_score-away_score)+handicap`;handicap≤0(主让,主队上盘)时 adjusted>0=upper;handicap>0(客让,客队上盘)时 adjusted>0=lower。

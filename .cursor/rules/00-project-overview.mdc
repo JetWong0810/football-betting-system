@@ -1,0 +1,45 @@
+---
+description: 项目总览(技术栈/服务/数据约定/文件地图)— 始终加载
+alwaysApply: true
+---
+
+# Football Betting System 总览
+
+竞彩(中国体育彩票)足球预测系统:7 因子方向预测 + 历史同赔分析 + 资金管理。
+
+## 技术栈
+- 后端 FastAPI + PyMySQL + MySQL 8(`api-service/`)。
+- 前端 UniApp + Vue 3 H5(`frontend/`)。
+- 抓取 `scraper-service/`(每 10min 同步在售比赛+赔率)。
+- 部署 Docker Compose → mysql-backup 服务器,Cloudflare Tunnel(`fc.jetwong.top`)。
+
+## 共享生产 MySQL(关键)
+MySQL 10.130.130.139:3321/football_betting = **生产库**,本地直连即写生产。改共享表(jczq_odds_history/matches 等)UPDATE/DELETE 需用户显式同意。`.env` 含密码已 gitignore。
+
+## 核心数据约定(详见 data-conventions)
+- **spf=胜平负 raw 1x2 / nspf=让球胜平负**,不可混。
+- **readpl wtype 反转**:抓 spf 用 `wtype=nspf`。
+- **亚盘符号:负=主让**(系统统一);matches.asian_handicap 存原值(正=主让)读时取反。
+- **竞彩让球(整数)≠ 亚盘让球(小数)**,系统必须用亚盘。
+
+## 预测
+竞彩 7 因子(F1近期/F2实力/F3市场信号/F4市场热度/F5竞彩赔率/F6历史同赔/F7单关),`predict_service.predict_match`。历史同赔 `jczq_similar_odds.py`(spf 池 45038 场,低赔±0.03+高赔±0.1+同侧+方向)。世界杯版 `wc_predict_service.py`。
+
+## 关键文件
+- `api-service/predict_service.py` 预测主逻辑
+- `api-service/jczq_similar_odds.py` 历史同赔引擎
+- `api-service/main.py` FastAPI 路由(预测/批量同赔/赛果)
+- `api-service/odds500_service.py` 500.com 抓取(亚盘/欧赔/fid/score)
+- `scraper-service/scraper/sporttery_service.py` 竞彩官方抓取
+- `frontend/src/pages/predict/predict.vue` 预测页
+- `frontend/src/pages/predict/batch-analysis.vue` 批量同赔分析页
+- `deploy/deploy-remote.sh` 部署脚本
+
+## 本地/部署(详见 dev-deploy)
+`./start-local.sh`(API:7001+Frontend:5173,`--restart`/`--stop`)。部署:`git push` → `bash deploy/deploy-remote.sh`。仅用户要求时 commit,部署须 main 分支。
+
+## 详细规则(按文件自动触发)
+`.cursor/rules/`:data-conventions / jczq-similar-odds / prediction-factors / data-sync / fund-management / f1f2-backtest / reverse-factors-pending / frontend-conventions / dev-deploy。
+
+## 用户偏好
+不用 emoji(文字/CSS 代替);标签按钮小圆角 6rpx;改共享生产表需显式同意;仅要求时 commit/push。

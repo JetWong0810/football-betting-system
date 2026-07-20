@@ -1,0 +1,37 @@
+---
+description: 比赛数据来源、历史导入、500.com fid获取坑、比分回填、scraper同步机制
+globs: scraper-service/**, api-service/sync_history.py, api-service/odds500_service.py, api-service/score_500.py, api-service/repository.py
+---
+
+# 数据同步与来源
+
+## 数据架构
+- MySQL 10.130.130.139:3321/football_betting(本地=生产共享)。服务器内网 10.130.147.121:3306。
+- scraper-service(Docker 每 10min)用**体彩官方 API**(webapi.sporttery.cn, matchId)同步当前在售比赛+赔率。
+- api-service 预测时实时从 **500.com** 抓亚盘/欧赔/基本面(需 500 的 fid)。
+
+## 历史数据(2018 起 46769 场,2026-07-09 全量导入)
+从 world-cup 项目 `~/Projects/personal/world-cup/data/jczq.db` 用 `api-service/sync_history.py` 导入,match_id 前缀 `jczq_`。覆盖 2018-2026(jczq.db 4.6 万场全有比分)。含比分、spf/nspf 赔率变动(jczq_odds_history)、初盘+终盘(odds_win_draw_lose)、okooo 亚盘(仅 2026)。
+- sync_history.py 已优化 executemany+关 FK 批量插入(原逐行 17.9 万次往返极慢)。
+- 缺口:2018-2025 亚盘初盘/终盘历史(okooo 只 2026)——由 backfill_ah_history.py(football-data)+ backfill_ah_500.py(500.com) 补。
+
+## 500.com fid 获取(关键坑)
+- world-cup 的 `zid` 是 trade.500.com 交易 ID,**不是** odds.500.com 的 fid,不能直接用。
+- 正确:`get_fid_for_match(sale_date, match_code)` 从竞彩亚盘列表页 `yazhi_jczq_{date}.shtml` 按场次反查,缓存到 matches.fid_500。
+- **列表页对久远日期会失效**,2064 场历史比赛拿不到 fid→用竞彩整数盘、F4/F5 显"无亚盘"(用户同意历史不管)。
+- 亚盘分析页 `yazhi-{fid}.shtml` 对历史长期保留,失效的只是按日期反查 fid 的列表页。
+- **在售(future)场的 zid/fid 在所有 500 页都 JS 加载**,静态拿不到;但 `get_fid_for_match` 能拿到(列表页可反查)。
+
+## 比分回填
+- matches 表有 home_score/away_score/fid_500(后加,schema+database.py 迁移已支持)。
+- scraper `backfill_scores(days=3)` 在每次 run_once 末尾从 500 网竞彩列表页(`score_500.py` fetch_match_score)回填已完赛缺比分场。
+- api-service 预测时若已完赛无比分也实时回填(main.py predict 端点)。
+
+## timestamp 坑(已修)
+15 场 2026-05-29 历史比赛因 world-cup 源 kickoff_time 空致 match_timestamp=NULL,前端按 timestamp<now 判断状态失效→已完赛误显"未开始"。已用 match_date 兜底,sync_history.py 加兜底。
+
+## spf/nspf 变动记录(scraper-service/repository.py)
+`record_odds_change`:had→spf / hhad→nspf 映射。与同场同类型最后一条对比,有变(任一差>0.005)或首条才 append(INSERT IGNORE 防同秒冲突)。direction_*=新-旧符号。earliest=初盘,latest=终盘。
+
+## readpl/spf 历史回采(backfill_spf_history.py)
+单线程 playwright 真浏览器过 500.com 加速乐盾(EO_Bot,普通 requests 被挡返回 567 非JSON)。被挡指数退避+重刷盾+重试。zid 源=world-cup jczq.db。**500.com 对单 IP 有请求预算,抓~100 场触发短暂封锁,退避后恢复;本机 IP 曾并发持续抓永久封,改服务器 IP+单线程**。服务器跑法:docker run playwright 镜像,--network=host 连 mysql:3321,读 deploy/.env。
