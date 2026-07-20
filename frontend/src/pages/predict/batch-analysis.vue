@@ -2,7 +2,11 @@
   <view class="batch-page" :class="{ 'sim-pad': simBet.hasLegs }">
     <view class="summary-bar">
       <view class="sum-row">
-        <text class="sum-title">{{ date.slice(5) }} 同赔分析</text>
+        <view class="date-nav">
+          <text class="date-arr" :class="{ disabled: !prevSaleDate }" @tap.stop="goPrevDate">‹</text>
+          <text class="sum-title date-tap" @tap="openCalendar">{{ dateLabel }} 同赔分析</text>
+          <text class="date-arr" :class="{ disabled: !nextSaleDate }" @tap.stop="goNextDate">›</text>
+        </view>
         <view class="sum-right">
           <text
             class="sim-toggle"
@@ -14,6 +18,18 @@
             <template v-else>{{ summary.total }} 场</template>
           </text>
         </view>
+      </view>
+      <view class="status-row">
+        <text
+          class="status-tab"
+          :class="{ on: status === 'not_started' }"
+          @tap="switchStatus('not_started')"
+        >在售</text>
+        <text
+          class="status-tab"
+          :class="{ on: status === 'finished' }"
+          @tap="switchStatus('finished')"
+        >已结束</text>
       </view>
       <view class="sum-stats">
         <text class="st upper">上盘 {{ summary.upper }}</text>
@@ -249,6 +265,40 @@
         </view>
       </scroll-view>
     </view>
+
+    <!-- 日期选择 -->
+    <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
+    <view class="cal-panel" :class="{ visible: showCalendar }">
+      <view class="cal-header">
+        <text class="cal-cancel" @tap="showCalendar = false">取消</text>
+        <text class="cal-title">选择日期</text>
+        <text class="cal-confirm" @tap="confirmCalendar">确定</text>
+      </view>
+      <view class="cal-body">
+        <view class="cal-nav">
+          <text class="cal-arrow" @tap="calPrevMonth">&lt;</text>
+          <text class="cal-month">{{ calYear }}年{{ calMonth }}月</text>
+          <text class="cal-arrow" @tap="calNextMonth">&gt;</text>
+        </view>
+        <view class="cal-weekdays">
+          <text class="cal-wd" v-for="w in ['日','一','二','三','四','五','六']" :key="w">{{ w }}</text>
+        </view>
+        <view class="cal-days">
+          <text
+            v-for="(d, i) in calDays"
+            :key="i"
+            class="cal-day"
+            :class="{
+              'cal-other': d.other,
+              'cal-today': d.isToday,
+              'cal-selected': d.dateStr === calSelected,
+              'cal-has': !d.other && saleDateSet.has(d.dateStr),
+            }"
+            @tap="!d.other && (calSelected = d.dateStr)"
+          >{{ d.day }}</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -267,6 +317,11 @@ const status = ref('not_started')
 const loading = ref(true)
 const items = ref([])
 const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
+const saleDates = ref([])
+const showCalendar = ref(false)
+const calYear = ref(2026)
+const calMonth = ref(6)
+const calSelected = ref('')
 const showSimilar = ref(false)
 const similarMatches = ref([])
 const similarRefScore = ref(null)
@@ -281,6 +336,138 @@ const sortMode = ref('default')
 
 const isFinished = computed(() => status.value === 'finished')
 const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0)
+const dateLabel = computed(() => (date.value || '').slice(5) || '--')
+const saleDateSet = computed(() => new Set(saleDates.value))
+
+/** 按日历早晚翻期, 不依赖 API 返回升/降序 */
+const sortedSaleDates = computed(() => [...saleDates.value].sort())
+const dateIndex = computed(() => sortedSaleDates.value.indexOf(date.value))
+const prevSaleDate = computed(() => {
+  const i = dateIndex.value
+  return i > 0 ? sortedSaleDates.value[i - 1] : null
+})
+const nextSaleDate = computed(() => {
+  const i = dateIndex.value
+  const list = sortedSaleDates.value
+  return i >= 0 && i < list.length - 1 ? list[i + 1] : null
+})
+
+const calDays = computed(() => {
+  const y = calYear.value
+  const m = calMonth.value
+  const firstDay = new Date(y, m - 1, 1).getDay()
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const daysInPrev = new Date(y, m - 1, 0).getDate()
+  const today = new Date().toISOString().slice(0, 10)
+  const cells = []
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const day = daysInPrev - i
+    const pm = m - 1 < 1 ? 12 : m - 1
+    const py = m - 1 < 1 ? y - 1 : y
+    cells.push({
+      day,
+      other: true,
+      dateStr: `${py}-${String(pm).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      isToday: false,
+    })
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push({ day: d, other: false, dateStr, isToday: dateStr === today })
+  }
+  const remaining = 42 - cells.length
+  for (let d = 1; d <= remaining; d++) {
+    const nm = m + 1 > 12 ? 1 : m + 1
+    const ny = m + 1 > 12 ? y + 1 : y
+    cells.push({
+      day: d,
+      other: true,
+      dateStr: `${ny}-${String(nm).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      isToday: false,
+    })
+  }
+  return cells
+})
+
+function calPrevMonth() {
+  if (calMonth.value === 1) {
+    calMonth.value = 12
+    calYear.value--
+  } else calMonth.value--
+}
+function calNextMonth() {
+  if (calMonth.value === 12) {
+    calMonth.value = 1
+    calYear.value++
+  } else calMonth.value++
+}
+
+function openCalendar() {
+  const base = date.value || saleDates.value[0] || new Date().toISOString().slice(0, 10)
+  const [y, m] = base.split('-').map(Number)
+  calYear.value = y
+  calMonth.value = m
+  calSelected.value = base
+  showCalendar.value = true
+}
+
+function confirmCalendar() {
+  if (calSelected.value) switchDate(calSelected.value)
+  showCalendar.value = false
+}
+
+function goPrevDate() {
+  if (prevSaleDate.value) switchDate(prevSaleDate.value)
+}
+function goNextDate() {
+  if (nextSaleDate.value) switchDate(nextSaleDate.value)
+}
+
+async function switchDate(next) {
+  if (!next || next === date.value) return
+  date.value = next
+  if (!saleDates.value.includes(next)) {
+    saleDates.value = [next, ...saleDates.value]
+  }
+  if (simBet.hasLegs) simBet.clearLegs()
+  await loadBatch({ autoFlipStatus: true })
+}
+
+async function switchStatus(next) {
+  if (!next || next === status.value) return
+  status.value = next
+  if (simBet.hasLegs) simBet.clearLegs()
+  await loadSaleDates()
+  // 当前日期若不在新状态的日期列表里, 落到最近一期
+  if (saleDates.value.length && !saleDates.value.includes(date.value)) {
+    date.value = status.value === 'finished'
+      ? saleDates.value[0]
+      : (saleDates.value[saleDates.value.length - 1] || saleDates.value[0])
+  }
+  await loadBatch()
+}
+
+async function loadSaleDates() {
+  try {
+    const data = await request({
+      url: '/api/predict/dates',
+      data: { status: status.value },
+    })
+    saleDates.value = data?.dates || []
+    if (date.value && !saleDates.value.includes(date.value)) {
+      saleDates.value = [date.value, ...saleDates.value]
+    }
+  } catch {
+    saleDates.value = date.value ? [date.value] : []
+  }
+}
+
+async function fetchBatch(forStatus) {
+  return request({
+    url: '/api/predict/batch-similar',
+    data: { date: date.value, status: forStatus },
+  })
+}
 
 function simPickLabel(it) {
   const leg = simBet.findLeg(it.matchId)
@@ -569,14 +756,32 @@ function closeSimilar() {
   similarRefScore.value = null
 }
 
-async function loadBatch() {
+async function loadBatch(opts = {}) {
+  const autoFlipStatus = !!opts.autoFlipStatus
   loading.value = true
   dirFilters.value = []
   moveFilters.value = []
   sortMode.value = 'default'
   try {
-    const data = await request({ url: '/api/predict/batch-similar', data: { date: date.value, status: status.value } })
-    items.value = data?.items || []
+    let data = await fetchBatch(status.value)
+    let list = data?.items || []
+    // 换日时空列表: 在售↔已结束自动对侧补救(常见:翻到已完赛日仍停在「在售」)
+    if (autoFlipStatus && list.length === 0) {
+      const other = status.value === 'not_started' ? 'finished' : 'not_started'
+      const otherData = await fetchBatch(other)
+      const otherList = otherData?.items || []
+      if (otherList.length > 0) {
+        status.value = other
+        data = otherData
+        list = otherList
+        await loadSaleDates()
+        uni.showToast({
+          title: other === 'finished' ? '已切到已结束' : '已切到在售',
+          icon: 'none',
+        })
+      }
+    }
+    items.value = list
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
     if (status.value === 'finished') applySimSettlement()
   } catch (e) {
@@ -586,10 +791,11 @@ async function loadBatch() {
   }
 }
 
-onLoad((options) => {
+onLoad(async (options) => {
   const today = new Date().toISOString().slice(0, 10)
   date.value = options?.date || today
   status.value = options?.status || 'not_started'
+  await loadSaleDates()
   loadBatch()
 })
 </script>
@@ -617,11 +823,36 @@ onLoad((options) => {
   background: $frbt-primary;
   padding: 22rpx 28rpx 20rpx;
   .sum-row {
-    display: flex; align-items: baseline; justify-content: space-between;
-    margin-bottom: 10rpx;
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10rpx; gap: 12rpx;
   }
-  .sum-title { font-size: 28rpx; font-weight: 600; color: #fff; }
-  .sum-right { display: flex; align-items: center; gap: 16rpx; }
+  .date-nav {
+    display: flex; align-items: center; gap: 4rpx; min-width: 0;
+  }
+  .date-arr {
+    font-size: 36rpx; color: rgba(255,255,255,0.9);
+    padding: 4rpx 10rpx; line-height: 1;
+    &.disabled { opacity: 0.28; pointer-events: none; }
+  }
+  .sum-title {
+    font-size: 28rpx; font-weight: 600; color: #fff;
+    &.date-tap {
+      padding: 4rpx 8rpx;
+      border-bottom: 1rpx dashed rgba(255,255,255,0.45);
+    }
+  }
+  .sum-right { display: flex; align-items: center; gap: 16rpx; flex-shrink: 0; }
+  .status-row {
+    display: flex; gap: 12rpx; margin-bottom: 10rpx;
+  }
+  .status-tab {
+    font-size: 22rpx; color: rgba(255,255,255,0.75);
+    padding: 4rpx 16rpx; border-radius: 6rpx;
+    border: 1rpx solid rgba(255,255,255,0.28);
+    &.on {
+      color: #0f172a; background: #fff; border-color: #fff; font-weight: 600;
+    }
+  }
   .sim-toggle {
     font-size: 22rpx; color: rgba(255,255,255,0.85);
     padding: 6rpx 14rpx; border-radius: 6rpx;
@@ -890,4 +1121,51 @@ onLoad((options) => {
 .ah-upper { color: #dc2626; }
 .ah-lower { color: #059669; }
 .ah-push { color: #64748b; }
+
+/* 日期日历 */
+.cal-mask {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 400;
+}
+.cal-panel {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: #fff;
+  border-radius: 12rpx 12rpx 0 0;
+  z-index: 401;
+  transform: translateY(100%);
+  transition: transform 0.25s ease;
+  padding-bottom: env(safe-area-inset-bottom);
+  &.visible { transform: translateY(0); }
+}
+.cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24rpx 32rpx;
+  border-bottom: 1rpx solid #f1f5f9;
+}
+.cal-cancel { font-size: 26rpx; color: #94a3b8; }
+.cal-title { font-size: 28rpx; color: #0f172a; font-weight: 600; }
+.cal-confirm { font-size: 26rpx; color: #0d9488; font-weight: 600; }
+.cal-body { padding: 20rpx 24rpx 40rpx; }
+.cal-nav {
+  display: flex; align-items: center; justify-content: center;
+  gap: 40rpx; margin-bottom: 20rpx;
+}
+.cal-arrow { font-size: 28rpx; color: #64748b; padding: 8rpx 16rpx; }
+.cal-month { font-size: 26rpx; color: #0f172a; font-weight: 500; }
+.cal-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 12rpx;
+}
+.cal-wd { text-align: center; font-size: 22rpx; color: #94a3b8; line-height: 2; }
+.cal-days {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4rpx 0;
+}
+.cal-day {
+  text-align: center; font-size: 26rpx; color: #334155;
+  line-height: 2.4; border-radius: 6rpx;
+  &.cal-other { color: #e2e8f0; }
+  &.cal-today { color: #0d9488; font-weight: 600; }
+  &.cal-has:not(.cal-selected) { color: #0f766e; font-weight: 600; }
+  &.cal-selected { background: #0d9488; color: #fff; font-weight: 600; }
+}
 </style>
