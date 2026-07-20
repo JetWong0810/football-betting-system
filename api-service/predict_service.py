@@ -13,8 +13,10 @@
 """
 import json
 import logging
+import math
 import os
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -2039,8 +2041,168 @@ def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
             "reason": reason, "details": details}
 
 
+def _hc_proximity(hist_hc: Optional[float], ah_handicap: Optional[float]) -> float:
+    """D4 盘口一致性权重: 线越接近越高; 缺盘口给中性 0.6。"""
+    if hist_hc is None or ah_handicap is None:
+        return 0.6
+    try:
+        delta = abs(float(hist_hc) - float(ah_handicap))
+    except (TypeError, ValueError):
+        return 0.6
+    if delta <= 0.25:
+        return 1.0
+    if delta <= 0.5:
+        return 0.7
+    if delta <= 1.0:
+        return 0.4
+    return 0.2
+
+
+def _time_decay(match_date) -> float:
+    """D8 时效: 近3年1.0 / 3–6年0.85 / 更旧0.7。"""
+    md = None
+    if isinstance(match_date, datetime):
+        md = match_date.date()
+    elif isinstance(match_date, date):
+        md = match_date
+    elif match_date:
+        try:
+            md = datetime.strptime(str(match_date)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            md = None
+    if md is None:
+        return 0.85
+    age_years = (date.today() - md).days / 365.25
+    if age_years <= 3:
+        return 1.0
+    if age_years <= 6:
+        return 0.85
+    return 0.7
+
+
+def _ah_side_mag(ah_result: Optional[str]) -> Tuple[Optional[str], float]:
+    """盘路 → (side upper/lower/push, 全赢1.0/半赢0.5)。无法判定返回 (None, 0)。"""
+    if ah_result == "上盘":
+        return "upper", 1.0
+    if ah_result == "半上":
+        return "upper", 0.5
+    if ah_result == "下盘":
+        return "lower", 1.0
+    if ah_result == "半下":
+        return "lower", 0.5
+    if ah_result == "走水":
+        return "push", 0.0
+    return None, 0.0
+
+
+def _calc_similar_ref_score(
+    direction: str,
+    rows: List[Dict[str, Any]],
+    *,
+    ah_handicap: Optional[float] = None,
+    query_degraded: bool = False,
+    total: int = 0,
+) -> Tuple[int, Dict[str, int]]:
+    """多维同赔参考分 0–100 + 分项 breakdown。
+
+    rows 字段: similarity, same_league, ah_result, handicap(float|None), match_date
+    """
+    empty_bd = {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}
+    if not rows:
+        return 0, empty_bd
+
+    support = 0.0
+    oppose = 0.0
+    wp = 0.0
+    sims: List[float] = []
+    hcs: List[float] = []
+    same_lg = 0
+    n_quality = 0
+    n_eff = 0.0
+    # 中性时先累加两侧,再取优势侧算 edge
+    w_upper = 0.0
+    w_lower = 0.0
+
+    for r in rows:
+        side, mag = _ah_side_mag(r.get("ah_result"))
+        if side is None:
+            continue
+        sim = float(r.get("similarity") or 0) / 100.0
+        sim = max(0.0, min(1.0, sim))
+        w_lg = 1.15 if r.get("same_league") else 1.0
+        w_hc = _hc_proximity(r.get("handicap"), ah_handicap)
+        w_time = _time_decay(r.get("match_date"))
+        w = sim * w_lg * w_hc * w_time
+
+        n_quality += 1
+        sims.append(sim)
+        hcs.append(w_hc)
+        if r.get("same_league"):
+            same_lg += 1
+
+        if side == "push":
+            wp += w
+            continue
+
+        contrib = mag * w
+        n_eff += w
+        if side == "upper":
+            w_upper += contrib
+        else:
+            w_lower += contrib
+
+    if n_quality == 0:
+        return 0, empty_bd
+
+    # 倾向侧: 明确方向用 direction; 中性取加权更强一侧
+    if direction == "upper":
+        support, oppose = w_upper, w_lower
+    elif direction == "lower":
+        support, oppose = w_lower, w_upper
+    else:
+        if w_upper >= w_lower:
+            support, oppose = w_upper, w_lower
+        else:
+            support, oppose = w_lower, w_upper
+
+    wdec = support + oppose
+    if wdec > 0:
+        margin = max(0.0, (support - oppose) / wdec)
+        s_edge = 100.0 * margin
+    else:
+        s_edge = 0.0
+
+    avg_sim = sum(sims) / len(sims)
+    avg_hc = sum(hcs) / len(hcs)
+    same_league_rate = same_lg / n_quality
+    s_quality = 100.0 * (0.5 * avg_sim + 0.25 * same_league_rate + 0.25 * avg_hc)
+
+    s_sample = 100.0 * (1.0 - math.exp(-n_eff / 14.0))
+
+    wtot = wdec + wp
+    s_decidable = 100.0 * (1.0 - wp / wtot) if wtot > 0 else 0.0
+
+    raw = 0.40 * s_edge + 0.25 * s_quality + 0.20 * s_sample + 0.15 * s_decidable
+    if query_degraded:
+        raw *= 0.85
+    if total < 3:
+        raw = min(raw, 20.0)
+    if direction == "neutral":
+        raw = min(raw, 50.0)
+
+    ref_score = int(max(0, min(100, round(raw))))
+    breakdown = {
+        "edge": int(max(0, min(100, round(s_edge)))),
+        "quality": int(max(0, min(100, round(s_quality)))),
+        "sample": int(max(0, min(100, round(s_sample)))),
+        "decidable": int(max(0, min(100, round(s_decidable)))),
+    }
+    return ref_score, breakdown
+
+
 def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional[str] = None,
-                                  exclude_match_id: Optional[str] = None) -> Dict[str, Any]:
+                                  exclude_match_id: Optional[str] = None,
+                                  ah_handicap: Optional[float] = None) -> Dict[str, Any]:
     """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
@@ -2049,10 +2211,14 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     - 盘路上盘命中 > 65%: upper, score=7
     - 盘路上盘命中 < 40%(即下盘频出): lower, score=7
     - 其他: neutral, score=5
+
+    另返回 refScore(0–100 多维证据强度) + refBreakdown, 不并入因子 score。
     """
+    _empty_ref = {"refScore": 0, "refBreakdown": {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}}
+
     if not jczq_company:
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": []}
+                "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], **_empty_ref}
 
     initial = jczq_company.get("initial", {})
     current = jczq_company.get("current", {})
@@ -2066,11 +2232,12 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
 
     if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "竞彩spf赔率不完整，无法匹配", "details": []}
+                "reason": "竞彩spf赔率不完整，无法匹配", "details": [], **_empty_ref}
 
     # 预测场仅有1条spf快照(open==current)时, 无真实变动, 方向恒"平"是数据缺失而非真稳定。
     # 此时放弃"变动方向一致"过滤, 仅按初/终盘接近+同侧匹配(方向降级)。
     has_move = initial != current
+    query_degraded = not has_move
 
     try:
         result = find_similar_spf(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
@@ -2079,68 +2246,16 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": f"查询异常: {e}", "details": []}
+                "reason": f"查询异常: {e}", "details": [], **_empty_ref}
 
     stats = result.get("stats", {})
     matches = result.get("matches", [])
     query = result.get("query", {})
     total = stats.get("total", 0)
 
-    dir_label = query.get("direction", "") if has_move else "不限(无变动)"
-    if total < 3:
-        return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": f"匹配到{total}场历史比赛，样本不足(需≥3场)",
-                "details": [{"name": "匹配条件", "desc": f"低赔初{query.get('low_open', 0):.2f}±{query.get('tolerance', 0.03):.2f} 终{query.get('low_close', 0):.2f}±{query.get('tolerance', 0.03):.2f}({query.get('low_position', '')}) 方向{dir_label}"}]}
-
-    # 方向以盘路(亚盘上盘/下盘)统计为准, 与弹窗"盘路"列口径一致
-    ah_total = stats.get("ah_total", 0)
-    ah_upper = stats.get("ah_upper", 0)
-    ah_lower = stats.get("ah_lower", 0)
-    ah_push = stats.get("ah_push", 0)
-    ah_upper_pct = stats.get("ah_upper_pct", 0)
-    ah_lower_pct = stats.get("ah_lower_pct", 0)
-    full_up = stats.get("full_up", 0)
-    half_up = stats.get("half_up", 0)
-    full_down = stats.get("full_down", 0)
-    half_down = stats.get("half_down", 0)
-
-    details = [
-        {"name": "匹配条件", "desc": (f"低赔初{query.get('low_open', 0):.2f}±{query.get('tolerance', 0.03):.2f} 终{query.get('low_close', 0):.2f}±{query.get('tolerance', 0.03):.2f}"
-                                      f"({query.get('low_position', '')}) | 高赔初{query.get('high_open', 0):.2f}±{query.get('high_tolerance', 0.1):.1f} 终{query.get('high_close', 0):.2f}±{query.get('high_tolerance', 0.1):.1f}"
-                                      f" | 方向{dir_label}")},
-        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf)"},
-        {"name": "盘路分布", "desc": f"上盘{ah_upper}(全{full_up}半{half_up}) 下盘{ah_lower}(全{full_down}半{half_down}) 走水{ah_push} (共{ah_total}场)"},
-        {"name": "上盘命中", "desc": f"{ah_upper_pct:.0f}% ({ah_upper}/{ah_total})"},
-        {"name": "下盘命中", "desc": f"{ah_lower_pct:.0f}% ({ah_lower}/{ah_total})"},
-        {"name": "走水", "desc": f"{ah_push}场 ({round(ah_push / ah_total * 100, 0) if ah_total else 0:.0f}%)" if ah_total else "0场"},
-    ]
-
-    # 添加匹配比赛摘要(前5场)
-    for m in matches[:5]:
-        score_str = f"{m['home_score']}-{m['away_score']}"
-        details.append({
-            "name": f"{m.get('match_date', '')} {m.get('league_name', '')}",
-            "desc": f"{m.get('home_team_cn', '')} {score_str} {m.get('away_team_cn', '')}"
-        })
-
-    if ah_total >= 3 and ah_upper_pct > 65:
-        direction = "upper"
-        score = 7
-        reason = f"历史同赔{ah_total}场盘路上盘命中{ah_upper_pct:.0f}%({ah_upper}/{ah_total})，上盘稳定打出→偏上盘"
-    elif ah_total >= 3 and ah_upper_pct < 40:
-        direction = "lower"
-        score = 7
-        reason = f"历史同赔{ah_total}场盘路下盘命中{ah_lower_pct:.0f}%({ah_lower}/{ah_total})，下盘频出→偏下盘"
-    else:
-        direction = "neutral"
-        score = 5
-        if ah_total >= 3:
-            reason = f"历史同赔{ah_total}场盘路上盘{ah_upper_pct:.0f}%/下盘{ah_lower_pct:.0f}%，无明确倾向"
-        else:
-            reason = f"历史同赔{total}场无盘口数据，无法判定盘路倾向"
-
-    # 构建详细比赛列表(用于前端弹窗展示)
+    # 详情列表(样本不足时也要返回, 避免 reason 说匹配N场但 matches 为空)
     similar_matches = []
+    ref_rows: List[Dict[str, Any]] = []
     for m in matches:
         hs, aws = m.get("home_score", 0), m.get("away_score", 0)
         hc = m.get("handicap")
@@ -2160,9 +2275,82 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "openOdds": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
             "closeOdds": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
         })
+        ref_rows.append({
+            "similarity": m.get("similarity", 0),
+            "same_league": bool(m.get("same_league", False)),
+            "ah_result": ah_result,
+            "handicap": float(hc) if hc is not None else None,
+            "match_date": m.get("match_date"),
+        })
+
+    dir_label = query.get("direction", "") if has_move else "不限(无变动)"
+    if total < 3:
+        ref_score, breakdown = _calc_similar_ref_score(
+            "neutral", ref_rows, ah_handicap=ah_handicap,
+            query_degraded=query_degraded, total=total)
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": f"匹配到{total}场历史比赛，样本不足(需≥3场)",
+                "details": [
+                    {"name": "匹配条件", "desc": f"低赔初{query.get('low_open', 0):.2f}±{query.get('tolerance', 0.03):.2f} 终{query.get('low_close', 0):.2f}±{query.get('tolerance', 0.03):.2f}({query.get('low_position', '')}) 方向{dir_label}"},
+                    {"name": "参考分", "desc": f"{ref_score} (证据强度)"},
+                ],
+                "matches": similar_matches, "refScore": ref_score, "refBreakdown": breakdown}
+
+    # 方向以盘路(亚盘上盘/下盘)统计为准, 与弹窗"盘路"列口径一致
+    ah_total = stats.get("ah_total", 0)
+    ah_upper = stats.get("ah_upper", 0)
+    ah_lower = stats.get("ah_lower", 0)
+    ah_push = stats.get("ah_push", 0)
+    ah_upper_pct = stats.get("ah_upper_pct", 0)
+    ah_lower_pct = stats.get("ah_lower_pct", 0)
+    full_up = stats.get("full_up", 0)
+    half_up = stats.get("half_up", 0)
+    full_down = stats.get("full_down", 0)
+    half_down = stats.get("half_down", 0)
+
+    if ah_total >= 3 and ah_upper_pct > 65:
+        direction = "upper"
+        score = 7
+        reason = f"历史同赔{ah_total}场盘路上盘命中{ah_upper_pct:.0f}%({ah_upper}/{ah_total})，上盘稳定打出→偏上盘"
+    elif ah_total >= 3 and ah_upper_pct < 40:
+        direction = "lower"
+        score = 7
+        reason = f"历史同赔{ah_total}场盘路下盘命中{ah_lower_pct:.0f}%({ah_lower}/{ah_total})，下盘频出→偏下盘"
+    else:
+        direction = "neutral"
+        score = 5
+        if ah_total >= 3:
+            reason = f"历史同赔{ah_total}场盘路上盘{ah_upper_pct:.0f}%/下盘{ah_lower_pct:.0f}%，无明确倾向"
+        else:
+            reason = f"历史同赔{total}场无盘口数据，无法判定盘路倾向"
+
+    ref_score, breakdown = _calc_similar_ref_score(
+        direction, ref_rows, ah_handicap=ah_handicap,
+        query_degraded=query_degraded, total=total)
+
+    details = [
+        {"name": "匹配条件", "desc": (f"低赔初{query.get('low_open', 0):.2f}±{query.get('tolerance', 0.03):.2f} 终{query.get('low_close', 0):.2f}±{query.get('tolerance', 0.03):.2f}"
+                                      f"({query.get('low_position', '')}) | 高赔初{query.get('high_open', 0):.2f}±{query.get('high_tolerance', 0.1):.1f} 终{query.get('high_close', 0):.2f}±{query.get('high_tolerance', 0.1):.1f}"
+                                      f" | 方向{dir_label}")},
+        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf)"},
+        {"name": "盘路分布", "desc": f"上盘{ah_upper}(全{full_up}半{half_up}) 下盘{ah_lower}(全{full_down}半{half_down}) 走水{ah_push} (共{ah_total}场)"},
+        {"name": "上盘命中", "desc": f"{ah_upper_pct:.0f}% ({ah_upper}/{ah_total})"},
+        {"name": "下盘命中", "desc": f"{ah_lower_pct:.0f}% ({ah_lower}/{ah_total})"},
+        {"name": "走水", "desc": f"{ah_push}场 ({round(ah_push / ah_total * 100, 0) if ah_total else 0:.0f}%)" if ah_total else "0场"},
+        {"name": "参考分", "desc": f"{ref_score} (证据强度 edge{breakdown['edge']}/质{breakdown['quality']}/样{breakdown['sample']}/判{breakdown['decidable']})"},
+    ]
+
+    # 添加匹配比赛摘要(前5场)
+    for m in matches[:5]:
+        score_str = f"{m['home_score']}-{m['away_score']}"
+        details.append({
+            "name": f"{m.get('match_date', '')} {m.get('league_name', '')}",
+            "desc": f"{m.get('home_team_cn', '')} {score_str} {m.get('away_team_cn', '')}"
+        })
 
     return {"name": "历史同赔", "score": score, "direction": direction,
-            "reason": reason, "details": details, "matches": similar_matches}
+            "reason": reason, "details": details, "matches": similar_matches,
+            "refScore": ref_score, "refBreakdown": breakdown}
 
 
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
@@ -2195,8 +2383,9 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     _mid = match_info.get("match_id")
     jczq_company_spf = get_match_spf_odds(_mid) if _mid else None
     f5 = calc_factor_jczq_odds(jczq_company_spf)
-    f6 = calc_factor_jczq_similar_odds(jczq_company_spf, league=match_info.get("league"),
-                                        exclude_match_id=_mid)
+    f6 = calc_factor_jczq_similar_odds(
+        jczq_company_spf, league=match_info.get("league"),
+        exclude_match_id=_mid, ah_handicap=match_info.get("handicap"))
 
     # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
     # 与世界杯一致: 不再投交锋历史票

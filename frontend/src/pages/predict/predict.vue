@@ -237,8 +237,10 @@
             <input class="search-input" v-model="searchKey" placeholder="搜索队伍" placeholder-style="color:#b0b7c0" />
           </view>
 
-          <scroll-view class="filter-tabs" scroll-x v-if="matchStatus === 'not_started'">
+          <!-- 日期按竞彩售卖期(match_number), 与赛果查询一致 -->
+          <scroll-view class="filter-tabs" scroll-x>
             <view
+              v-if="matchStatus === 'not_started'"
               class="league-tab"
               :class="{ active: filterDate === 'all' }"
               @tap="filterDate = 'all'"
@@ -247,26 +249,14 @@
             </view>
             <view
               class="league-tab"
-              v-for="d in availableDates"
+              v-for="d in displaySaleDates"
               :key="d"
               :class="{ active: filterDate === d }"
               @tap="filterDate = d"
             >
               <text>{{ d.slice(5) }}</text>
             </view>
-          </scroll-view>
-
-          <scroll-view class="filter-tabs" scroll-x v-if="matchStatus === 'finished'">
-            <view
-              class="league-tab"
-              v-for="d in recentFinishedDates"
-              :key="d"
-              :class="{ active: filterDate === d }"
-              @tap="filterDate = d"
-            >
-              <text>{{ d.slice(5) }}</text>
-            </view>
-            <view class="league-tab" @tap="showCalendar = true">
+            <view v-if="matchStatus === 'finished'" class="league-tab" @tap="openCalendar">
               <text>选择日期</text>
             </view>
           </scroll-view>
@@ -288,7 +278,7 @@
             <text class="row-handicap" v-if="match.handicap">{{ formatHandicap(match.handicap) }}</text>
           </view>
           <view v-if="filteredPickerMatches.length === 0" class="list-empty">
-            <text>暂无赛事</text>
+            <text>{{ emptyPickerHint }}</text>
           </view>
         </scroll-view>
       </view>
@@ -305,29 +295,29 @@
         <view class="similar-table">
           <view class="similar-row similar-thead">
             <text class="col-sim">相似度</text>
-            <text class="col-date">日期</text>
-            <text class="col-league">联赛</text>
             <text class="col-team">主队</text>
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
             <text class="col-result">结果</text>
-            <text class="col-odds">初盘</text>
-            <text class="col-odds">终盘</text>
             <text class="col-handicap">让球</text>
             <text class="col-ah-result">盘路</text>
+            <text class="col-odds">初盘</text>
+            <text class="col-odds">终盘</text>
+            <text class="col-date">日期</text>
+            <text class="col-league">联赛</text>
           </view>
           <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
             <text class="col-sim">{{ m.similarity }}%</text>
-            <text class="col-date">{{ m.date }}</text>
-            <text class="col-league" :class="{ 'league-same': m.sameLeague }">{{ m.league }}</text>
             <text class="col-team">{{ m.homeTeam }}</text>
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
             <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
-            <text class="col-odds">{{ m.openOdds }}</text>
-            <text class="col-odds">{{ m.closeOdds }}</text>
             <text class="col-handicap">{{ m.handicap || '-' }}</text>
             <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
+            <text class="col-odds">{{ m.openOdds }}</text>
+            <text class="col-odds">{{ m.closeOdds }}</text>
+            <text class="col-date">{{ m.date }}</text>
+            <text class="col-league" :class="{ 'league-same': m.sameLeague }">{{ m.league }}</text>
           </view>
           <view v-if="similarMatches.length === 0" class="similar-empty">
             <text>暂无历史同赔数据</text>
@@ -358,7 +348,12 @@
             v-for="(d, i) in calDays"
             :key="i"
             class="cal-day"
-            :class="{ 'cal-other': d.other, 'cal-today': d.isToday, 'cal-selected': d.dateStr === calSelected }"
+            :class="{
+              'cal-other': d.other,
+              'cal-today': d.isToday,
+              'cal-selected': d.dateStr === calSelected,
+              'cal-has': !d.other && saleDateSet.has(d.dateStr),
+            }"
             @tap="!d.other && (calSelected = d.dateStr)"
           >{{ d.day }}</text>
         </view>
@@ -434,8 +429,11 @@ if (typeof document !== 'undefined') {
 
 const allMatches = ref([])
 const loadingMatches = ref(false)
-const finishedDates = ref([])
+/** 售卖期日期列表 YYYY-MM-DD, 来自 /api/predict/dates(match_number前6位) */
+const saleDates = ref([])
 const pendingMatchId = ref(null)
+/** 从赛事列表「预」进入时自动开跑 */
+const pendingAutoStart = ref(false)
 const customStake = ref(null)
 
 const configStore = useConfigStore()
@@ -550,21 +548,39 @@ watch(analysisComplete, async (v) => {
 })
 
 onLoad((query) => {
+  // 进入页先清空上次预测展示(不再从 storage 恢复)
+  analysisSteps.value = []
+  analysisComplete.value = false
+  prediction.value = { direction: '', confidence: 0, overallReverse: false }
+  aiAnalysis.value = ''
+  selectedMatch.value = null
+
   if (query?.matchId) {
     pendingMatchId.value = query.matchId
+  }
+  if (query?.auto === '1' || query?.auto === 'true') {
+    pendingAutoStart.value = true
+  }
+  // 带售卖日时先锁日期, 保证列表里能命中该场
+  if (query?.date && /^\d{4}-\d{2}-\d{2}$/.test(query.date)) {
+    filterDate.value = query.date
   }
 })
 
 async function fetchDates() {
-  if (matchStatus.value !== 'finished') return
   try {
-    const data = await request({ url: '/api/predict/dates', data: { status: 'finished' } })
-    finishedDates.value = data?.dates || []
-    if (finishedDates.value.length > 0 && (filterDate.value === 'all' || !filterDate.value)) {
-      filterDate.value = finishedDates.value[0]
+    const statusParam = matchStatus.value === 'finished' ? 'finished' : 'not_started'
+    const data = await request({ url: '/api/predict/dates', data: { status: statusParam } })
+    saleDates.value = data?.dates || []
+    if (matchStatus.value === 'finished') {
+      if (saleDates.value.length > 0 && (filterDate.value === 'all' || !filterDate.value)) {
+        filterDate.value = saleDates.value[0]
+      }
+    } else if (filterDate.value && filterDate.value !== 'all' && !saleDates.value.includes(filterDate.value)) {
+      filterDate.value = 'all'
     }
   } catch (e) {
-    finishedDates.value = []
+    saleDates.value = []
   }
 }
 
@@ -572,13 +588,20 @@ async function fetchMatches() {
   loadingMatches.value = true
   try {
     const statusParam = matchStatus.value === 'finished' ? 'finished' : 'not_started'
-    const params = { status: statusParam, page_size: 50 }
-    if (matchStatus.value === 'finished' && filterDate.value && filterDate.value !== 'all') {
+    const params = { status: statusParam, page_size: 100 }
+    // 按售卖期日期过滤(与赛果一致); 未开始选「全部」时不传 date
+    if (filterDate.value && filterDate.value !== 'all') {
       params.date = filterDate.value
+    } else if (statusParam === 'finished') {
+      // 已结束必须带期号, 避免一次拉全量历史
+      loadingMatches.value = false
+      allMatches.value = []
+      return
     }
     const data = await request({ url: '/api/predict/matches', data: params })
     allMatches.value = (data?.items || []).map(item => ({
       matchId: item.matchId,
+      matchNumber: item.matchNumber,
       matchDate: item.matchDate,
       matchTime: item.matchTime || '00:00:00',
       matchStatus: item.matchStatus || (statusParam === 'finished' ? 'finished' : 'not_started'),
@@ -589,12 +612,30 @@ async function fetchMatches() {
       awayScore: item.awayScore,
       handicap: item.handicap,
       isSingle: item.isSingle,
+      wdl: item.wdl,
     }))
     if (pendingMatchId.value) {
       const found = allMatches.value.find(m => m.matchId === pendingMatchId.value)
       if (found) {
         selectedMatch.value = found
         pendingMatchId.value = null
+        if (pendingAutoStart.value) {
+          analysisSteps.value = []
+          analysisComplete.value = false
+          prediction.value = { direction: '', confidence: 0, overallReverse: false }
+          aiAnalysis.value = ''
+          // 等 onShow 跳过缓存恢复后再开跑; 标志在回调里清
+          setTimeout(() => {
+            if (pendingAutoStart.value) {
+              pendingAutoStart.value = false
+              startAnalysis()
+            }
+          }, 80)
+        }
+      } else if (pendingAutoStart.value) {
+        uni.showToast({ title: '未找到该场比赛', icon: 'none' })
+        pendingMatchId.value = null
+        pendingAutoStart.value = false
       }
     }
   } catch (e) {
@@ -652,30 +693,55 @@ function calNextMonth() {
   else calMonth.value++
 }
 
-function confirmCalendar() {
-  if (calSelected.value) filterDate.value = calSelected.value
-  showCalendar.value = false
+function openCalendar() {
+  const base = (filterDate.value && filterDate.value !== 'all')
+    ? filterDate.value
+    : (saleDates.value[0] || new Date().toISOString().slice(0, 10))
+  const [y, m] = base.split('-').map(Number)
+  calYear.value = y
+  calMonth.value = m
+  calSelected.value = base
+  showCalendar.value = true
 }
 
-const availableDates = computed(() => {
-  const dates = [...new Set(allMatches.value.map(m => m.matchDate))].sort()
-  return dates
-})
-
-const recentFinishedDates = computed(() => {
-  return finishedDates.value.slice(0, 5)
-})
+function confirmCalendar() {
+  if (calSelected.value) {
+    // 日历选中的期若不在快捷条, 插到列表前端便于回看
+    if (!saleDates.value.includes(calSelected.value)) {
+      saleDates.value = [calSelected.value, ...saleDates.value]
+    }
+    filterDate.value = calSelected.value
+  }
+  showCalendar.value = false
+}
 
 const availableLeagues = computed(() => {
   const leagues = [...new Set(pickerMatches.value.map(m => m.league))].sort()
   return leagues
 })
 
-const filteredPickerMatches = computed(() => {
-  let list = pickerMatches.value
-  if (matchStatus.value === 'not_started' && filterDate.value && filterDate.value !== 'all') {
-    list = list.filter(m => m.matchDate === filterDate.value)
+/** 快捷日期条: 最近几期 + 当前选中(日历选出的更早日期也挂上) */
+const displaySaleDates = computed(() => {
+  const head = saleDates.value.slice(0, 8)
+  const cur = filterDate.value
+  if (cur && cur !== 'all' && !head.includes(cur)) {
+    return [cur, ...head]
   }
+  return head
+})
+const saleDateSet = computed(() => new Set(saleDates.value))
+
+const emptyPickerHint = computed(() => {
+  if (loadingMatches.value) return '加载中…'
+  if (matchStatus.value === 'finished' && filterDate.value && filterDate.value !== 'all') {
+    return `${filterDate.value.slice(5)} 售卖期暂无已完赛`
+  }
+  return '暂无赛事'
+})
+
+const filteredPickerMatches = computed(() => {
+  // 日期已在 API 按售卖期过滤, 前端只做联赛/搜索
+  let list = pickerMatches.value
   if (filterLeague.value && filterLeague.value !== 'all') {
     list = list.filter(m => m.league === filterLeague.value)
   }
@@ -908,7 +974,7 @@ function pickLeagueColor(league) {
   return colors[league] || '#6b7280'
 }
 
-watch(matchStatus, () => {
+watch(matchStatus, async () => {
   selectedMatch.value = null
   analysisSteps.value = []
   analysisComplete.value = false
@@ -916,40 +982,24 @@ watch(matchStatus, () => {
   filterLeague.value = 'all'
   if (matchStatus.value === 'finished') {
     filterDate.value = ''
-    fetchDates()
+    await fetchDates()
+    await fetchMatches()
   } else {
     filterDate.value = 'all'
-    fetchMatches()
+    await fetchDates()
+    await fetchMatches()
   }
 })
 
 watch(filterDate, (val) => {
-  if (matchStatus.value === 'finished' && val && val !== 'all') {
-    fetchMatches()
-  }
+  if (!val) return
+  if (matchStatus.value === 'finished' && val === 'all') return
+  fetchMatches()
 })
 
-onShow(() => {
-  if (matchStatus.value === 'finished') {
-    fetchDates()
-  } else {
-    fetchMatches()
-  }
-
-  // 恢复上次预测结果（仅当当前没有结果时）
-  if (!analysisComplete.value && !pendingMatchId.value) {
-    try {
-      const cached = uni.getStorageSync('predict-last-result')
-      if (cached && cached.matchId && Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
-        selectedMatch.value = cached.match
-        analysisSteps.value = cached.steps || []
-        prediction.value = cached.prediction || { direction: '', confidence: 0, overallReverse: false }
-        aiAnalysis.value = cached.aiAnalysis || ''
-        analysisComplete.value = true
-        matchStatus.value = cached.matchStatus || 'not_started'
-      }
-    } catch (e) { /* ignore */ }
-  }
+onShow(async () => {
+  await fetchDates()
+  await fetchMatches()
 })
 </script>
 
@@ -2009,6 +2059,7 @@ onShow(() => {
   border-radius: 8rpx;
   &.cal-other { color: #ddd; }
   &.cal-today { color: #0d9488; font-weight: 600; }
+  &.cal-has:not(.cal-selected) { color: #0f766e; font-weight: 600; }
   &.cal-selected { background: #0d9488; color: #fff; font-weight: 600; }
 }
 </style>

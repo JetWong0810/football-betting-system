@@ -3,18 +3,24 @@
 数据源: football-data.co.uk 静态CSV(无反爬, 直接httpx下载), 每联赛每赛季一文件。
 覆盖: 18个国内联赛(英超/英冠/西甲/西乙/意甲/意乙/德甲/德乙/法甲/法乙/荷甲/葡超/比甲/
       挪超/瑞典超/日职/巴甲/美职联), 赛季1819~2526(2018-2026)。
-映射: team_name_mapping(fd_name->jczq_name) 按(日期,主队,客队)命中matches表;
-      未映射队按(日期,联赛,比分)回退(借此覆盖SP2/I2等无队名映射的联赛)。
+映射:
+  1) team_name_mapping(fd_name->jczq_name) 按(日期,主队,客队)命中 —— 优先、可覆盖已有行
+  2) 可选比分回退: 仅当(日期,联赛,比分)在 matches 中唯一,且该场尚未被队名命中占用
+     (旧版 LIMIT 1 会把同日同比分场次的盘写串, 如阿森纳被伯恩茅斯盘覆盖)
+
 符号约定: football-data 亚盘标准(正=主受让/主underdog, 负=主让/主favorite), 原样存入。
 
 用法:
   python3 -u backfill_ah_history.py            # 全量
   LEAGUES=E0,E1 LIMIT=10 python3 -u backfill_ah_history.py
+  DRY_RUN=1 python3 -u backfill_ah_history.py  # 只统计不写库
+  SCORE_FALLBACK=0 python3 -u backfill_ah_history.py  # 禁用比分回退(默认开启唯一比分回退)
 """
 import os
 import csv
 import io
 import time
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -78,7 +84,7 @@ def get_conn():
 
 
 def load_team_map() -> Dict[str, Dict[str, str]]:
-    """{league_code: {fd_home_name: jczq_home_name}} — 双向按队名同时映射主客"""
+    """{league_code: {fd_name: jczq_name}}"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -91,6 +97,44 @@ def load_team_map() -> Dict[str, Dict[str, str]]:
         conn.close()
 
 
+def load_match_indexes(league_names: List[str]) -> Tuple[
+    Dict[Tuple[str, str, str], str],
+    Dict[Tuple[str, str, int, int], List[str]],
+]:
+    """预加载 matches 索引, 避免逐行查库。
+
+    Returns:
+      by_teams: (date, home, away) -> match_id
+      by_score: (date, league, hs, as) -> [match_id, ...]
+    """
+    conn = get_conn()
+    by_teams: Dict[Tuple[str, str, str], str] = {}
+    by_score: Dict[Tuple[str, str, int, int], List[str]] = defaultdict(list)
+    try:
+        with conn.cursor() as cur:
+            placeholders = ",".join(["%s"] * len(league_names))
+            cur.execute(
+                f"""
+                SELECT match_id, match_date, league_name, home_team_name, away_team_name,
+                       home_score, away_score
+                FROM matches
+                WHERE league_name IN ({placeholders})
+                  AND match_date >= '2018-01-01'
+                """,
+                league_names,
+            )
+            for r in cur.fetchall():
+                d = str(r["match_date"])[:10]
+                mid = r["match_id"]
+                by_teams[(d, r["home_team_name"], r["away_team_name"])] = mid
+                if r["home_score"] is not None and r["away_score"] is not None:
+                    key = (d, r["league_name"], int(r["home_score"]), int(r["away_score"]))
+                    by_score[key].append(mid)
+        return by_teams, dict(by_score)
+    finally:
+        conn.close()
+
+
 def fetch_csv(season: str, code: str) -> List[Dict]:
     url = f"{BASE}/{season}/{code}.csv"
     try:
@@ -98,7 +142,6 @@ def fetch_csv(season: str, code: str) -> List[Dict]:
         if resp.status_code != 200 or not resp.content:
             return []
         text = resp.content.decode("utf-8", errors="replace")
-        # 去BOM
         if text and text[0] == "﻿":
             text = text[1:]
         return list(csv.DictReader(io.StringIO(text)))
@@ -113,6 +156,9 @@ def _to_row(match_id: str, r: Dict) -> Optional[Tuple]:
     # 至少有收盘线(盘路用)才入库; 开盘线可缺
     if open_h is None and close_h is None:
         return None
+    # 仅有开盘时用开盘填收盘, 避免 close NULL
+    if close_h is None:
+        close_h = open_h
     open_home = _f(r.get("B365AHH"))
     open_away = _f(r.get("B365AHA"))
     close_home = _f(r.get("B365CAHH"))
@@ -135,18 +181,36 @@ def main():
     codes = [c.strip() for c in os.getenv("LEAGUES", "").split(",") if c.strip()] or list(LEAGUE_NAMES.keys())
     seasons = [s.strip() for s in os.getenv("SEASONS", "").split(",") if s.strip()] or SEASONS
     limit = int(os.getenv("LIMIT", "0"))
+    dry_run = os.getenv("DRY_RUN", "0") == "1"
+    score_fallback = os.getenv("SCORE_FALLBACK", "1") != "0"
 
     team_map = load_team_map()
-    print(f"联赛 {len(codes)} 个, 赛季 {len(seasons)} 个, 队名映射覆盖 {len(team_map)} 联赛", flush=True)
+    league_names = [LEAGUE_NAMES[c] for c in codes if c in LEAGUE_NAMES]
+    print(
+        f"联赛 {len(codes)} 个, 赛季 {len(seasons)} 个, 队名映射覆盖 {len(team_map)} 联赛, "
+        f"SCORE_FALLBACK={int(score_fallback)}, DRY_RUN={int(dry_run)}",
+        flush=True,
+    )
+    print("预加载 matches 索引...", flush=True)
+    by_teams, by_score = load_match_indexes(league_names)
+    print(f"  队名索引 {len(by_teams)}, 比分索引 {len(by_score)}", flush=True)
 
-    conn = get_conn()
+    # 两遍: 先队名占坑, 再唯一比分补洞(不覆盖已占)
+    pending_score: List[Tuple[str, Dict, str]] = []  # (league_code, csv_row, date)
+    claimed: Dict[str, str] = {}  # match_id -> source (team|score)
     batch: List[Tuple] = []
     written = 0
     csv_matches = 0
+    stats = defaultdict(int)
+
+    conn = None if dry_run else get_conn()
 
     def flush():
         nonlocal written
-        if not batch:
+        if dry_run or not batch:
+            if batch:
+                written += len(batch)
+                batch.clear()
             return
         with conn.cursor() as cur:
             cur.executemany(INSERT_SQL, batch)
@@ -154,12 +218,28 @@ def main():
         written += len(batch)
         batch.clear()
 
+    def try_append(mid: str, r: Dict, source: str) -> bool:
+        if mid in claimed:
+            stats[f"skip_claimed_by_{claimed[mid]}"] += 1
+            return False
+        rec = _to_row(mid, r)
+        if not rec:
+            stats["skip_no_ah"] += 1
+            return False
+        claimed[mid] = source
+        batch.append(rec)
+        stats[f"hit_{source}"] += 1
+        if len(batch) >= 200:
+            flush()
+        return True
+
+    # ---- Pass 1: 队名映射 ----
     for code in codes:
         league_name = LEAGUE_NAMES.get(code, "")
         if not league_name:
             continue
-        tmap = team_map.get(code, {})  # 该联赛 fd_name->jczq_name
-        league_hit = 0
+        tmap = team_map.get(code, {})
+        league_team = 0
         for season in seasons:
             rows = fetch_csv(season, code)
             if not rows:
@@ -169,53 +249,61 @@ def main():
                 csv_matches += 1
                 date = _norm_date(r.get("Date", ""))
                 if not date:
+                    stats["skip_bad_date"] += 1
                     continue
-                ht = r.get("HomeTeam", "").strip()
-                at = r.get("AwayTeam", "").strip()
+                ht = (r.get("HomeTeam") or "").strip()
+                at = (r.get("AwayTeam") or "").strip()
                 mid = None
-                # 1) 队名映射命中
                 if ht in tmap and at in tmap:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT match_id FROM matches WHERE match_date=%s AND home_team_name=%s AND away_team_name=%s",
-                            (date, tmap[ht], tmap[at]),
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            mid = row["match_id"]
-                # 2) 回退: 日期+联赛+比分
-                if not mid:
-                    hs = _i(r.get("FTHG"))
-                    as_ = _i(r.get("FTAG"))
-                    if hs is not None and as_ is not None:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "SELECT match_id FROM matches WHERE match_date=%s AND league_name=%s "
-                                "AND home_score=%s AND away_score=%s LIMIT 1",
-                                (date, league_name, hs, as_),
-                            )
-                            row = cur.fetchone()
-                            if row:
-                                mid = row["match_id"]
-                if not mid:
-                    continue
-                rec = _to_row(mid, r)
-                if rec:
-                    batch.append(rec)
-                    league_hit += 1
-                    if len(batch) >= 200:
-                        flush()
-                if limit and written >= limit:
-                    break
+                    mid = by_teams.get((date, tmap[ht], tmap[at]))
+                if mid:
+                    if try_append(mid, r, "team"):
+                        league_team += 1
+                else:
+                    # 留给 pass2
+                    pending_score.append((code, r, date))
             if limit and written >= limit:
                 break
-        print(f"  {code} {league_name}: 入库 {league_hit} 场", flush=True)
+        print(f"  {code} {league_name}: 队名命中 {league_team}", flush=True)
         if limit and written >= limit:
             break
 
+    # ---- Pass 2: 唯一比分回退 ----
+    score_hits_by_league: Dict[str, int] = defaultdict(int)
+    if score_fallback and not (limit and written >= limit):
+        for code, r, date in pending_score:
+            if limit and written >= limit:
+                break
+            league_name = LEAGUE_NAMES.get(code, "")
+            hs = _i(r.get("FTHG"))
+            as_ = _i(r.get("FTAG"))
+            if hs is None or as_ is None:
+                stats["score_skip_no_ft"] += 1
+                continue
+            cands = by_score.get((date, league_name, hs, as_), [])
+            if len(cands) == 0:
+                stats["score_skip_none"] += 1
+                continue
+            if len(cands) > 1:
+                stats["score_skip_ambiguous"] += 1
+                continue
+            mid = cands[0]
+            if try_append(mid, r, "score"):
+                score_hits_by_league[code] += 1
+
     flush()
-    conn.close()
-    print(f"\n完成: 扫描CSV {csv_matches} 行, 入库 {written} 场", flush=True)
+    if conn:
+        conn.close()
+
+    print("\n比分回退命中(按联赛):", dict(score_hits_by_league) or "{}", flush=True)
+    print(
+        f"完成: CSV={csv_matches}, 入库={written}, "
+        f"team={stats['hit_team']}, score={stats['hit_score']}, "
+        f"比分歧义跳过={stats['score_skip_ambiguous']}, "
+        f"已被队名占用跳过={stats['skip_claimed_by_team']}, "
+        f"DRY_RUN={int(dry_run)}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

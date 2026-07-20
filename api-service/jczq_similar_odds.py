@@ -56,6 +56,17 @@ def _get_low_odds_info(open_win, open_draw, open_loss, close_win, close_draw, cl
     return low_key, low_open, low_close, direction
 
 
+def _side_high_odds(win, loss):
+    """高赔方=主胜/客胜中较高者(对阵双方 underdog), 不含平赔。
+
+    平是中间项, 不参与高赔匹配。缺一侧则返回另一侧; 都缺返回 None。
+    """
+    cands = [o for o in (win, loss) if o is not None]
+    if not cands:
+        return None
+    return max(cands)
+
+
 def get_nspf_pool() -> List[Dict]:
     """加载竞彩 nspf 历史同赔池: 每场初盘(最早)+终盘(最晚)+比分+盘口+推导结果。
 
@@ -340,7 +351,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
 
     "上盘球队"(低赔方)必须与预测比赛同一侧(同为胜/平/负的某一项), 初盘与终盘的低赔都在
     ±tolerance 内、高赔都在 ±high_tolerance 内, 且初→终盘变动方向一致。同侧避免主胜低赔匹配到
-    客胜低赔的盘口结构相反场次。高赔方=三项最大值(underdog),约束两端接近使赔率形态相似。
+    客胜低赔的盘口结构相反场次。
+    高赔方=主胜/客胜中较高者(对阵双方 underdog), **不含平赔**(平是中间项, 不参与高赔约束)。
     exclude_match_id: 剔除预测比赛自身(已完赛回溯预测时该场在池中会100%自匹配)。
     require_direction=False: 当预测场仅有1条spf快照(open==close, 无真实变动)时,
       放弃"变动方向一致"过滤(此时方向恒为"平"是数据缺失而非真稳定), 仅按初/终盘接近+同侧匹配。
@@ -358,10 +370,11 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     pool = pool_loader()
     league_norm = (league or "").strip()
 
-    # 高赔方(初/终盘三项最大值=underdog) — 严格过滤: 历史高赔须接近本场
-    input_high_open = max(o for o in [open_win, open_draw, open_loss] if o is not None)
-    _ch = [o for o in [close_win, close_draw, close_loss] if o is not None]
-    input_high_close = max(_ch) if _ch else None
+    # 高赔方: 主/客胜较高者(排除平), 历史高赔须接近本场
+    input_high_open = _side_high_odds(open_win, open_loss)
+    input_high_close = _side_high_odds(close_win, close_loss)
+    if input_high_open is None:
+        return {"query": {}, "matches": [], "stats": {}}
 
     matched = []
     for m in pool:
@@ -384,13 +397,13 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         if input_low_close is not None and hist_low_close is not None:
             if abs(hist_low_close - input_low_close) > tolerance:
                 continue
-        # 高赔方 ±high_tolerance (初盘+终盘, 新增严格过滤)
-        hist_high_open = max(m["open_win"], m["open_draw"], m["open_loss"])
-        if abs(hist_high_open - input_high_open) > high_tolerance:
+        # 高赔方 ±high_tolerance (主/客较高者, 不含平; 初盘+终盘)
+        hist_high_open = _side_high_odds(m["open_win"], m["open_loss"])
+        if hist_high_open is None or abs(hist_high_open - input_high_open) > high_tolerance:
             continue
         if input_high_close is not None:
-            hist_high_close = max(m["close_win"], m["close_draw"], m["close_loss"])
-            if abs(hist_high_close - input_high_close) > high_tolerance:
+            hist_high_close = _side_high_odds(m["close_win"], m["close_loss"])
+            if hist_high_close is None or abs(hist_high_close - input_high_close) > high_tolerance:
                 continue
         # 初→终盘变动方向一致(预测场无真实变动时跳过此过滤)
         if require_direction and hist_direction != input_direction:

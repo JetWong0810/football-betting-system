@@ -23,6 +23,11 @@
                 >
                 <text class="tip">(红框选项可投单关)</text>
               </view>
+              <text
+                v-if="group.displayDate && group.displayDate !== '待定'"
+                class="day-similar"
+                @tap.stop="goBatchSimilarDate(group.displayDate)"
+              >同赔</text>
               <text class="arrow" :class="{ collapsed: collapsedMap[group.key] }">▲</text>
             </view>
 
@@ -142,7 +147,7 @@
                     </view>
 
                     <view class="predict-icon" @tap="goPredict(match)">
-                      <text class="predict-icon-text">⚡</text>
+                      <text class="predict-icon-text">预</text>
                     </view>
                   </view>
                 </view>
@@ -315,9 +320,15 @@ function goIndices(matchId) {
 
 function goPredict(match) {
   const isWorldCup = match.league && match.league.includes("世界杯");
+  const key = extractIssueKey(match);
+  const date =
+    deriveIssueDate(key) ||
+    (match?.matchDate && dayjs(match.matchDate).isValid() ? match.matchDate : "");
+  const qs = [`matchId=${encodeURIComponent(match.matchId)}`, "auto=1"];
+  if (date) qs.push(`date=${encodeURIComponent(date)}`);
   const url = isWorldCup
-    ? `/pages/worldcup/predict?matchId=${match.matchId}`
-    : `/pages/predict/predict?matchId=${match.matchId}`;
+    ? `/pages/worldcup/predict?${qs.join("&")}`
+    : `/pages/predict/predict?${qs.join("&")}`;
   uni.navigateTo({ url });
 }
 
@@ -327,6 +338,17 @@ function goPredictPage() {
 
 function goResults() {
   uni.navigateTo({ url: "/pages/matches/results" });
+}
+
+/** 按售卖日进当日同赔分析(在售 not_started) */
+function goBatchSimilarDate(date) {
+  if (!date || date === "待定") {
+    uni.showToast({ title: "日期未知", icon: "none" });
+    return;
+  }
+  uni.navigateTo({
+    url: `/pages/predict/batch-analysis?date=${date}&status=not_started`,
+  });
 }
 
 function toggleGroup(date) {
@@ -560,14 +582,16 @@ function hasMatchSelection(matchId) {
 
 .day-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12rpx;
   padding: 16rpx 24rpx 12rpx;
   background: transparent;
   letter-spacing: 0.03em;
 }
 
 .day-title {
+  flex: 1;
+  min-width: 0;
   font-size: 22rpx;
   color: #666;
   line-height: 1.6;
@@ -599,6 +623,19 @@ function hasMatchSelection(matchId) {
   font-size: 24rpx;
   color: #999;
   transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.day-similar {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: #0d9488;
+  font-weight: 600;
+  padding: 4rpx 12rpx;
+  border-radius: 6rpx;
+  border: 1rpx solid rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.06);
+  &:active { opacity: 0.7; }
 }
 
 .arrow.collapsed {
@@ -875,7 +912,7 @@ function hasMatchSelection(matchId) {
   justify-content: center;
   width: 48rpx;
   height: 48rpx;
-  border-radius: 50%;
+  border-radius: 6rpx;
   background: linear-gradient(135deg, #0d9488, #14b8a6);
   flex-shrink: 0;
   align-self: center;
@@ -884,8 +921,10 @@ function hasMatchSelection(matchId) {
 }
 
 .predict-icon-text {
-  font-size: 24rpx;
+  font-size: 22rpx;
   line-height: 1;
+  color: #fff;
+  font-weight: 600;
 }
 
 .state {

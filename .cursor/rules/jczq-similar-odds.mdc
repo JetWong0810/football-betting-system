@@ -23,7 +23,7 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 3. **同侧**:历史低赔方 == 本场低赔方(同为胜/平/负某一项)。
 4. **初盘低赔 ±0.03**(TOLERANCE)。
 5. **终盘低赔 ±0.03**。
-6. **初盘高赔方 ±0.1**(高赔=三项最大值=underdog,新增严格过滤)。
+6. **初盘高赔方 ±0.1**(高赔=**主胜/客胜中较高者**,不含平赔;旧逻辑曾误用三项max把平当高赔)。
 7. **终盘高赔方 ±0.1**。
 8. **方向一致**:初→终盘低赔变动方向(升/降/平)。**方向降级**:本场仅 1 条 spf 快照(open==current,无变动)时 `require_direction=False`,跳过方向过滤(此时方向恒"平"是数据缺失非真稳定),仅按初/终盘接近+同侧匹配。details 显"方向不限(无变动)"。
 
@@ -39,9 +39,10 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 - 胜平负分布 + 低赔命中(参考,不主导方向)。
 - **盘路纯亚盘口径**:仅对 handicap 非None 场统计。**半上归上盘、半下归下盘(各计1,不再拆给两边)**,走水单列。保留 full_up/half_up/full_down/half_down/push 子计数。上盘+下盘+走水=ah_total。
 - F6 方向:`ah_total<3`→neutral;`ah_upper_pct>65`→upper(score 7);`<40`→lower(score 7);否则 neutral(score 5)。
+- **refScore(0–100 多维证据强度,独立于方向阈值/因子score)**:单场权重 `w=(sim/100)*league(同联赛1.15)*hc_proximity(|Δ盘|)*time_decay`；半赢×0.5。合成 `0.40*edge + 0.25*quality + 0.20*sample + 0.15*decidable`；无变动降级×0.85；`total<3`封顶20；neutral封顶50。返回 `refScore` + `refBreakdown{edge,quality,sample,decidable}`。批量接口传入本场 `ahHandicap` 供盘口一致性。
 
 ### F6 details(predict_service.calc_factor_jczq_similar_odds)
-匹配条件(低赔初/终±0.03 + 高赔初/终±0.1 + 方向)+ 匹配场次 + 盘路分布(上盘X(全a半b) 下盘Y(全c半d) 走水Z)+ 上下盘命中 + 走水 + 样本场。返回 `matches`(similar_matches 列表,供弹窗:相似度/日期/联赛/队/比分/结果/初盘/终盘/让球/盘路)。
+匹配条件(低赔初/终±0.03 + 高赔初/终±0.1 + 方向)+ 匹配场次 + 盘路分布(上盘X(全a半b) 下盘Y(全c半d) 走水Z)+ 上下盘命中 + 走水 + 参考分 + 样本场。返回 `matches`(similar_matches 列表,供弹窗:相似度/日期/联赛/队/比分/结果/初盘/终盘/让球/盘路)+ `refScore`/`refBreakdown`。
 
 ## readpl wtype 反转(关键坑)
 见 [[data-conventions]]。抓 spf 用 `wtype=nspf`。`backfill_spf_history.py` 历史曾误用 `wtype=spf` 抓成 nspf 标 spf,已修正为 `wtype=nspf`。DB 'spf' 45038 场=真 spf(已验证 jczq_46754 精确比对)。
@@ -55,9 +56,9 @@ sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 
 
 ## 批量同赔分析
 - `GET /api/predict/batch-similar?date=&status=not_started|finished`(main.py)。
-- status=not_started:按 `match_date=date` 查(picker 按 matchDate 过滤)。finished:按 `match_number LIKE date前缀`(售卖期,picker 显示整个售卖期,含跨凌晨场)。
+- 未开始/已结束统一按 `match_number LIKE date前缀`(竞彩售卖期,与赛果查询一致,含跨凌晨场);完赛判定=`timestamp<now` 或 `home_score` 非空。
 - finished 额外返回 actualScore/actualResult/actualAh(亚盘)/hit(F6方向 vs 实际盘路)/summary.hitRate。亚盘来源:jczq_ah_history → matches.asian_handicap(取反),纯读不写。缺则"无亚盘"。
-- 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
+- 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 右上角方向旁 refScore + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
 
 ## 同赔弹窗(predict.vue / batch-analysis.vue)
 表头:相似度/日期/联赛/主队/比分/客队/结果/初盘/终盘/让球/盘路。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动(min-width 1300rpx)。

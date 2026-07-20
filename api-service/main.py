@@ -1073,37 +1073,58 @@ class PredictRequest(BaseModel):
     market_heat: Optional[str] = Field(default=None, description="用户手动输入的市场热度描述")
 
 
+def _predict_is_finished_sql(alias: str = "") -> str:
+    """与赛果口径一致的完赛判定: 已开赛(timestamp<now) 或 已有比分。
+
+    timestamp 为空但有比分 → 完赛(修复误留未开始); 无时间无比分 → 仍算未开始。
+    """
+    p = f"{alias}." if alias else ""
+    return (
+        f"(({p}match_timestamp IS NOT NULL AND {p}match_timestamp < %s) "
+        f"OR {p}home_score IS NOT NULL)"
+    )
+
+
+def _predict_is_not_started_sql(alias: str = "") -> str:
+    p = f"{alias}." if alias else ""
+    return (
+        f"({p}home_score IS NULL AND "
+        f"({p}match_timestamp IS NULL OR {p}match_timestamp >= %s))"
+    )
+
+
 @app.get("/api/predict/matches")
 def list_predict_matches(
     status: str = Query(default="not_started", description="not_started 或 finished"),
-    date: Optional[str] = Query(default=None, description="按日期过滤 YYYY-MM-DD"),
+    date: Optional[str] = Query(default=None, description="售卖期日期 YYYY-MM-DD(match_number前6位), 与赛果一致"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=50),
+    page_size: int = Query(default=50, ge=1, le=100),
 ):
-    """获取预测页可选赛事列表（包含未开始和已结束）"""
+    """获取预测页可选赛事列表。日期按竞彩售卖期(match_number)归期, 与赛果查询一致。"""
     import time as _time
     offset = (page - 1) * page_size
     now_ts = int(_time.time())
 
-    where = []
+    where: List = []
     params: List = []
 
     if status == "finished":
-        # 已开赛的比赛（通过 match_timestamp 判断）
-        where.append("match_timestamp IS NOT NULL AND match_timestamp < %s")
+        # 已结束含历史导入 jczq_*(与赛果一致); 未开始只看体彩在售 ID
+        where.append(_predict_is_finished_sql())
         params.append(now_ts)
     else:
-        # 未开赛：match_timestamp 在未来
-        where.append("(match_timestamp IS NULL OR match_timestamp >= %s)")
+        where.append("match_id NOT LIKE 'jczq%%'")
+        where.append(_predict_is_not_started_sql())
         params.append(now_ts)
 
+    # 与赛果页相同: 按售卖期号前缀过滤(含跨凌晨场), 不用 match_date
     if date:
         date_prefix = date[2:].replace("-", "")
         where.append("match_number LIKE %s")
         params.append(f"{date_prefix}%")
 
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    order = "ORDER BY match_date DESC, match_time DESC" if status == "finished" else "ORDER BY match_date ASC, match_time ASC"
+    where_clause = f"WHERE {' AND '.join(where)}"
+    order = "ORDER BY match_time ASC, match_number ASC"
 
     from database import get_db
     with get_db() as conn:
@@ -1125,8 +1146,8 @@ def list_predict_matches(
         wdl = odds_map.get(row["match_id"], {})
         item["wdl"] = wdl
         ts = row.get("match_timestamp")
-        item["matchStatus"] = "finished" if (ts and ts < now_ts) else "not_started"
-        # 让球信息从让球胜平负赔率中获取
+        has_score = row.get("home_score") is not None
+        item["matchStatus"] = "finished" if (has_score or (ts and ts < now_ts)) else "not_started"
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
         items.append(item)
@@ -1154,21 +1175,19 @@ def batch_similar(
         date = _time.strftime("%Y-%m-%d", _time.localtime())
 
     now_ts = int(_time.time())
-    where = ["match_id NOT LIKE 'jczq%%'"]
+    where: List = []
     params: List = []
     if status == "finished":
-        where.append("match_timestamp IS NOT NULL AND match_timestamp < %s")
+        where.append(_predict_is_finished_sql())
         params.append(now_ts)
-        # 已结束按售卖期号(match_number前缀)查, 与预测页finished picker一致(显示整个售卖期, 跨凌晨场也含)
-        date_prefix = date[2:].replace("-", "")
-        where.append("match_number LIKE %s")
-        params.append(f"{date_prefix}%")
     else:
-        where.append("(match_timestamp IS NULL OR match_timestamp >= %s)")
+        where.append("match_id NOT LIKE 'jczq%%'")
+        where.append(_predict_is_not_started_sql())
         params.append(now_ts)
-        # 未开始按match_date查(picker按matchDate过滤)
-        where.append("match_date = %s")
-        params.append(date)
+    # 未开始/已结束统一按售卖期号归期(与赛果查询一致, 含跨凌晨场)
+    date_prefix = date[2:].replace("-", "")
+    where.append("match_number LIKE %s")
+    params.append(f"{date_prefix}%")
     where_clause = "WHERE " + " AND ".join(where)
     order = "ORDER BY match_time ASC"
 
@@ -1177,7 +1196,8 @@ def batch_similar(
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM matches {where_clause} {order}", params)
         rows = cur.fetchall()
-        # 批量取本场亚盘让球(jczq_ah_history.close_handicap, 标准亚盘负=主让)用于实际盘路
+        # 批量取本场亚盘让球(标准约定: 负=主让)
+        # 优先 jczq_ah_history(历史 jczq_* 池); 在售/体彩场几乎不在此表,靠 matches.asian_handicap
         ah_map = {}
         if rows:
             mids = [r["match_id"] for r in rows]
@@ -1187,14 +1207,64 @@ def batch_similar(
             for ar in cur.fetchall():
                 if ar.get("close_handicap") is not None:
                     ah_map[ar["match_id"]] = float(ar["close_handicap"])
-        # 兜底1: matches.asian_handicap(500.com原值正=主让, 取反为负=主让; 由赛果页/回填脚本写入)
+        # 兜底: matches.asian_handicap(500.com 原值正=主让 → 取反)
         for r in rows:
             if r["match_id"] not in ah_map and r.get("asian_handicap") is not None:
                 try:
                     ah_map[r["match_id"]] = -float(r["asian_handicap"])
                 except (TypeError, ValueError):
                     pass
-        # 注: 仍缺亚盘的已结束场(如近期未回填) actualAh 留 None/"无亚盘"; 由 backfill_ah_500.py 补 jczq_ah_history
+
+    # 已结束且仍缺亚盘: 与赛果页同逻辑,从 500.com 懒抓并缓存到 matches.asian_handicap
+    # (jczq_ah_history 主要挂 jczq_* 历史 ID,体彩在售 ID 通常不在其中)
+    if status == "finished" and rows:
+        need_asian = [
+            r for r in rows
+            if r["match_id"] not in ah_map and r.get("home_score") is not None
+        ]
+        if need_asian:
+            try:
+                from repository import derive_sale_date as _derive_sale_ah
+                from odds500_service import get_fid_for_match, fetch_asian_handicap
+                from database import get_db as _get_db_ah
+                for m in need_asian:
+                    sale_date = _derive_sale_ah(m) or m.get("match_date")
+                    mcode = m.get("match_code")
+                    if not sale_date or not mcode:
+                        continue
+                    fid = m.get("fid_500") or get_fid_for_match(sale_date, mcode)
+                    if not fid:
+                        continue
+                    asian_list = fetch_asian_handicap(fid)
+                    preferred = next(
+                        (a for a in asian_list if a.get("bookmaker") == "澳门"), None
+                    ) or (asian_list[0] if asian_list else None)
+                    if not preferred or not preferred.get("current"):
+                        continue
+                    hc = preferred["current"].get("handicap")
+                    if hc is None:
+                        continue
+                    home_odds = preferred["current"].get("home")
+                    away_odds = preferred["current"].get("away")
+                    company = preferred.get("bookmaker", "")
+                    m["asian_handicap"] = hc
+                    m["fid_500"] = fid
+                    try:
+                        ah_map[m["match_id"]] = -float(hc)
+                    except (TypeError, ValueError):
+                        continue
+                    try:
+                        with _get_db_ah() as _conn_ah:
+                            _conn_ah.cursor().execute(
+                                "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
+                                "asian_away_odds=%s, asian_company=%s, fid_500=%s "
+                                "WHERE match_id=%s",
+                                (hc, home_odds, away_odds, company, fid, m["match_id"]),
+                            )
+                    except Exception as _we:
+                        logger.warning(f"批量同赔亚盘落库失败 {m['match_id']}: {_we}")
+            except Exception as e:
+                logger.warning(f"批量同赔亚盘懒回填失败: {e}")
 
     match_ids = [r["match_id"] for r in rows]
     odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
@@ -1204,16 +1274,26 @@ def batch_similar(
         mid = row["match_id"]
         item = format_match(row)
         wdl = odds_map.get(mid, {})
+        # 竞彩整数让球(hhad)仅作参考字段,亚盘另走 ahHandicap
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
+        # 单关: matches.is_single 或赔率表任一玩法 is_single=1
+        if not item.get("isSingle") and wdl:
+            item["isSingle"] = any(bool(v.get("is_single")) for v in wdl.values())
+        # 亚盘盘口(标准负=主让)先解析,供 F6 参考分 D4 盘口一致性 + 前端展示
+        ahc = ah_map.get(mid)
+        item["ahHandicap"] = ahc
+
         # F6 历史同赔
         spf = get_match_spf_odds(mid)
         has_move = bool(spf and spf["initial"] != spf["current"])
         if spf:
-            f6 = calc_factor_jczq_similar_odds(spf, league=item.get("league"), exclude_match_id=mid)
+            f6 = calc_factor_jczq_similar_odds(
+                spf, league=item.get("league"), exclude_match_id=mid, ah_handicap=ahc)
         else:
             f6 = {"name": "历史同赔", "direction": "neutral", "score": 5,
-                  "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": []}
+                  "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
+                  "refScore": 0, "refBreakdown": {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}}
         item["spf"] = spf  # 本场初盘/终盘(胜平负), 供对比展示
         item["hasMove"] = has_move
         item["f6"] = f6
@@ -1225,8 +1305,6 @@ def batch_similar(
             if hs is not None and aws is not None:
                 diff = int(hs) - int(aws)
                 item["actualResult"] = "主胜" if diff > 0 else ("平局" if diff == 0 else "客胜")
-            ahc = ah_map.get(mid)  # 亚盘让球(负=主让)
-            item["ahHandicap"] = ahc
             actual_ah = None
             if hs is not None and aws is not None and ahc is not None:
                 low_key = None
@@ -1273,27 +1351,34 @@ def list_predict_dates(
     with get_db() as conn:
         cur = conn.cursor()
         if status == "finished":
+            # 含 jczq_ 历史期, 与赛果可查范围对齐; 上限覆盖近年常用回看
             cur.execute(
-                """SELECT LEFT(match_number, 6) as sale_prefix FROM matches
-                   WHERE match_timestamp IS NOT NULL AND match_timestamp < %s
+                f"""SELECT LEFT(match_number, 6) as sale_prefix FROM matches
+                   WHERE {_predict_is_finished_sql()}
                      AND match_number IS NOT NULL AND LENGTH(match_number) >= 6
+                     AND LEFT(match_number, 6) REGEXP '^[0-9]{{6}}$'
                    GROUP BY sale_prefix
                    ORDER BY sale_prefix DESC
-                   LIMIT 30""",
+                   LIMIT 400""",
                 (now_ts,),
             )
         else:
             cur.execute(
-                """SELECT LEFT(match_number, 6) as sale_prefix FROM matches
-                   WHERE (match_timestamp IS NULL OR match_timestamp >= %s)
+                f"""SELECT LEFT(match_number, 6) as sale_prefix FROM matches
+                   WHERE match_id NOT LIKE 'jczq%%'
+                     AND {_predict_is_not_started_sql()}
                      AND match_number IS NOT NULL AND LENGTH(match_number) >= 6
+                     AND LEFT(match_number, 6) REGEXP '^[0-9]{{6}}$'
                    GROUP BY sale_prefix
-                   ORDER BY sale_prefix ASC""",
+                   ORDER BY sale_prefix ASC
+                   LIMIT 30""",
                 (now_ts,),
             )
         dates = []
         for r in cur.fetchall():
             prefix = r["sale_prefix"]
+            if not prefix or not str(prefix).isdigit():
+                continue
             sale_date = f"20{prefix[:2]}-{prefix[2:4]}-{prefix[4:6]}"
             dates.append(sale_date)
 
