@@ -2269,6 +2269,8 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "homeTeam": m.get("home_team_cn", ""),
             "awayTeam": m.get("away_team_cn", ""),
             "score": f"{hs}-{aws}",
+            "homeScore": int(hs) if hs is not None else None,
+            "awayScore": int(aws) if aws is not None else None,
             "result": {"H": "主胜", "D": "平局", "A": "客胜"}.get(m.get("result"), ""),
             "handicap": ("0" if hc == 0 else f"{hc:+.2f}") if hc is not None else "",
             "ahResult": ah_result,

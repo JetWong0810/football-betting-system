@@ -1,12 +1,19 @@
 <template>
-  <view class="batch-page">
+  <view class="batch-page" :class="{ 'sim-pad': simBet.hasLegs }">
     <view class="summary-bar">
       <view class="sum-row">
         <text class="sum-title">{{ date.slice(5) }} 同赔分析</text>
-        <text class="sum-total">
-          <template v-if="hasFilter">已筛 {{ filteredItems.length }}/{{ summary.total }}</template>
-          <template v-else>{{ summary.total }} 场</template>
-        </text>
+        <view class="sum-right">
+          <text
+            class="sim-toggle"
+            :class="{ on: simBet.simMode }"
+            @tap="simBet.toggleSimMode()"
+          >模拟投注</text>
+          <text class="sum-total">
+            <template v-if="hasFilter">已筛 {{ filteredItems.length }}/{{ summary.total }}</template>
+            <template v-else>{{ summary.total }} 场</template>
+          </text>
+        </view>
       </view>
       <view class="sum-stats">
         <text class="st upper">上盘 {{ summary.upper }}</text>
@@ -18,6 +25,14 @@
           <text class="st-sep">·</text>
           <text class="st hit">命中 {{ summary.hitRate }}%</text>
         </template>
+      </view>
+      <view v-if="simBet.simMode && dateConfirmed.length" class="sum-sim-hist">
+        <text
+          v-for="s in dateConfirmed.slice(0, 3)"
+          :key="s.id"
+          class="sim-hist-item"
+          :class="[s.status, s.result]"
+        >{{ s.parlayLabel }} {{ s.combinedSafety }} · {{ slipResultLabel(s) }}{{ slipStakeBrief(s) }}{{ slipLegSettleBrief(s) }}</text>
       </view>
     </view>
 
@@ -105,6 +120,13 @@
               >{{ it.f6.refScore }}</text>
             </view>
           </view>
+          <view v-if="simBet.simMode" class="row-sim">
+            <text
+              class="sim-pick"
+              :class="{ disabled: it.ahHandicap == null, active: !!simBet.findLeg(it.matchId) }"
+              @tap.stop="openSimPick(it)"
+            >{{ simPickLabel(it) }}</text>
+          </view>
 
           <view class="row-teams">
             <text class="team home">{{ it.homeTeam?.name }}</text>
@@ -168,6 +190,22 @@
       </view>
     </scroll-view>
 
+    <SimBetLineSheet
+      :visible="showSimSheet"
+      :home-team="simTarget?.homeTeam?.name || ''"
+      :away-team="simTarget?.awayTeam?.name || ''"
+      :main-hc="simTarget?.ahHandicap"
+      :matches="simTarget?.f6?.matches || []"
+      :f6-direction="simTarget?.f6?.direction || 'neutral'"
+      :ref-score="simTarget?.f6?.refScore"
+      :low-key="lowKeyFromSpf(simTarget?.spf)"
+      :selected-side="simBet.findLeg(simTarget?.matchId)?.side"
+      :selected-line="simBet.findLeg(simTarget?.matchId)?.line"
+      @close="closeSimPick"
+      @pick="onSimPick"
+    />
+    <SimBetSlip />
+
     <view class="similar-mask" v-if="showSimilar" @tap="closeSimilar"></view>
     <view class="similar-modal" :class="{ show: showSimilar }">
       <view class="similar-header">
@@ -218,7 +256,12 @@
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
+import { useSimBetStore } from '@/stores/simBetStore'
+import { lowKeyFromSpf } from '@/utils/simBet'
+import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
+import SimBetSlip from '@/components/SimBetSlip.vue'
 
+const simBet = useSimBetStore()
 const date = ref('')
 const status = ref('not_started')
 const loading = ref(true)
@@ -227,6 +270,8 @@ const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
 const showSimilar = ref(false)
 const similarMatches = ref([])
 const similarRefScore = ref(null)
+const showSimSheet = ref(false)
+const simTarget = ref(null)
 /** 多选: upper/lower/neutral/hit */
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
@@ -236,6 +281,78 @@ const sortMode = ref('default')
 
 const isFinished = computed(() => status.value === 'finished')
 const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0)
+
+function simPickLabel(it) {
+  const leg = simBet.findLeg(it.matchId)
+  if (leg) return `${leg.pickLabel} · ${leg.safetyScore}`
+  if (it.ahHandicap == null) return '无亚盘'
+  return '选盘'
+}
+function openSimPick(it) {
+  if (it.ahHandicap == null) {
+    uni.showToast({ title: '该场无亚盘数据', icon: 'none' })
+    return
+  }
+  simTarget.value = it
+  showSimSheet.value = true
+}
+function closeSimPick() {
+  showSimSheet.value = false
+  simTarget.value = null
+}
+function onSimPick(cell) {
+  const it = simTarget.value
+  if (!it) return
+  simBet.setLeg({
+    matchId: it.matchId,
+    homeTeam: it.homeTeam?.name || '',
+    awayTeam: it.awayTeam?.name || '',
+    league: it.league || '',
+    matchTime: it.matchTime || '',
+    mainHc: it.ahHandicap,
+    side: cell.side,
+    line: cell.line,
+    safetyScore: cell.safetyScore,
+    scoreSource: cell.scoreSource,
+    sample: cell.sample,
+    notLoseRate: cell.notLoseRate,
+    expUnit: cell.expUnit,
+    f6Direction: it.f6?.direction || 'neutral',
+    date: date.value,
+  })
+  closeSimPick()
+}
+function applySimSettlement() {
+  const map = {}
+  for (const it of items.value) {
+    const score = it.actualScore
+    if (!score || typeof score !== 'string' || !score.includes('-')) continue
+    const [hs, aws] = score.split('-').map(Number)
+    if (Number.isNaN(hs) || Number.isNaN(aws)) continue
+    map[it.matchId] = { homeScore: hs, awayScore: aws }
+  }
+  if (Object.keys(map).length) simBet.settleWithScores(map)
+}
+
+const dateConfirmed = computed(() =>
+  simBet.confirmed.filter((s) => !s.date || s.date === date.value)
+)
+function slipResultLabel(s) {
+  if (s.status !== 'settled') return '待结算'
+  return ({ win: '赢', lose: '输', half: '半', push: '走水' })[s.result] || s.result || '-'
+}
+function slipLegSettleBrief(s) {
+  if (!s?.legs?.length) return ''
+  const parts = s.legs
+    .filter((l) => l.settle?.label)
+    .map((l) => l.settle.label)
+  if (!parts.length) return ''
+  return ` (${parts.join('/')})`
+}
+function slipStakeBrief(s) {
+  if (s?.suggestedStake == null) return ''
+  return ` · 建议¥${s.suggestedStake}`
+}
 
 const DIR_ORDER = { upper: 0, lower: 1, neutral: 2 }
 function itemHitPct(it) {
@@ -461,6 +578,7 @@ async function loadBatch() {
     const data = await request({ url: '/api/predict/batch-similar', data: { date: date.value, status: status.value } })
     items.value = data?.items || []
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
+    if (status.value === 'finished') applySimSettlement()
   } catch (e) {
     uni.showToast({ title: '加载失败', icon: 'none' })
   } finally {
@@ -503,6 +621,15 @@ onLoad((options) => {
     margin-bottom: 10rpx;
   }
   .sum-title { font-size: 28rpx; font-weight: 600; color: #fff; }
+  .sum-right { display: flex; align-items: center; gap: 16rpx; }
+  .sim-toggle {
+    font-size: 22rpx; color: rgba(255,255,255,0.85);
+    padding: 6rpx 14rpx; border-radius: 6rpx;
+    border: 1rpx solid rgba(255,255,255,0.35);
+    &.on {
+      color: #0f172a; background: #fff; border-color: #fff; font-weight: 600;
+    }
+  }
   .sum-total { font-size: 22rpx; color: rgba(255,255,255,0.7); }
   .sum-stats {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8rpx;
@@ -514,6 +641,15 @@ onLoad((options) => {
       &.hit { color: #fde68a; font-weight: 600; }
     }
     .st-sep { font-size: 22rpx; color: rgba(255,255,255,0.35); }
+  }
+  .sum-sim-hist {
+    margin-top: 12rpx; display: flex; flex-wrap: wrap; gap: 8rpx;
+    .sim-hist-item {
+      font-size: 20rpx; color: rgba(255,255,255,0.8);
+      padding: 4rpx 10rpx; border-radius: 6rpx;
+      background: rgba(0,0,0,0.15);
+      &.settled { color: #fde68a; }
+    }
   }
 }
 
@@ -567,6 +703,7 @@ onLoad((options) => {
 
 .card-list { flex: 1; width: 100%; height: 0; }
 .card-list-inner { padding: 16rpx 24rpx 80rpx; width: 100%; }
+.batch-page.sim-pad .card-list-inner { padding-bottom: 180rpx; }
 
 /* 卡片: 白底 + 细分隔,无阴影/左边条/内嵌色盒 */
 .match-card {
@@ -576,6 +713,18 @@ onLoad((options) => {
   margin-bottom: 14rpx;
   border: 1rpx solid #e8eef0;
   width: 100%;
+}
+
+.row-sim {
+  margin: -6rpx 0 12rpx;
+  .sim-pick {
+    display: inline-block;
+    font-size: 22rpx; color: #0d9488; font-weight: 600;
+    padding: 6rpx 16rpx; border-radius: 6rpx;
+    border: 1rpx solid rgba(#0d9488, 0.45); background: rgba(#0d9488, 0.06);
+    &.active { background: #0d9488; color: #fff; border-color: #0d9488; }
+    &.disabled { color: #94a3b8; border-color: #e2e8f0; background: #f8fafc; font-weight: 500; }
+  }
 }
 
 .row-meta {

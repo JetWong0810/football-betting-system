@@ -162,6 +162,51 @@ def _ah_outcome(home_score: int, away_score: int, hc: Optional[float],
     return ("上盘" if upper_covered else "下盘", "upper" if upper_covered else "lower")
 
 
+def settle_ah_selection(home_score: int, away_score: int, side: str,
+                        line: float) -> Optional[Dict]:
+    """结算单侧亚盘选择(模拟投注/赛后核对)。
+
+    side: 'home'|'away'; line: 该侧盘口(标准约定, 主队负=主让)。
+    买主 line=H → net=(HS-AS)+H; 买客 line=A → net=(AS-HS)+A。
+    返回 {label, units, key}; key∈win/half_win/push/half_lose/lose。
+    """
+    if side not in ("home", "away") or line is None:
+        return None
+    try:
+        hs, aws = int(home_score), int(away_score)
+        ln = float(line)
+    except (TypeError, ValueError):
+        return None
+    if side == "home":
+        net = (hs - aws) + ln
+    else:
+        net = (aws - hs) + ln
+    a = abs(net)
+    if a < 1e-9:
+        return {"label": "走水", "units": 0.0, "key": "push"}
+    half = abs(a - 0.25) < 1e-9
+    if net > 0:
+        if half:
+            return {"label": "半赢", "units": 0.5, "key": "half_win"}
+        return {"label": "全赢", "units": 1.0, "key": "win"}
+    if half:
+        return {"label": "半输", "units": -0.5, "key": "half_lose"}
+    return {"label": "全输", "units": -1.0, "key": "lose"}
+
+
+def upper_side_for_hc(hc: Optional[float], low_key: Optional[str] = None) -> Optional[str]:
+    """主盘 hc 下上盘侧: home|away。平手盘退用 spf 低赔方(与 _ah_outcome 一致)。"""
+    if hc is None:
+        return None
+    try:
+        h = float(hc)
+    except (TypeError, ValueError):
+        return None
+    if abs(h) < 1e-9:
+        return "away" if low_key == "loss" else "home"
+    return "home" if h < 0 else "away"
+
+
 def _calc_stats(matches: List[Dict]) -> Dict:
     """统计: 胜平负分布 + 低赔命中率 + 亚盘盘路(纯亚盘口径, 含半输半赢)"""
     if not matches:
