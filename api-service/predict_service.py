@@ -2200,12 +2200,27 @@ def _calc_similar_ref_score(
     return ref_score, breakdown
 
 
+def _fmt_ah_line(hc) -> str:
+    """亚盘展示: 0 / +0.25 / -0.50; None→空串。"""
+    if hc is None:
+        return ""
+    try:
+        v = float(hc)
+    except (TypeError, ValueError):
+        return ""
+    if abs(v) < 1e-9:
+        return "0"
+    return f"{v:+.2f}"
+
+
 def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional[str] = None,
                                   exclude_match_id: Optional[str] = None,
-                                  ah_handicap: Optional[float] = None) -> Dict[str, Any]:
+                                  ah_handicap: Optional[float] = None,
+                                  ah_open: Optional[float] = None) -> Dict[str, Any]:
     """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
+    ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 均有时相似度并入亚盘路径。
     方向判定(以盘路为准, 与弹窗"盘路"列口径一致, 不用胜平负低赔命中):
     - 匹配 < 3场 或 无盘口: neutral, score=5
     - 盘路上盘命中 > 65%: upper, score=7
@@ -2242,7 +2257,8 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     try:
         result = find_similar_spf(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
                                   league=league, exclude_match_id=exclude_match_id,
-                                  require_direction=has_move)
+                                  require_direction=has_move,
+                                  ah_open=ah_open, ah_close=ah_handicap)
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
@@ -2258,7 +2274,8 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     ref_rows: List[Dict[str, Any]] = []
     for m in matches:
         hs, aws = m.get("home_score", 0), m.get("away_score", 0)
-        hc = m.get("handicap")
+        hc = m.get("handicap")  # close
+        oh = m.get("open_handicap")
         out = _ah_outcome(hs, aws, hc, m.get("hist_low_key"))
         ah_result = out[0] if out else None
         similar_matches.append({
@@ -2272,7 +2289,9 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "homeScore": int(hs) if hs is not None else None,
             "awayScore": int(aws) if aws is not None else None,
             "result": {"H": "主胜", "D": "平局", "A": "客胜"}.get(m.get("result"), ""),
-            "handicap": ("0" if hc == 0 else f"{hc:+.2f}") if hc is not None else "",
+            "handicap": _fmt_ah_line(hc),  # 兼容旧字段=终盘
+            "handicapOpen": _fmt_ah_line(oh),
+            "handicapClose": _fmt_ah_line(hc),
             "ahResult": ah_result,
             "openOdds": f"{m.get('open_win', 0):.2f}/{m.get('open_draw', 0):.2f}/{m.get('open_loss', 0):.2f}",
             "closeOdds": f"{m.get('close_win', 0):.2f}/{m.get('close_draw', 0):.2f}/{m.get('close_loss', 0):.2f}",
@@ -2387,7 +2406,9 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     f5 = calc_factor_jczq_odds(jczq_company_spf)
     f6 = calc_factor_jczq_similar_odds(
         jczq_company_spf, league=match_info.get("league"),
-        exclude_match_id=_mid, ah_handicap=match_info.get("handicap"))
+        exclude_match_id=_mid,
+        ah_handicap=match_info.get("handicap"),
+        ah_open=match_info.get("handicap_open"))
 
     # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
     # 与世界杯一致: 不再投交锋历史票

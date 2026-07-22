@@ -167,10 +167,17 @@
             <text class="reason">{{ it.f6?.reason || '暂无同赔样本' }}</text>
           </view>
 
-          <!-- 亚盘盘口: 在售/已结束都常显; 无数据时显示「无数据」 -->
+          <!-- 亚盘盘口: 初/终; 无数据时显示「无数据」 -->
           <view class="row-ah">
             <text class="ah-lab">亚盘</text>
-            <text v-if="it.ahHandicap != null" class="ah-num">{{ fmtAh(it.ahHandicap) }}</text>
+            <template v-if="hasAh(it)">
+              <text class="ah-muted">初</text>
+              <text class="ah-num">{{ ahOpenOf(it) != null ? fmtAh(ahOpenOf(it)) : '-' }}</text>
+              <text class="ah-muted">→</text>
+              <text class="ah-muted">终</text>
+              <text class="ah-num">{{ ahCloseOf(it) != null ? fmtAh(ahCloseOf(it)) : '-' }}</text>
+              <text v-if="ahMoveLabel(it)" class="ah-move" :class="ahMoveClass(it)">{{ ahMoveLabel(it) }}</text>
+            </template>
             <text v-else class="ah-miss">无数据</text>
             <template v-if="isFinished && it.actualScore">
               <text class="ac-sep">·</text>
@@ -239,7 +246,8 @@
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
             <text class="col-result">结果</text>
-            <text class="col-handicap">让球</text>
+            <text class="col-ah">亚初</text>
+            <text class="col-ah">亚终</text>
             <text class="col-ah-result">盘路</text>
             <text class="col-odds">初盘</text>
             <text class="col-odds">终盘</text>
@@ -252,7 +260,8 @@
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
             <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
-            <text class="col-handicap">{{ m.handicap || '-' }}</text>
+            <text class="col-ah">{{ m.handicapOpen || '-' }}</text>
+            <text class="col-ah">{{ m.handicapClose || m.handicap || '-' }}</text>
             <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
             <text class="col-odds">{{ m.openOdds }}</text>
             <text class="col-odds">{{ m.closeOdds }}</text>
@@ -645,6 +654,41 @@ function fmtAh(h) {
   const s = Math.abs(n) % 1 === 0 ? String(Math.abs(n)) : Math.abs(n).toFixed(2).replace(/0$/, '')
   return (n > 0 ? '+' : '-') + s
 }
+function ahOpenOf(it) {
+  // 缺初盘时不要用终盘顶替, 否则永远显示「初=终」
+  if (it?.ahHandicapOpen != null) return it.ahHandicapOpen
+  return null
+}
+function ahCloseOf(it) {
+  if (it?.ahHandicapClose != null) return it.ahHandicapClose
+  return it?.ahHandicap
+}
+function hasAh(it) {
+  return ahCloseOf(it) != null || ahOpenOf(it) != null
+}
+/** 亚盘初→终: 升盘(绝对值变深)/降盘/不变 */
+function ahMoveDir(it) {
+  const o = it?.ahHandicapOpen
+  const c = ahCloseOf(it)
+  if (o == null || c == null) return null
+  const a = Number(o), b = Number(c)
+  if (Number.isNaN(a) || Number.isNaN(b)) return null
+  if (Math.abs(a - b) < 1e-9) return 'flat'
+  if (Math.abs(b) > Math.abs(a) + 1e-9) return 'up'
+  if (Math.abs(b) < Math.abs(a) - 1e-9) return 'down'
+  return 'up'
+}
+function ahMoveLabel(it) {
+  const d = ahMoveDir(it)
+  if (d === 'up') return '升盘'
+  if (d === 'down') return '降盘'
+  if (d === 'flat') return '不变'
+  return ''
+}
+function ahMoveClass(it) {
+  const d = ahMoveDir(it)
+  return d ? `ah-mv-${d}` : ''
+}
 function isLow(odds) {
   if (!odds) return ''
   const w = Number(odds.win), d = Number(odds.draw), l = Number(odds.lose)
@@ -1035,8 +1079,15 @@ onLoad(async (options) => {
   border-top: 1rpx solid #f1f5f9;
   font-size: 24rpx; color: #334155;
   .ah-lab { font-size: 22rpx; color: #94a3b8; }
+  .ah-muted { font-size: 22rpx; color: #94a3b8; }
   .ah-num { font-size: 26rpx; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
   .ah-miss { font-size: 22rpx; color: #94a3b8; }
+  .ah-move {
+    margin-left: 4rpx; font-size: 20rpx; font-weight: 600;
+    &.ah-mv-up { color: #dc2626; }
+    &.ah-mv-down { color: #059669; }
+    &.ah-mv-flat { color: #94a3b8; font-weight: 500; }
+  }
   .ac-score { font-weight: 700; color: #1e293b; }
   .ac-sep { color: #cbd5e1; }
   .ac-hit { margin-left: auto; color: #059669; font-weight: 600; font-size: 22rpx; }
@@ -1092,7 +1143,7 @@ onLoad(async (options) => {
   flex: 0 1 auto; overflow: auto; min-height: 0;
   max-height: calc(88vh - 100rpx);
 }
-.similar-table { min-width: 1300rpx; padding: 0 16rpx 24rpx; }
+.similar-table { min-width: 1400rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex; align-items: center; padding: 14rpx 0;
   border-bottom: 1rpx solid #f1f5f9; gap: 4rpx;
@@ -1112,6 +1163,7 @@ onLoad(async (options) => {
 .col-score { width: 70rpx; text-align: center; font-weight: 600; }
 .col-result { width: 70rpx; text-align: center; font-weight: 500; }
 .col-odds { width: 170rpx; text-align: center; }
+.col-ah { width: 72rpx; text-align: center; font-variant-numeric: tabular-nums; }
 .col-handicap { width: 70rpx; text-align: center; }
 .col-ah-result { width: 70rpx; text-align: center; font-weight: 500; }
 

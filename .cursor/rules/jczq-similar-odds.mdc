@@ -27,7 +27,7 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 7. **终盘高赔方 ±0.1**。
 8. **方向一致**:初→终盘低赔变动方向(升/降/平)。**方向降级**:本场仅 1 条 spf 快照(open==current,无变动)时 `require_direction=False`,跳过方向过滤(此时方向恒"平"是数据缺失非真稳定),仅按初/终盘接近+同侧匹配。details 显"方向不限(无变动)"。
 
-相似度=(低赔初盘接近度+低赔终盘接近度)/2 × 100。排序:同联赛优先 + 相似度降序。
+相似度=(低赔初盘接近度+低赔终盘接近度)/2;若本场有亚盘初/终,再并入历史亚盘初/终接近度:`0.7*欧赔相似+0.3*亚盘相似`(|Δ盘|/0.5归一,缺历史亚盘则欧赔×0.95)。排序:同联赛优先+相似度降序。
 
 ### 盘路算法 `_ah_outcome(home, away, hc, low_key)`
 标准亚盘(负=主让)。`Net=(主-客)+hc`。
@@ -60,8 +60,8 @@ sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 
 - finished 额外返回 actualScore/actualResult/actualAh(亚盘)/hit(F6方向 vs 实际盘路)/summary.hitRate。亚盘来源:jczq_ah_history → matches.asian_handicap(取反),纯读不写。缺则"无亚盘"。
 - 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 右上角方向旁 refScore + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
 
-## 同赔弹窗(predict.vue / batch-analysis.vue)
-表头:相似度/日期/联赛/主队/比分/客队/结果/初盘/终盘/让球/盘路。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动(min-width 1300rpx)。
+同赔弹窗(predict.vue / batch-analysis.vue)
+表头:相似度/日期/联赛/主队/比分/客队/结果/亚初/亚终/盘路/初盘/终盘。亚初/亚终=jczq_ah_history.open/close_handicap(Bet365系)。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动。
 
 ## NL 查询(analysis_functions.similar_odds)
 优先竞彩 spf 池(`find_match_by_question` 按问题文本搜队名,绕过 KNOWN_TEAMS),回退世界杯 SQLite。`_jczq_similar_rows` 用 `_ah_outcome` 算盘口结果 + 亚盘让球列。

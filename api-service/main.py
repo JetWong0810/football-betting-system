@@ -1196,29 +1196,40 @@ def batch_similar(
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM matches {where_clause} {order}", params)
         rows = cur.fetchall()
-        # 批量取本场亚盘让球(标准约定: 负=主让)
-        # 优先 jczq_ah_history(历史 jczq_* 池); 在售/体彩场几乎不在此表,靠 matches.asian_handicap
-        ah_map = {}
+        # 批量取本场亚盘初/终(标准约定: 负=主让)
+        # 优先 jczq_ah_history; 在售/体彩场几乎不在此表,靠 matches.asian_handicap(仅终盘)
+        ah_map = {}  # mid -> {"open": float|None, "close": float|None}
         if rows:
             mids = [r["match_id"] for r in rows]
             cur.execute(
-                "SELECT match_id, close_handicap FROM jczq_ah_history WHERE match_id IN (%s)"
+                "SELECT match_id, open_handicap, close_handicap FROM jczq_ah_history WHERE match_id IN (%s)"
                 % ",".join(["%s"] * len(mids)), mids)
             for ar in cur.fetchall():
-                if ar.get("close_handicap") is not None:
-                    ah_map[ar["match_id"]] = float(ar["close_handicap"])
-        # 兜底: matches.asian_handicap(500.com 原值正=主让 → 取反)
+                oh = ar.get("open_handicap")
+                ch = ar.get("close_handicap")
+                if oh is None and ch is None:
+                    continue
+                ah_map[ar["match_id"]] = {
+                    "open": float(oh) if oh is not None else None,
+                    "close": float(ch) if ch is not None else None,
+                }
+        # 兜底: matches.asian_handicap(500.com 原值正=主让 → 取反) 仅终盘, 初盘待懒抓
         for r in rows:
             if r["match_id"] not in ah_map and r.get("asian_handicap") is not None:
                 try:
-                    ah_map[r["match_id"]] = -float(r["asian_handicap"])
+                    ah_map[r["match_id"]] = {"open": None, "close": -float(r["asian_handicap"])}
                 except (TypeError, ValueError):
                     pass
 
-    # 在售/已结束缺亚盘: 与赛果页同逻辑,从 500.com 懒抓并缓存到 matches.asian_handicap
-    # (jczq_ah_history 主要挂 jczq_* 历史 ID,体彩场通常不在其中; 在售同样需要懒抓才能展示)
+    # 缺终盘或缺初盘: 懒抓500.com(优先Bet365初终, 否则澳门)
+    # 仅有 matches.asian_handicap 时 open=None, 必须再抓才能显示真初盘(勿用终盘冒充)
     if rows:
-        need_asian = [r for r in rows if r["match_id"] not in ah_map]
+        need_asian = [
+            r for r in rows
+            if r["match_id"] not in ah_map
+            or ah_map[r["match_id"]].get("close") is None
+            or ah_map[r["match_id"]].get("open") is None
+        ]
         if need_asian:
             try:
                 from repository import derive_sale_date as _derive_sale_ah
@@ -1234,20 +1245,31 @@ def batch_similar(
                         continue
                     asian_list = fetch_asian_handicap(fid)
                     preferred = next(
+                        (a for a in asian_list if a.get("bookmaker") == "Bet365"), None
+                    ) or next(
                         (a for a in asian_list if a.get("bookmaker") == "澳门"), None
                     ) or (asian_list[0] if asian_list else None)
                     if not preferred or not preferred.get("current"):
                         continue
-                    hc = preferred["current"].get("handicap")
+                    curr = preferred["current"]
+                    ini = preferred.get("initial") or {}
+                    hc = curr.get("handicap")
                     if hc is None:
                         continue
-                    home_odds = preferred["current"].get("home")
-                    away_odds = preferred["current"].get("away")
+                    oh_raw = ini.get("handicap")
+                    home_odds = curr.get("home")
+                    away_odds = curr.get("away")
                     company = preferred.get("bookmaker", "")
                     m["asian_handicap"] = hc
                     m["fid_500"] = fid
                     try:
-                        ah_map[m["match_id"]] = -float(hc)
+                        close_std = -float(hc)
+                        open_std = -float(oh_raw) if oh_raw is not None else None
+                        prev = ah_map.get(m["match_id"]) or {}
+                        ah_map[m["match_id"]] = {
+                            "open": open_std if open_std is not None else prev.get("open"),
+                            "close": close_std,
+                        }
                     except (TypeError, ValueError):
                         continue
                     try:
@@ -1277,16 +1299,21 @@ def batch_similar(
         # 单关: matches.is_single 或赔率表任一玩法 is_single=1
         if not item.get("isSingle") and wdl:
             item["isSingle"] = any(bool(v.get("is_single")) for v in wdl.values())
-        # 亚盘盘口(标准负=主让)先解析,供 F6 参考分 D4 盘口一致性 + 前端展示
-        ahc = ah_map.get(mid)
-        item["ahHandicap"] = ahc
+        # 亚盘初/终(标准负=主让)
+        ah = ah_map.get(mid) or {}
+        ah_open = ah.get("open")
+        ahc = ah.get("close")
+        item["ahHandicap"] = ahc  # 兼容=终盘
+        item["ahHandicapOpen"] = ah_open
+        item["ahHandicapClose"] = ahc
 
         # F6 历史同赔
         spf = get_match_spf_odds(mid)
         has_move = bool(spf and spf["initial"] != spf["current"])
         if spf:
             f6 = calc_factor_jczq_similar_odds(
-                spf, league=item.get("league"), exclude_match_id=mid, ah_handicap=ahc)
+                spf, league=item.get("league"), exclude_match_id=mid,
+                ah_handicap=ahc, ah_open=ah_open)
         else:
             f6 = {"name": "历史同赔", "direction": "neutral", "score": 5,
                   "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
@@ -1478,16 +1505,24 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     if asian_data:
         mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
         curr_handicaps = []
+        open_handicaps = []
         for c in asian_data:
             if c.get("bookmaker") in mainstream:
                 h = c.get("current", {}).get("handicap")
                 if h is not None:
                     curr_handicaps.append(float(h))
+                oh = (c.get("initial") or {}).get("handicap")
+                if oh is not None:
+                    open_handicaps.append(float(oh))
         if curr_handicaps:
             curr_handicaps.sort()
             mid = len(curr_handicaps) // 2
             median_hcap = curr_handicaps[mid]
             match_info["handicap"] = -median_hcap
+        if open_handicaps:
+            open_handicaps.sort()
+            mid_o = len(open_handicaps) // 2
+            match_info["handicap_open"] = -open_handicaps[mid_o]
 
     # 比分回填：已结束但DB无比分时，从500.com竞彩列表页抓取并落库
     import time as _t
@@ -1517,6 +1552,8 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
         # 返回实际使用的亚盘盘口值
         if match_info.get("handicap") is not None:
             match_formatted["handicap"] = match_info["handicap"]
+        if match_info.get("handicap_open") is not None:
+            match_formatted["handicapOpen"] = match_info["handicap_open"]
 
         # 保存预测记录(覆盖上次)，供赛后复盘使用
         prediction = result["prediction"]

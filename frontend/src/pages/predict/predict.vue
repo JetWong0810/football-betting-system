@@ -299,7 +299,8 @@
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
             <text class="col-result">结果</text>
-            <text class="col-handicap">让球</text>
+            <text class="col-ah">亚初</text>
+            <text class="col-ah">亚终</text>
             <text class="col-ah-result">盘路</text>
             <text class="col-odds">初盘</text>
             <text class="col-odds">终盘</text>
@@ -312,7 +313,8 @@
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
             <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
-            <text class="col-handicap">{{ m.handicap || '-' }}</text>
+            <text class="col-ah">{{ m.handicapOpen || '-' }}</text>
+            <text class="col-ah">{{ m.handicapClose || m.handicap || '-' }}</text>
             <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
             <text class="col-odds">{{ m.openOdds }}</text>
             <text class="col-odds">{{ m.closeOdds }}</text>
@@ -1400,7 +1402,7 @@ onShow(async () => {
   min-height: 0;
   max-height: calc(88vh - 100rpx);
 }
-.similar-table { min-width: 1300rpx; padding: 0 16rpx 24rpx; }
+.similar-table { min-width: 1400rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex;
   align-items: center;
@@ -1428,6 +1430,7 @@ onShow(async () => {
 .col-score { width: 70rpx; text-align: center; font-weight: 600; }
 .col-result { width: 70rpx; text-align: center; font-weight: 500; }
 .col-odds { width: 170rpx; text-align: center; }
+.col-ah { width: 72rpx; text-align: center; font-variant-numeric: tabular-nums; }
 .col-handicap { width: 70rpx; text-align: center; }
 .col-ah-result { width: 70rpx; text-align: center; font-weight: 500; }
 

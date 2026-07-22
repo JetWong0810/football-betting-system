@@ -321,8 +321,9 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
 def get_spf_pool() -> List[Dict]:
     """spf(胜平负)历史同赔池: 每场初盘+终盘+比分+亚盘让球, 结果按raw比分算(主胜/平/客胜)。
 
-    让球用亚盘收盘线(jczq_ah_history.close_handicap, 标准亚盘: 正=主受让 负=主让),
-    无亚盘数据(杯赛/非欧联赛)则 handicap=None, 盘路留空不计入统计。过滤: spf变动≥2 + 已完赛。
+    让球用亚盘收盘线(jczq_ah_history.close_handicap, 标准亚盘: 正=主受让 负=主让)结算盘路;
+    另带 open_handicap 供弹窗展示初→终。无亚盘则 handicap/open_handicap=None。
+    过滤: spf变动≥2 + 已完赛。
     """
     global _spf_pool_cache
     if _spf_pool_cache is not None:
@@ -332,6 +333,7 @@ def get_spf_pool() -> List[Dict]:
             m.match_id, m.match_date, m.league_name,
             m.home_team_name, m.away_team_name,
             m.home_score, m.away_score,
+            ah.open_handicap AS open_handicap,
             ah.close_handicap AS handicap,
             f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
             l.odds_win  AS close_win, l.odds_draw  AS close_draw, l.odds_loss  AS close_loss
@@ -370,6 +372,7 @@ def get_spf_pool() -> List[Dict]:
         else:
             result = "A"
         hc = r["handicap"]
+        oh = r.get("open_handicap")
         pool.append({
             "match_id": r["match_id"],
             "match_date": str(r["match_date"]) if r["match_date"] else "",
@@ -378,6 +381,7 @@ def get_spf_pool() -> List[Dict]:
             "away_team": r["away_team_name"] or "",
             "home_score": int(r["home_score"]),
             "away_score": int(r["away_score"]),
+            "open_handicap": float(oh) if oh is not None else None,
             "handicap": float(hc) if hc is not None else None,
             "result": result,
             "open_win": float(r["open_win"]), "open_draw": float(r["open_draw"]), "open_loss": float(r["open_loss"]),
@@ -387,11 +391,26 @@ def get_spf_pool() -> List[Dict]:
     return pool
 
 
+AH_LINE_TOL = 0.5  # 亚盘相似: |Δ|≥0.5 球 → 该项贡献归零
+
+
+def _ah_line_sim(hist: Optional[float], query: Optional[float], tol: float = AH_LINE_TOL) -> Optional[float]:
+    """亚盘线接近度 [0,1]; 任一侧缺失返回 None。"""
+    if hist is None or query is None:
+        return None
+    try:
+        return max(0.0, 1.0 - abs(float(hist) - float(query)) / tol)
+    except (TypeError, ValueError):
+        return None
+
+
 def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
                   tolerance: float, pool_loader, league: Optional[str] = None,
                   exclude_match_id: Optional[str] = None,
                   require_direction: bool = True,
-                  high_tolerance: float = 0.1) -> Dict:
+                  high_tolerance: float = 0.1,
+                  ah_open: Optional[float] = None,
+                  ah_close: Optional[float] = None) -> Dict:
     """共享匹配逻辑: 初盘低赔±tolerance+高赔±high_tolerance, 终盘同理, + 低赔方同侧 + 变动方向一致。
 
     "上盘球队"(低赔方)必须与预测比赛同一侧(同为胜/平/负的某一项), 初盘与终盘的低赔都在
@@ -402,7 +421,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     require_direction=False: 当预测场仅有1条spf快照(open==close, 无真实变动)时,
       放弃"变动方向一致"过滤(此时方向恒为"平"是数据缺失而非真稳定), 仅按初/终盘接近+同侧匹配。
 
-    相似度: 低赔初盘接近度 + 低赔终盘接近度(各按容差归一化到[0,1]再取均值×100)。
+    相似度: 默认低赔初/终接近度均值; 若传入本场亚盘初/终(ah_open/ah_close),
+      再并入历史亚盘初/终接近度: 0.7*欧赔相似 + 0.3*亚盘相似(|Δ|/0.5 归一)。
     排序: 同联赛优先, 再按相似度降序(league 非空时生效)。
     """
     input_low_key, input_low_open, input_low_close, input_direction = _get_low_odds_info(
@@ -420,6 +440,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     input_high_close = _side_high_odds(close_win, close_loss)
     if input_high_open is None:
         return {"query": {}, "matches": [], "stats": {}}
+
+    use_ah_sim = ah_open is not None and ah_close is not None
 
     matched = []
     for m in pool:
@@ -454,13 +476,24 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         if require_direction and hist_direction != input_direction:
             continue
 
-        # 相似度 = 低赔初盘接近度 与 低赔终盘接近度 的均值
+        # 相似度 = 欧赔低赔初/终接近度; 有本场亚盘初终时再并入亚盘路径相似
         sim_open = max(0.0, 1 - abs(hist_low_open - input_low_open) / tolerance)
         if input_low_close is not None and hist_low_close is not None:
             sim_close = max(0.0, 1 - abs(hist_low_close - input_low_close) / tolerance)
         else:
             sim_close = 0.0
-        similarity = round((sim_open + sim_close) / 2 * 100, 1)
+        odds_sim = (sim_open + sim_close) / 2
+        if use_ah_sim:
+            s_ah_o = _ah_line_sim(m.get("open_handicap"), ah_open)
+            s_ah_c = _ah_line_sim(m.get("handicap"), ah_close)
+            if s_ah_o is not None and s_ah_c is not None:
+                ah_sim = (s_ah_o + s_ah_c) / 2
+                similarity = round((0.7 * odds_sim + 0.3 * ah_sim) * 100, 1)
+            else:
+                # 历史无亚盘: 仅用欧赔, 略降权避免无盘场虚高
+                similarity = round(odds_sim * 0.95 * 100, 1)
+        else:
+            similarity = round(odds_sim * 100, 1)
 
         same_league = bool(league_norm) and (m.get("league_name") or "").strip() == league_norm
 
@@ -485,6 +518,7 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
             "low_position": low_label, "low_open": input_low_open, "low_close": input_low_close,
             "high_open": input_high_open, "high_close": input_high_close,
             "direction": input_direction, "tolerance": tolerance, "high_tolerance": high_tolerance,
+            "ah_open": ah_open, "ah_close": ah_close,
             "league": league_norm or None,
         },
         "matches": matched,
@@ -497,9 +531,12 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                     tolerance: float = TOLERANCE, league: Optional[str] = None,
                     exclude_match_id: Optional[str] = None,
                     require_direction: bool = True,
-                    high_tolerance: float = 0.1) -> Dict:
+                    high_tolerance: float = 0.1,
+                    ah_open: Optional[float] = None,
+                    ah_close: Optional[float] = None) -> Dict:
     """核心匹配(胜平负 spf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
 
+    ah_open/ah_close: 本场亚盘初/终(标准负=主让), 传入则相似度并入亚盘路径接近度。
     league 非空时同联赛优先排序; exclude_match_id 剔除预测比赛自身。
     require_direction=False: 预测场仅有1条spf快照(无真实变动)时放弃方向过滤。
     Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
@@ -508,7 +545,8 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                          tolerance, pool_loader=get_spf_pool, league=league,
                          exclude_match_id=exclude_match_id,
                          require_direction=require_direction,
-                         high_tolerance=high_tolerance)
+                         high_tolerance=high_tolerance,
+                         ah_open=ah_open, ah_close=ah_close)
 
 
 if __name__ == "__main__":
