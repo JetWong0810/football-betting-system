@@ -135,6 +135,9 @@
                 :class="[it.f6?.direction || 'neutral', refTier(it.f6)]"
               >{{ it.f6.refScore }}</text>
             </view>
+            <view class="predict-icon" @tap.stop="goPredict(it)">
+              <text class="predict-icon-text">预</text>
+            </view>
           </view>
           <view v-if="simBet.simMode" class="row-sim">
             <text
@@ -800,6 +803,20 @@ function closeSimilar() {
   similarRefScore.value = null
 }
 
+function goPredict(it) {
+  if (!it?.matchId) {
+    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
+    return
+  }
+  const isWorldCup = it.league && it.league.includes('世界杯')
+  const qs = [`matchId=${encodeURIComponent(it.matchId)}`, 'auto=1']
+  if (date.value) qs.push(`date=${encodeURIComponent(date.value)}`)
+  const url = isWorldCup
+    ? `/pages/worldcup/predict?${qs.join('&')}`
+    : `/pages/predict/predict?${qs.join('&')}`
+  uni.navigateTo({ url })
+}
+
 async function loadBatch(opts = {}) {
   const autoFlipStatus = !!opts.autoFlipStatus
   loading.value = true
@@ -1014,6 +1031,24 @@ onLoad(async (options) => {
   }
   .dir-wrap {
     margin-left: auto; display: flex; align-items: baseline; gap: 8rpx; flex-shrink: 0;
+  }
+  .predict-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48rpx;
+    height: 48rpx;
+    border-radius: 6rpx;
+    background: linear-gradient(135deg, #0d9488, #14b8a6);
+    flex-shrink: 0;
+    box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
+    &:active { opacity: 0.75; }
+  }
+  .predict-icon-text {
+    font-size: 22rpx;
+    line-height: 1;
+    color: #fff;
+    font-weight: 600;
   }
   .dir {
     font-size: 24rpx; font-weight: 600;
