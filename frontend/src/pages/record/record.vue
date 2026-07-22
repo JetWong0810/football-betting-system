@@ -3,8 +3,8 @@
     <!-- 顶部工具栏 -->
     <view class="toolbar">
       <view class="tabs-list">
-        <view class="tab-item" :class="{ active: activeTab === 'saved' }" @tap="activeTab = 'saved'">保存记录</view>
         <view class="tab-item" :class="{ active: activeTab === 'betting' }" @tap="activeTab = 'betting'">投注记录</view>
+        <view class="tab-item" :class="{ active: activeTab === 'saved' }" @tap="activeTab = 'saved'">保存记录</view>
       </view>
     </view>
 
@@ -161,7 +161,7 @@ const betStore = useBetStore();
 const controlStore = useControlStore();
 const editingBet = ref(null);
 const settleMode = ref(false);
-const activeTab = ref("saved");
+const activeTab = ref("betting");
 const betFilter = ref("all");
 const showDialog = ref(false);
 
