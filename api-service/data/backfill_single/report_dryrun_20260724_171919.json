@@ -1,0 +1,1109 @@
+{
+  "mode": "dryrun",
+  "range": [
+    "2024-01-01",
+    "2024-12-31"
+  ],
+  "overall_match_rate": 0.995736617716722,
+  "month_stats": [
+    {
+      "month": "2024-01",
+      "api": 352,
+      "matched": 351,
+      "unmatched": 1,
+      "ambiguous": 0,
+      "rate": 0.9972,
+      "api_single": 51,
+      "matched_single": 51
+    },
+    {
+      "month": "2024-02",
+      "api": 246,
+      "matched": 244,
+      "unmatched": 2,
+      "ambiguous": 0,
+      "rate": 0.9919,
+      "api_single": 32,
+      "matched_single": 32
+    },
+    {
+      "month": "2024-03",
+      "api": 388,
+      "matched": 388,
+      "unmatched": 0,
+      "ambiguous": 0,
+      "rate": 1.0,
+      "api_single": 60,
+      "matched_single": 60
+    },
+    {
+      "month": "2024-04",
+      "api": 386,
+      "matched": 384,
+      "unmatched": 2,
+      "ambiguous": 0,
+      "rate": 0.9948,
+      "api_single": 81,
+      "matched_single": 80
+    },
+    {
+      "month": "2024-05",
+      "api": 380,
+      "matched": 379,
+      "unmatched": 1,
+      "ambiguous": 0,
+      "rate": 0.9974,
+      "api_single": 46,
+      "matched_single": 46
+    },
+    {
+      "month": "2024-06",
+      "api": 304,
+      "matched": 304,
+      "unmatched": 0,
+      "ambiguous": 0,
+      "rate": 1.0,
+      "api_single": 56,
+      "matched_single": 56
+    },
+    {
+      "month": "2024-07",
+      "api": 257,
+      "matched": 256,
+      "unmatched": 1,
+      "ambiguous": 0,
+      "rate": 0.9961,
+      "api_single": 58,
+      "matched_single": 57
+    },
+    {
+      "month": "2024-08",
+      "api": 404,
+      "matched": 402,
+      "unmatched": 2,
+      "ambiguous": 0,
+      "rate": 0.995,
+      "api_single": 76,
+      "matched_single": 76
+    },
+    {
+      "month": "2024-09",
+      "api": 350,
+      "matched": 349,
+      "unmatched": 1,
+      "ambiguous": 0,
+      "rate": 0.9971,
+      "api_single": 61,
+      "matched_single": 61
+    },
+    {
+      "month": "2024-10",
+      "api": 247,
+      "matched": 245,
+      "unmatched": 2,
+      "ambiguous": 0,
+      "rate": 0.9919,
+      "api_single": 25,
+      "matched_single": 25
+    },
+    {
+      "month": "2024-11",
+      "api": 378,
+      "matched": 377,
+      "unmatched": 1,
+      "ambiguous": 0,
+      "rate": 0.9974,
+      "api_single": 77,
+      "matched_single": 77
+    },
+    {
+      "month": "2024-12",
+      "api": 530,
+      "matched": 525,
+      "unmatched": 5,
+      "ambiguous": 0,
+      "rate": 0.9906,
+      "api_single": 149,
+      "matched_single": 147
+    }
+  ],
+  "p0": {
+    "sporttery_id_set": 4204,
+    "sporttery_id_skip_conflict": 0,
+    "sporttery_id_skip_filled": 0,
+    "match_single_up": 768,
+    "had_single_up": 768,
+    "already_single": 0,
+    "non_single": 3436
+  },
+  "p1": {},
+  "unmatched_sample": [
+    {
+      "matchId": 1023104,
+      "matchDate": "2024-01-20",
+      "matchNumStr": "周五003",
+      "home": "埃门",
+      "away": "格罗宁根",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023673,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六009",
+      "home": "格拉纳达",
+      "away": "巴伦西亚",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023487,
+      "matchDate": "2024-02-04",
+      "matchNumStr": "周六030",
+      "home": "法马利康",
+      "away": "里斯本",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1024819,
+      "matchDate": "2024-04-18",
+      "matchNumStr": "周二005",
+      "home": "阿布艾因",
+      "away": "利雅新月",
+      "score": "4:2",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1024781,
+      "matchDate": "2024-04-15",
+      "matchNumStr": "周日018",
+      "home": "乌迪内斯",
+      "away": "罗马",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1025118,
+      "matchDate": "2024-05-04",
+      "matchNumStr": "周六004",
+      "home": "奥斯纳",
+      "away": "沙尔克04",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1026223,
+      "matchDate": "2024-07-22",
+      "matchNumStr": "周日012",
+      "home": "罗森博格",
+      "away": "利勒斯特",
+      "score": "无效场次",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1026655,
+      "matchDate": "2024-08-24",
+      "matchNumStr": "周六002",
+      "home": "浦和红钻",
+      "away": "川崎前锋",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1026401,
+      "matchDate": "2024-08-07",
+      "matchNumStr": "周三008",
+      "home": "浦和红钻",
+      "away": "柏太阳神",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1027119,
+      "matchDate": "2024-09-25",
+      "matchNumStr": "周一003",
+      "home": "亚特兰大",
+      "away": "科莫",
+      "score": "2:3",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1027610,
+      "matchDate": "2024-10-31",
+      "matchNumStr": "周三011",
+      "home": "佩纳罗尔",
+      "away": "博塔弗戈",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1027288,
+      "matchDate": "2024-10-09",
+      "matchNumStr": "周二001",
+      "home": "切尔滕",
+      "away": "雷丁",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1027927,
+      "matchDate": "2024-11-16",
+      "matchNumStr": "周五007",
+      "home": "罗马尼亚",
+      "away": "科索沃",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1028955,
+      "matchDate": "2024-12-23",
+      "matchNumStr": "周日033",
+      "home": "朗斯",
+      "away": "巴黎圣曼",
+      "score": "1:1",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1028923,
+      "matchDate": "2024-12-22",
+      "matchNumStr": "周六042",
+      "home": "赫拉克勒",
+      "away": "格罗宁根",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1028836,
+      "matchDate": "2024-12-20",
+      "matchNumStr": "周四001",
+      "home": "巴战士",
+      "away": "奥莫尼亚",
+      "score": "取消",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1028507,
+      "matchDate": "2024-12-07",
+      "matchNumStr": "周六021",
+      "home": "加的夫城",
+      "away": "沃特福德",
+      "score": "取消",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1028349,
+      "matchDate": "2024-12-02",
+      "matchNumStr": "周日033",
+      "home": "佛罗伦萨",
+      "away": "国际米兰",
+      "score": "无效场次",
+      "bettingSingle": 1
+    }
+  ],
+  "unmatched_count": 18,
+  "ambiguous_sample": [],
+  "ambiguous_count": 0,
+  "matched_single_sample": [
+    {
+      "match_id": "jczq_35926",
+      "sporttery_match_id": "1023364",
+      "code": "周三143",
+      "home": "巴林",
+      "api_home": "巴林",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35914",
+      "sporttery_match_id": "1023363",
+      "code": "周二142",
+      "home": "沙特阿拉伯",
+      "api_home": "沙特",
+      "score": 94,
+      "reason": "code+score home=89 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35913",
+      "sporttery_match_id": "1023386",
+      "code": "周二001",
+      "home": "诺丁汉森林",
+      "api_home": "诺丁汉",
+      "score": 94,
+      "reason": "code+score home=91 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35915",
+      "sporttery_match_id": "1023362",
+      "code": "周二141",
+      "home": "乌兹别克斯坦",
+      "api_home": "乌兹别克",
+      "score": 99,
+      "reason": "code+score home=91 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35907",
+      "sporttery_match_id": "1023361",
+      "code": "周一140",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35908",
+      "sporttery_match_id": "1023360",
+      "code": "周一139",
+      "home": "伊拉克",
+      "api_home": "伊拉克",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35883",
+      "sporttery_match_id": "1023268",
+      "code": "周日138",
+      "home": "塔吉克斯坦",
+      "api_home": "塔吉克",
+      "score": 94,
+      "reason": "code+score home=91 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35899",
+      "sporttery_match_id": "1023359",
+      "code": "周日137",
+      "home": "澳大利亚",
+      "api_home": "澳大利亚",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35895",
+      "sporttery_match_id": "1023317",
+      "code": "周日006",
+      "home": "塞尔塔",
+      "api_home": "塞尔塔",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35847",
+      "sporttery_match_id": "1023308",
+      "code": "周六026",
+      "home": "AC米兰",
+      "api_home": "AC米兰",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35865",
+      "sporttery_match_id": "1023290",
+      "code": "周六008",
+      "home": "斯图加特",
+      "api_home": "斯图加特",
+      "score": 95,
+      "reason": "code+score home=100 away=7|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35839",
+      "sporttery_match_id": "1023267",
+      "code": "周五005",
+      "home": "热刺",
+      "api_home": "热刺",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35834",
+      "sporttery_match_id": "1023131",
+      "code": "周四136",
+      "home": "沙特阿拉伯",
+      "api_home": "沙特",
+      "score": 99,
+      "reason": "code+score home=89 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35836",
+      "sporttery_match_id": "1023129",
+      "code": "周四134",
+      "home": "韩国",
+      "api_home": "韩国",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35830",
+      "sporttery_match_id": "1023127",
+      "code": "周三132",
+      "home": "伊拉克",
+      "api_home": "伊拉克",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35823",
+      "sporttery_match_id": "1023123",
+      "code": "周二128",
+      "home": "叙利亚",
+      "api_home": "叙利亚",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35824",
+      "sporttery_match_id": "1023122",
+      "code": "周二127",
+      "home": "澳大利亚",
+      "api_home": "澳大利亚",
+      "score": 99,
+      "reason": "code+score home=100 away=91|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35813",
+      "sporttery_match_id": "1023219",
+      "code": "周一005",
+      "home": "那不勒斯",
+      "api_home": "那不勒斯",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35815",
+      "sporttery_match_id": "1023121",
+      "code": "周一126",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35816",
+      "sporttery_match_id": "1023120",
+      "code": "周一125",
+      "home": "塔吉克斯坦",
+      "api_home": "塔吉克",
+      "score": 99,
+      "reason": "code+score home=91 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35786",
+      "sporttery_match_id": "1023184",
+      "code": "周日022",
+      "home": "赫罗纳",
+      "api_home": "赫罗纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35794",
+      "sporttery_match_id": "1023177",
+      "code": "周日015",
+      "home": "伯恩茅斯",
+      "api_home": "伯恩茅斯",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35797",
+      "sporttery_match_id": "1023063",
+      "code": "周日123",
+      "home": "阿曼",
+      "api_home": "阿曼",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35757",
+      "sporttery_match_id": "1023154",
+      "code": "周六024",
+      "home": "RB莱比锡",
+      "api_home": "莱红牛",
+      "score": 90,
+      "reason": "code+score home=7 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35769",
+      "sporttery_match_id": "1023062",
+      "code": "周六122",
+      "home": "巴林",
+      "api_home": "巴林",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35781",
+      "sporttery_match_id": "1023061",
+      "code": "周六121",
+      "home": "约旦",
+      "api_home": "约旦",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35777",
+      "sporttery_match_id": "1023136",
+      "code": "周六005",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35745",
+      "sporttery_match_id": "1023059",
+      "code": "周五119",
+      "home": "越南",
+      "api_home": "越南",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35746",
+      "sporttery_match_id": "1023058",
+      "code": "周五118",
+      "home": "伊拉克",
+      "api_home": "伊拉克",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35739",
+      "sporttery_match_id": "1023055",
+      "code": "周四115",
+      "home": "叙利亚",
+      "api_home": "叙利亚",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35732",
+      "sporttery_match_id": "1023053",
+      "code": "周三113",
+      "home": "黎巴嫩",
+      "api_home": "黎巴嫩",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35723",
+      "sporttery_match_id": "1022903",
+      "code": "周二112",
+      "home": "沙特阿拉伯",
+      "api_home": "沙特",
+      "score": 94,
+      "reason": "code+score home=89 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35724",
+      "sporttery_match_id": "1022902",
+      "code": "周二111",
+      "home": "泰国",
+      "api_home": "泰国",
+      "score": 99,
+      "reason": "code+score home=100 away=91|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35718",
+      "sporttery_match_id": "1022899",
+      "code": "周一108",
+      "home": "韩国",
+      "api_home": "韩国",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35690",
+      "sporttery_match_id": "1023018",
+      "code": "周日021",
+      "home": "皇马",
+      "api_home": "皇马",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35695",
+      "sporttery_match_id": "1023006",
+      "code": "周日014",
+      "home": "曼联",
+      "api_home": "曼联",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35698",
+      "sporttery_match_id": "1022897",
+      "code": "周日106",
+      "home": "阿联酋",
+      "api_home": "阿联酋",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35706",
+      "sporttery_match_id": "1022896",
+      "code": "周日105",
+      "home": "日本",
+      "api_home": "日本",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35702",
+      "sporttery_match_id": "1023000",
+      "code": "周日008",
+      "home": "埃弗顿",
+      "api_home": "埃弗顿",
+      "score": 99,
+      "reason": "code+score home=100 away=89|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35665",
+      "sporttery_match_id": "1022983",
+      "code": "周六020",
+      "home": "纽卡斯尔联",
+      "api_home": "纽卡斯尔",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35674",
+      "sporttery_match_id": "1022894",
+      "code": "周六103",
+      "home": "中国",
+      "api_home": "中国",
+      "score": 99,
+      "reason": "code+score home=100 away=91|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35684",
+      "sporttery_match_id": "1022965",
+      "code": "周六002",
+      "home": "切尔西",
+      "api_home": "切尔西",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35653",
+      "sporttery_match_id": "1022892",
+      "code": "周五101",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35648",
+      "sporttery_match_id": "1022913",
+      "code": "周四001",
+      "home": "巴萨",
+      "api_home": "巴萨",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35645",
+      "sporttery_match_id": "1022912",
+      "code": "周三002",
+      "home": "皇马",
+      "api_home": "皇马",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35619",
+      "sporttery_match_id": "1022856",
+      "code": "周日017",
+      "home": "罗马",
+      "api_home": "罗马",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35623",
+      "sporttery_match_id": "1022852",
+      "code": "周日013",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35633",
+      "sporttery_match_id": "1022843",
+      "code": "周日003",
+      "home": "恩波利",
+      "api_home": "恩波利",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35601",
+      "sporttery_match_id": "1022836",
+      "code": "周六017",
+      "home": "米德尔斯堡",
+      "api_home": "米堡",
+      "score": 91,
+      "reason": "code+score home=20 away=89|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35612",
+      "sporttery_match_id": "1022825",
+      "code": "周六006",
+      "home": "桑德兰",
+      "api_home": "桑德兰",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35578",
+      "sporttery_match_id": "1022760",
+      "code": "周三006",
+      "home": "赫罗纳",
+      "api_home": "赫罗纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36161",
+      "sporttery_match_id": "1023755",
+      "code": "周三002",
+      "home": "切尔西",
+      "api_home": "切尔西",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36155",
+      "sporttery_match_id": "1023751",
+      "code": "周二002",
+      "home": "布莱克本",
+      "api_home": "布莱克本",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36122",
+      "sporttery_match_id": "1023724",
+      "code": "周日026",
+      "home": "AC米兰",
+      "api_home": "AC米兰",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36132",
+      "sporttery_match_id": "1023714",
+      "code": "周日016",
+      "home": "切尔西",
+      "api_home": "切尔西",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36137",
+      "sporttery_match_id": "1023709",
+      "code": "周日011",
+      "home": "狼队",
+      "api_home": "狼队",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36090",
+      "sporttery_match_id": "1023693",
+      "code": "周六029",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36095",
+      "sporttery_match_id": "1023688",
+      "code": "周六024",
+      "home": "拜仁",
+      "api_home": "拜仁",
+      "score": 90,
+      "reason": "code+score home=100 away=7|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36103",
+      "sporttery_match_id": "1023680",
+      "code": "周六016",
+      "home": "曼联",
+      "api_home": "曼联",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36117",
+      "sporttery_match_id": "1023666",
+      "code": "周六002",
+      "home": "湘南丽海",
+      "api_home": "湘南海洋",
+      "score": 96,
+      "reason": "code+score home=30 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36060",
+      "sporttery_match_id": "1023621",
+      "code": "周三005",
+      "home": "那不勒斯",
+      "api_home": "那不勒斯",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36062",
+      "sporttery_match_id": "1023634",
+      "code": "周三003",
+      "home": "利雅得胜利",
+      "api_home": "利雅胜利",
+      "score": 90,
+      "reason": "code+score home=90 away=0|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36049",
+      "sporttery_match_id": "1023618",
+      "code": "周二010",
+      "home": "国米",
+      "api_home": "国际米兰",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36058",
+      "sporttery_match_id": "1023609",
+      "code": "周二001",
+      "home": "川崎前锋",
+      "api_home": "川崎前锋",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36024",
+      "sporttery_match_id": "1023601",
+      "code": "周日021",
+      "home": "蒙扎",
+      "api_home": "蒙扎",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36029",
+      "sporttery_match_id": "1023596",
+      "code": "周日016",
+      "home": "卢顿",
+      "api_home": "卢顿",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36039",
+      "sporttery_match_id": "1023586",
+      "code": "周日006",
+      "home": "巴列卡诺",
+      "api_home": "巴列卡诺",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36020",
+      "sporttery_match_id": "1023556",
+      "code": "周三150",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36014",
+      "sporttery_match_id": "1023550",
+      "code": "周二149",
+      "home": "约旦",
+      "api_home": "约旦",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35980",
+      "sporttery_match_id": "1023517",
+      "code": "周日024",
+      "home": "皇马",
+      "api_home": "皇马",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35982",
+      "sporttery_match_id": "1023515",
+      "code": "周日022",
+      "home": "国米",
+      "api_home": "国际米兰",
+      "score": 94,
+      "reason": "code+score home=100 away=90|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35987",
+      "sporttery_match_id": "1023510",
+      "code": "周日017",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35996",
+      "sporttery_match_id": "1023501",
+      "code": "周日008",
+      "home": "曼联",
+      "api_home": "曼联",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35944",
+      "sporttery_match_id": "1023490",
+      "code": "周六033",
+      "home": "赫罗纳",
+      "api_home": "赫罗纳",
+      "score": 95,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35955",
+      "sporttery_match_id": "1023433",
+      "code": "周六148",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 99,
+      "reason": "code+score home=100 away=91|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35975",
+      "sporttery_match_id": "1023457",
+      "code": "周六147",
+      "home": "伊朗",
+      "api_home": "伊朗",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35973",
+      "sporttery_match_id": "1023462",
+      "code": "周六005",
+      "home": "埃弗顿",
+      "api_home": "埃弗顿",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35930",
+      "sporttery_match_id": "1023442",
+      "code": "周五009",
+      "home": "斯特拉斯堡",
+      "api_home": "斯特拉斯",
+      "score": 91,
+      "reason": "code+score home=93 away=33|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35938",
+      "sporttery_match_id": "1023432",
+      "code": "周五146",
+      "home": "澳大利亚",
+      "api_home": "澳大利亚",
+      "score": 100,
+      "reason": "code+score home=100 away=100|unique_window",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35939",
+      "sporttery_match_id": "1023424",
+      "code": "周五145",
+      "home": "塔吉克斯坦",
+      "api_home": "塔吉克",
+      "score": 99,
+      "reason": "code+score home=91 away=100|unique_window",
+      "betting_single": 1
+    }
+  ]
+}

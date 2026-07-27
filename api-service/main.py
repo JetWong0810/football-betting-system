@@ -1296,9 +1296,8 @@ def batch_similar(
         # 竞彩整数让球(hhad)仅作参考字段,亚盘另走 ahHandicap
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
-        # 单关: matches.is_single 或赔率表任一玩法 is_single=1
-        if not item.get("isSingle") and wdl:
-            item["isSingle"] = any(bool(v.get("is_single")) for v in wdl.values())
+        # 预测/同赔口径的 isSingle = matches.is_single(胜平负单固,赛果页「单」)
+        # 投注红框仍用分玩法 odds_win_draw_lose.is_single, 不在此用 any(pool) 污染 F7
         # 亚盘初/终(标准负=主让)
         ah = ah_map.get(mid) or {}
         ah_open = ah.get("open")
@@ -1359,6 +1358,18 @@ def batch_similar(
         hits = [it for it in items if it.get("hit") is not None]
         summary["hitRate"] = round(sum(1 for h in hits if h["hit"]) * 100 / len(hits), 1) if hits else 0
         summary["hitTotal"] = len(hits)
+
+        def _hit_bucket(pred):
+            bucket = [it for it in hits if pred(it)]
+            n = len(bucket)
+            if not n:
+                return {"total": 0, "hits": 0, "hitRate": 0.0}
+            h = sum(1 for it in bucket if it["hit"])
+            return {"total": n, "hits": h, "hitRate": round(h * 100 / n, 1)}
+
+        summary["single"] = _hit_bucket(lambda it: bool(it.get("isSingle")))
+        summary["nonSingle"] = _hit_bucket(lambda it: not bool(it.get("isSingle")))
+        summary["singleCount"] = sum(1 for it in items if it.get("isSingle"))
     return {"date": date, "status": status, "summary": summary, "items": items}
 
 
@@ -1416,16 +1427,8 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
 
-    # 判断是否单关：赔率表中任意玩法有 is_single=1 即为单关
+    # F7 单关口径: 仅 matches.is_single(胜平负单固), 不用赔率表 any(pool)
     is_single = bool(match.get("is_single"))
-    if not is_single:
-        from database import get_db as _get_db
-        with _get_db() as _conn:
-            _cur = _conn.cursor()
-            _cur.execute("SELECT MAX(is_single) as s FROM odds_win_draw_lose WHERE match_id=%s", (match_id,))
-            row = _cur.fetchone()
-            if row and row["s"]:
-                is_single = True
 
     # 构建比赛信息
     match_info = {
@@ -1622,15 +1625,8 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
 
+    # F7 单关口径: 仅 matches.is_single(胜平负单固)
     is_single = bool(match.get("is_single"))
-    if not is_single:
-        from database import get_db as _get_db
-        with _get_db() as _conn:
-            _cur = _conn.cursor()
-            _cur.execute("SELECT MAX(is_single) as s FROM odds_win_draw_lose WHERE match_id=%s", (match_id,))
-            row = _cur.fetchone()
-            if row and row["s"]:
-                is_single = True
 
     match_info = {
         "league": match.get("league_name"),

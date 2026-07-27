@@ -1,0 +1,128 @@
+[
+  {
+    "matchId": 1023104,
+    "matchDate": "2024-01-20",
+    "matchNumStr": "周五003",
+    "home": "埃门",
+    "away": "格罗宁根",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1024781,
+    "matchDate": "2024-04-15",
+    "matchNumStr": "周日018",
+    "home": "乌迪内斯",
+    "away": "罗马",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1025118,
+    "matchDate": "2024-05-04",
+    "matchNumStr": "周六004",
+    "home": "奥斯纳",
+    "away": "沙尔克04",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1026223,
+    "matchDate": "2024-07-22",
+    "matchNumStr": "周日012",
+    "home": "罗森博格",
+    "away": "利勒斯特",
+    "score": "无效场次",
+    "bettingSingle": 1
+  },
+  {
+    "matchId": 1026655,
+    "matchDate": "2024-08-24",
+    "matchNumStr": "周六002",
+    "home": "浦和红钻",
+    "away": "川崎前锋",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1026401,
+    "matchDate": "2024-08-07",
+    "matchNumStr": "周三008",
+    "home": "浦和红钻",
+    "away": "柏太阳神",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1027610,
+    "matchDate": "2024-10-31",
+    "matchNumStr": "周三011",
+    "home": "佩纳罗尔",
+    "away": "博塔弗戈",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1027288,
+    "matchDate": "2024-10-09",
+    "matchNumStr": "周二001",
+    "home": "切尔滕",
+    "away": "雷丁",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1027927,
+    "matchDate": "2024-11-16",
+    "matchNumStr": "周五007",
+    "home": "罗马尼亚",
+    "away": "科索沃",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1028955,
+    "matchDate": "2024-12-23",
+    "matchNumStr": "周日033",
+    "home": "朗斯",
+    "away": "巴黎圣曼",
+    "score": "1:1",
+    "bettingSingle": 1
+  },
+  {
+    "matchId": 1028923,
+    "matchDate": "2024-12-22",
+    "matchNumStr": "周六042",
+    "home": "赫拉克勒",
+    "away": "格罗宁根",
+    "score": "无效场次",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1028836,
+    "matchDate": "2024-12-20",
+    "matchNumStr": "周四001",
+    "home": "巴战士",
+    "away": "奥莫尼亚",
+    "score": "取消",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1028507,
+    "matchDate": "2024-12-07",
+    "matchNumStr": "周六021",
+    "home": "加的夫城",
+    "away": "沃特福德",
+    "score": "取消",
+    "bettingSingle": 0
+  },
+  {
+    "matchId": 1028349,
+    "matchDate": "2024-12-02",
+    "matchNumStr": "周日033",
+    "home": "佛罗伦萨",
+    "away": "国际米兰",
+    "score": "无效场次",
+    "bettingSingle": 1
+  }
+]

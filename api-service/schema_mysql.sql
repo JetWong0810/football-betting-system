@@ -21,10 +21,15 @@ CREATE TABLE IF NOT EXISTS matches (
     match_status VARCHAR(50),
     notice TEXT,
     odds_update_time VARCHAR(50),
+    fid_500 VARCHAR(20) DEFAULT NULL COMMENT '500.com fixture id',
+    sporttery_match_id VARCHAR(32) DEFAULT NULL COMMENT '体彩官网 matchId',
+    home_score TINYINT DEFAULT NULL,
+    away_score TINYINT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_matches_date (match_date),
-    INDEX idx_matches_league (league_name(100))
+    INDEX idx_matches_league (league_name(100)),
+    UNIQUE KEY uk_sporttery_match_id (sporttery_match_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS odds_win_draw_lose (

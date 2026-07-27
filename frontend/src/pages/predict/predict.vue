@@ -295,6 +295,7 @@
         <view class="similar-table">
           <view class="similar-row similar-thead">
             <text class="col-sim">相似度</text>
+            <text class="col-single">单</text>
             <text class="col-team">主队</text>
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
@@ -309,6 +310,7 @@
           </view>
           <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
             <text class="col-sim">{{ m.similarity }}%</text>
+            <text class="col-single" :class="{ on: m.isSingle }">{{ m.isSingle ? '单' : '-' }}</text>
             <text class="col-team">{{ m.homeTeam }}</text>
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
@@ -1402,7 +1404,7 @@ onShow(async () => {
   min-height: 0;
   max-height: calc(88vh - 100rpx);
 }
-.similar-table { min-width: 1400rpx; padding: 0 16rpx 24rpx; }
+.similar-table { min-width: 1480rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex;
   align-items: center;
@@ -1423,6 +1425,13 @@ onShow(async () => {
 .similar-empty { text-align: center; padding: 60rpx; color: #94a3b8; font-size: 24rpx; }
 
 .col-sim { width: 90rpx; text-align: center; }
+.col-single {
+  width: 48rpx;
+  text-align: center;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+.col-single.on { color: #dc2626; font-weight: 600; }
 .col-date { width: 110rpx; text-align: center; }
 .col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-league.league-same { color: #2979ff; font-weight: 600; }

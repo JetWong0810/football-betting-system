@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS matches (
     home_score TINYINT DEFAULT NULL,
     away_score TINYINT DEFAULT NULL,
     fid_500 VARCHAR(20) DEFAULT NULL,
+    sporttery_match_id VARCHAR(32) DEFAULT NULL COMMENT '体彩官网 matchId',
     is_single TINYINT DEFAULT 0,
     match_status VARCHAR(50),
     notice TEXT,

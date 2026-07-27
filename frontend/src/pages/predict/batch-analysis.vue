@@ -42,6 +42,13 @@
           <text class="st hit">命中 {{ summary.hitRate }}%</text>
         </template>
       </view>
+      <view v-if="isFinished && summary.hitTotal" class="sum-stats single-split">
+        <text class="st single-stat">单关 {{ summary.single?.hitRate ?? 0 }}%（{{ summary.single?.hits || 0 }}/{{ summary.single?.total || 0 }}）</text>
+        <text class="st-sep">·</text>
+        <text class="st">非单 {{ summary.nonSingle?.hitRate ?? 0 }}%（{{ summary.nonSingle?.hits || 0 }}/{{ summary.nonSingle?.total || 0 }}）</text>
+        <text v-if="summary.singleCount" class="st-sep">·</text>
+        <text v-if="summary.singleCount" class="st">单关场 {{ summary.singleCount }}</text>
+      </view>
       <view v-if="simBet.simMode && dateConfirmed.length" class="sum-sim-hist">
         <text
           v-for="s in dateConfirmed.slice(0, 3)"
@@ -56,6 +63,7 @@
       <view class="ctrl-row">
         <text class="ctrl-lab">排序</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'default' }" @tap="sortMode = 'default'">默认</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'time' }" @tap="sortMode = 'time'">时间</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'hitPct' }" @tap="sortMode = 'hitPct'">命中率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'refScore' }" @tap="sortMode = 'refScore'">分数</text>
       </view>
@@ -245,6 +253,7 @@
         <view class="similar-table">
           <view class="similar-row similar-thead">
             <text class="col-sim">相似度</text>
+            <text class="col-single">单</text>
             <text class="col-team">主队</text>
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
@@ -259,6 +268,7 @@
           </view>
           <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
             <text class="col-sim">{{ m.similarity }}%</text>
+            <text class="col-single" :class="{ on: m.isSingle }">{{ m.isSingle ? '单' : '-' }}</text>
             <text class="col-team">{{ m.homeTeam }}</text>
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
@@ -343,7 +353,7 @@ const simTarget = ref(null)
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
 const moveFilters = ref([])
-/** default | hitPct | refScore */
+/** default | time | hitPct | refScore */
 const sortMode = ref('default')
 
 const isFinished = computed(() => status.value === 'finished')
@@ -561,9 +571,25 @@ function itemRefScore(it) {
   const s = it?.f6?.refScore
   return s == null ? -1 : Number(s)
 }
+function itemTimeValue(it) {
+  const t = String(it?.matchTime || '')
+  const m = t.match(/(\d{1,2}):(\d{2})/)
+  if (!m) return Number.MAX_SAFE_INTEGER
+  const hour = Number(m[1])
+  const minute = Number(m[2])
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return Number.MAX_SAFE_INTEGER
+  return hour * 60 + minute
+}
 const sortedItems = computed(() => {
   const list = [...items.value]
   const mode = sortMode.value
+  if (mode === 'time') {
+    return list.sort((a, b) => {
+      const d = itemTimeValue(a) - itemTimeValue(b)
+      if (d !== 0) return d
+      return itemRefScore(b) - itemRefScore(a)
+    })
+  }
   if (mode === 'hitPct') {
     return list.sort((a, b) => {
       const d = itemHitPct(b) - itemHitPct(a)
@@ -931,8 +957,10 @@ onLoad(async (options) => {
       &.lower { color: #a7f3d0; font-weight: 600; }
       &.neutral { color: rgba(255,255,255,0.85); font-weight: 500; }
       &.hit { color: #fde68a; font-weight: 600; }
+      &.single-stat { color: #fdba74; font-weight: 600; }
     }
     .st-sep { font-size: 22rpx; color: rgba(255,255,255,0.35); }
+    &.single-split { margin-top: 6rpx; opacity: 0.95; }
   }
   .sum-sim-hist {
     margin-top: 12rpx; display: flex; flex-wrap: wrap; gap: 8rpx;
@@ -1178,7 +1206,7 @@ onLoad(async (options) => {
   flex: 0 1 auto; overflow: auto; min-height: 0;
   max-height: calc(88vh - 100rpx);
 }
-.similar-table { min-width: 1400rpx; padding: 0 16rpx 24rpx; }
+.similar-table { min-width: 1480rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex; align-items: center; padding: 14rpx 0;
   border-bottom: 1rpx solid #f1f5f9; gap: 4rpx;
@@ -1191,6 +1219,10 @@ onLoad(async (options) => {
 .similar-empty { text-align: center; padding: 60rpx; color: #94a3b8; font-size: 24rpx; }
 
 .col-sim { width: 90rpx; text-align: center; }
+.col-single {
+  width: 48rpx; text-align: center; color: #94a3b8; flex-shrink: 0;
+  &.on { color: #dc2626; font-weight: 600; }
+}
 .col-date { width: 110rpx; text-align: center; }
 .col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-league.league-same { color: #2979ff; font-weight: 600; }

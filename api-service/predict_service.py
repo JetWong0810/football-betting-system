@@ -2283,6 +2283,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "date": m.get("match_date", ""),
             "league": m.get("league_name", ""),
             "sameLeague": bool(m.get("same_league", False)),
+            "isSingle": bool(int(m.get("is_single") or 0)),
             "homeTeam": m.get("home_team_cn", ""),
             "awayTeam": m.get("away_team_cn", ""),
             "score": f"{hs}-{aws}",

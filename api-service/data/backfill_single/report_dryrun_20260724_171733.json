@@ -1,0 +1,812 @@
+{
+  "mode": "dryrun",
+  "range": [
+    "2024-02-01",
+    "2024-02-29"
+  ],
+  "overall_match_rate": 0.7764227642276422,
+  "month_stats": [
+    {
+      "month": "2024-02",
+      "api": 246,
+      "matched": 191,
+      "unmatched": 55,
+      "ambiguous": 0,
+      "rate": 0.7764,
+      "api_single": 32,
+      "matched_single": 28
+    }
+  ],
+  "p0": {
+    "sporttery_id_set": 191,
+    "sporttery_id_skip_conflict": 0,
+    "sporttery_id_skip_filled": 0,
+    "match_single_up": 28,
+    "had_single_up": 28,
+    "already_single": 0,
+    "non_single": 163
+  },
+  "p1": {},
+  "unmatched_sample": [
+    {
+      "matchId": 1023756,
+      "matchDate": "2024-02-29",
+      "matchNumStr": "周三003",
+      "home": "狼队",
+      "away": "布赖顿",
+      "score": "1:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023753,
+      "matchDate": "2024-02-28",
+      "matchNumStr": "周二004",
+      "home": "皇家社会",
+      "away": "马洛卡",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023726,
+      "matchDate": "2024-02-26",
+      "matchNumStr": "周日028",
+      "home": "里奥阿维",
+      "away": "里斯本",
+      "score": "3:3",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023717,
+      "matchDate": "2024-02-26",
+      "matchNumStr": "周日019",
+      "home": "巴黎圣曼",
+      "away": "雷恩",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023716,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周日018",
+      "home": "维兹拉",
+      "away": "埃斯托里",
+      "score": "3:3",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023705,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周日007",
+      "home": "汉堡",
+      "away": "埃沃斯堡",
+      "score": "1:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023703,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周日005",
+      "home": "尤文图斯",
+      "away": "弗洛西诺",
+      "score": "3:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023702,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周日004",
+      "home": "墨胜利",
+      "away": "中央海岸",
+      "score": "0:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023701,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周日003",
+      "home": "纽喷气机",
+      "away": "麦克阿瑟",
+      "score": "2:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023695,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周六031",
+      "home": "吉马良斯",
+      "away": "卡萨皮亚",
+      "score": "0:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023689,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周六025",
+      "home": "阿拉维斯",
+      "away": "马洛卡",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023688,
+      "matchDate": "2024-02-25",
+      "matchNumStr": "周六024",
+      "home": "拜仁",
+      "away": "莱红牛",
+      "score": "2:1",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1023685,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六021",
+      "home": "法伦斯",
+      "away": "摩雷伦斯",
+      "score": "0:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023684,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六020",
+      "home": "巴萨",
+      "away": "赫塔费",
+      "score": "4:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023681,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六017",
+      "home": "布赖顿",
+      "away": "埃弗顿",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023677,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六013",
+      "home": "不来梅",
+      "away": "达姆施塔",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023675,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六011",
+      "home": "圣埃蒂安",
+      "away": "阿纳西",
+      "score": "2:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023673,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六009",
+      "home": "格拉纳达",
+      "away": "巴伦西亚",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023670,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六006",
+      "home": "不伦瑞克",
+      "away": "柏林赫塔",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023666,
+      "matchDate": "2024-02-24",
+      "matchNumStr": "周六002",
+      "home": "湘南海洋",
+      "away": "川崎前锋",
+      "score": "1:2",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1023632,
+      "matchDate": "2024-02-23",
+      "matchNumStr": "周四011",
+      "home": "马赛",
+      "away": "顿矿工",
+      "score": "3:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023631,
+      "matchDate": "2024-02-23",
+      "matchNumStr": "周四010",
+      "home": "布斯巴达",
+      "away": "加拉塔萨",
+      "score": "4:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023630,
+      "matchDate": "2024-02-23",
+      "matchNumStr": "周四009",
+      "home": "里斯本",
+      "away": "年轻人",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023627,
+      "matchDate": "2024-02-23",
+      "matchNumStr": "周四006",
+      "home": "利雅新月",
+      "away": "塞帕汉",
+      "score": "3:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023626,
+      "matchDate": "2024-02-23",
+      "matchNumStr": "周四005",
+      "home": "卡拉巴赫",
+      "away": "布拉加",
+      "score": "0:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023634,
+      "matchDate": "2024-02-22",
+      "matchNumStr": "周三003",
+      "home": "利雅胜利",
+      "away": "迈季宽广",
+      "score": "2:0",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1023619,
+      "matchDate": "2024-02-21",
+      "matchNumStr": "周三001",
+      "home": "甲府风林",
+      "away": "蔚山现代",
+      "score": "1:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023616,
+      "matchDate": "2024-02-21",
+      "matchNumStr": "周二008",
+      "home": "加的夫城",
+      "away": "布莱克本",
+      "score": "0:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023611,
+      "matchDate": "2024-02-20",
+      "matchNumStr": "周二003",
+      "home": "浦项制铁",
+      "away": "全北现代",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023610,
+      "matchDate": "2024-02-20",
+      "matchNumStr": "周二002",
+      "home": "墨胜利",
+      "away": "西部联",
+      "score": "2:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023608,
+      "matchDate": "2024-02-20",
+      "matchNumStr": "周一004",
+      "home": "摩雷伦斯",
+      "away": "里斯本",
+      "score": "0:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023604,
+      "matchDate": "2024-02-19",
+      "matchNumStr": "周日024",
+      "home": "布拉加",
+      "away": "法伦斯",
+      "score": "2:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023599,
+      "matchDate": "2024-02-19",
+      "matchNumStr": "周日019",
+      "home": "马洛卡",
+      "away": "皇家社会",
+      "score": "1:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023598,
+      "matchDate": "2024-02-19",
+      "matchNumStr": "周日018",
+      "home": "弗洛西诺",
+      "away": "罗马",
+      "score": "0:3",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023587,
+      "matchDate": "2024-02-18",
+      "matchNumStr": "周日007",
+      "home": "谢菲联",
+      "away": "布赖顿",
+      "score": "0:5",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023584,
+      "matchDate": "2024-02-18",
+      "matchNumStr": "周日004",
+      "home": "圣保利",
+      "away": "不伦瑞克",
+      "score": "1:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023565,
+      "matchDate": "2024-02-08",
+      "matchNumStr": "周三004",
+      "home": "巴黎圣曼",
+      "away": "布雷斯特",
+      "score": "3:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023563,
+      "matchDate": "2024-02-08",
+      "matchNumStr": "周三002",
+      "home": "诺丁汉",
+      "away": "布城",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023561,
+      "matchDate": "2024-02-07",
+      "matchNumStr": "周二005",
+      "home": "马洛卡",
+      "away": "皇家社会",
+      "score": "0:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023523,
+      "matchDate": "2024-02-06",
+      "matchNumStr": "周一005",
+      "home": "卡萨皮亚",
+      "away": "博阿维斯",
+      "score": "0:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023518,
+      "matchDate": "2024-02-05",
+      "matchNumStr": "周日025",
+      "home": "布拉加",
+      "away": "摩雷伦斯",
+      "score": "1:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023513,
+      "matchDate": "2024-02-05",
+      "matchNumStr": "周日020",
+      "home": "贝蒂斯",
+      "away": "赫塔费",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023511,
+      "matchDate": "2024-02-05",
+      "matchNumStr": "周日018",
+      "home": "莱红牛",
+      "away": "柏林联合",
+      "score": "2:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023487,
+      "matchDate": "2024-02-04",
+      "matchNumStr": "周六030",
+      "home": "法马利康",
+      "away": "里斯本",
+      "score": "无效场次",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023481,
+      "matchDate": "2024-02-04",
+      "matchNumStr": "周六024",
+      "home": "弗洛西诺",
+      "away": "AC米兰",
+      "score": "2:3",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023473,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周六016",
+      "home": "布赖顿",
+      "away": "水晶宫",
+      "score": "4:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023470,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周六013",
+      "home": "美因茨",
+      "away": "不来梅",
+      "score": "0:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023463,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周六006",
+      "home": "巴伦西亚",
+      "away": "阿梅里亚",
+      "score": "2:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023459,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周六002",
+      "home": "纽喷气机",
+      "away": "墨胜利",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023442,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周五009",
+      "home": "斯特拉斯",
+      "away": "巴黎圣曼",
+      "score": "1:2",
+      "bettingSingle": 1
+    },
+    {
+      "matchId": 1023441,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周五008",
+      "home": "毕尔巴鄂",
+      "away": "马洛卡",
+      "score": "4:0",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023440,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周五007",
+      "home": "布城",
+      "away": "利兹联",
+      "score": "0:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023436,
+      "matchDate": "2024-02-03",
+      "matchNumStr": "周五003",
+      "home": "马格德堡",
+      "away": "基尔",
+      "score": "1:1",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023401,
+      "matchDate": "2024-02-02",
+      "matchNumStr": "周四002",
+      "home": "赫塔费",
+      "away": "皇马",
+      "score": "0:2",
+      "bettingSingle": 0
+    },
+    {
+      "matchId": 1023399,
+      "matchDate": "2024-02-01",
+      "matchNumStr": "周三009",
+      "home": "布拉加",
+      "away": "沙维什",
+      "score": "1:1",
+      "bettingSingle": 0
+    }
+  ],
+  "unmatched_count": 55,
+  "ambiguous_sample": [],
+  "ambiguous_count": 0,
+  "matched_single_sample": [
+    {
+      "match_id": "jczq_36161",
+      "sporttery_match_id": "1023755",
+      "code": "周三002",
+      "home": "切尔西",
+      "api_home": "切尔西",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36155",
+      "sporttery_match_id": "1023751",
+      "code": "周二002",
+      "home": "布莱克本",
+      "api_home": "布莱克本",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36122",
+      "sporttery_match_id": "1023724",
+      "code": "周日026",
+      "home": "AC米兰",
+      "api_home": "AC米兰",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36132",
+      "sporttery_match_id": "1023714",
+      "code": "周日016",
+      "home": "切尔西",
+      "api_home": "切尔西",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36137",
+      "sporttery_match_id": "1023709",
+      "code": "周日011",
+      "home": "狼队",
+      "api_home": "狼队",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36090",
+      "sporttery_match_id": "1023693",
+      "code": "周六029",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36103",
+      "sporttery_match_id": "1023680",
+      "code": "周六016",
+      "home": "曼联",
+      "api_home": "曼联",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36060",
+      "sporttery_match_id": "1023621",
+      "code": "周三005",
+      "home": "那不勒斯",
+      "api_home": "那不勒斯",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36049",
+      "sporttery_match_id": "1023618",
+      "code": "周二010",
+      "home": "国米",
+      "api_home": "国际米兰",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36058",
+      "sporttery_match_id": "1023609",
+      "code": "周二001",
+      "home": "川崎前锋",
+      "api_home": "川崎前锋",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36024",
+      "sporttery_match_id": "1023601",
+      "code": "周日021",
+      "home": "蒙扎",
+      "api_home": "蒙扎",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36029",
+      "sporttery_match_id": "1023596",
+      "code": "周日016",
+      "home": "卢顿",
+      "api_home": "卢顿",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36039",
+      "sporttery_match_id": "1023586",
+      "code": "周日006",
+      "home": "巴列卡诺",
+      "api_home": "巴列卡诺",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36020",
+      "sporttery_match_id": "1023556",
+      "code": "周三150",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_36014",
+      "sporttery_match_id": "1023550",
+      "code": "周二149",
+      "home": "约旦",
+      "api_home": "约旦",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35980",
+      "sporttery_match_id": "1023517",
+      "code": "周日024",
+      "home": "皇马",
+      "api_home": "皇马",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35982",
+      "sporttery_match_id": "1023515",
+      "code": "周日022",
+      "home": "国米",
+      "api_home": "国际米兰",
+      "score": 110,
+      "reason": "home=100,away=90,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35987",
+      "sporttery_match_id": "1023510",
+      "code": "周日017",
+      "home": "阿森纳",
+      "api_home": "阿森纳",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35996",
+      "sporttery_match_id": "1023501",
+      "code": "周日008",
+      "home": "曼联",
+      "api_home": "曼联",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35944",
+      "sporttery_match_id": "1023490",
+      "code": "周六033",
+      "home": "赫罗纳",
+      "api_home": "赫罗纳",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35955",
+      "sporttery_match_id": "1023433",
+      "code": "周六148",
+      "home": "卡塔尔",
+      "api_home": "卡塔尔",
+      "score": 120,
+      "reason": "home=100,away=91,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35975",
+      "sporttery_match_id": "1023457",
+      "code": "周六147",
+      "home": "伊朗",
+      "api_home": "伊朗",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35973",
+      "sporttery_match_id": "1023462",
+      "code": "周六005",
+      "home": "埃弗顿",
+      "api_home": "埃弗顿",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35938",
+      "sporttery_match_id": "1023432",
+      "code": "周五146",
+      "home": "澳大利亚",
+      "api_home": "澳大利亚",
+      "score": 125,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35939",
+      "sporttery_match_id": "1023424",
+      "code": "周五145",
+      "home": "塔吉克斯坦",
+      "api_home": "塔吉克",
+      "score": 120,
+      "reason": "home=91,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35927",
+      "sporttery_match_id": "1023402",
+      "code": "周四003",
+      "home": "狼队",
+      "api_home": "狼队",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35925",
+      "sporttery_match_id": "1023269",
+      "code": "周三144",
+      "home": "伊朗",
+      "api_home": "伊朗",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    },
+    {
+      "match_id": "jczq_35917",
+      "sporttery_match_id": "1023398",
+      "code": "周三008",
+      "home": "利物浦",
+      "api_home": "利物浦",
+      "score": 115,
+      "reason": "home=100,away=100,score_ok",
+      "betting_single": 1
+    }
+  ]
+}
