@@ -572,13 +572,22 @@ function itemRefScore(it) {
   return s == null ? -1 : Number(s)
 }
 function itemTimeValue(it) {
-  const t = String(it?.matchTime || '')
-  const m = t.match(/(\d{1,2}):(\d{2})/)
-  if (!m) return Number.MAX_SAFE_INTEGER
-  const hour = Number(m[1])
-  const minute = Number(m[2])
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return Number.MAX_SAFE_INTEGER
-  return hour * 60 + minute
+  const rawTime = String(it?.matchTime || '')
+  const fullInTime = rawTime.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (fullInTime) {
+    const [, y, mo, d, h, mi, s = '0'] = fullInTime
+    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)).getTime()
+  }
+
+  const rawDate = String(it?.matchDate || '')
+  const dateMatch = rawDate.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (!dateMatch || !timeMatch) return Number.MAX_SAFE_INTEGER
+
+  const [, y, mo, d] = dateMatch
+  const [, h, mi, s = '0'] = timeMatch
+  const value = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)).getTime()
+  return Number.isNaN(value) ? Number.MAX_SAFE_INTEGER : value
 }
 const sortedItems = computed(() => {
   const list = [...items.value]
