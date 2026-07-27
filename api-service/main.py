@@ -1296,8 +1296,9 @@ def batch_similar(
         # 竞彩整数让球(hhad)仅作参考字段,亚盘另走 ahHandicap
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
-        # 预测/同赔口径的 isSingle = matches.is_single(胜平负单固,赛果页「单」)
-        # 投注红框仍用分玩法 odds_win_draw_lose.is_single, 不在此用 any(pool) 污染 F7
+        # 同赔页单关标记按胜平负单固口径: matches.is_single 兜底, had.is_single 优先。
+        # 不用任意玩法 any(pool), 避免 hhad 等玩法污染 F7/同赔的单关判断。
+        item["isSingle"] = bool(item.get("isSingle") or int((wdl.get("had") or {}).get("is_single") or 0) == 1)
         # 亚盘初/终(标准负=主让)
         ah = ah_map.get(mid) or {}
         ah_open = ah.get("open")
