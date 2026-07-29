@@ -45,10 +45,22 @@ class OddsRepository:
         values = [match.get(f) for f in fields]
         placeholders = ", ".join([PLACEHOLDER] * len(fields))
         # is_single 只升不降：单关是历史事实，在售时同步为1，停售后API返回0时不回退
+        # match_status 不降级：已有比分或已 finished/cancelled 时，不被体彩 Selling 写回 not_started
+        def _update_expr(f: str) -> str:
+            if f == "is_single":
+                return "is_single=IF(VALUES(is_single)=1,1,is_single)"
+            if f == "match_status":
+                return (
+                    "match_status=IF("
+                    "home_score IS NOT NULL, 'finished', "
+                    "IF(match_status IN ('finished','cancelled') "
+                    "AND VALUES(match_status)='not_started', match_status, VALUES(match_status))"
+                    ")"
+                )
+            return f"{f}=VALUES({f})"
+
         update_placeholders = ", ".join(
-            "is_single=IF(VALUES(is_single)=1,1,is_single)" if f == "is_single"
-            else f"{f}=VALUES({f})"
-            for f in fields if f != "match_id"
+            _update_expr(f) for f in fields if f != "match_id"
         )
         sql = f"""
             INSERT INTO matches ({columns}) VALUES ({placeholders})
@@ -240,12 +252,22 @@ class OddsRepository:
         with get_db() as conn:
             update_sync_status(conn, total_matches, total_odds)
 
-    def get_finished_without_score(self, days: Optional[int] = None) -> List[Dict[str, Any]]:
-        """查询已开赛(match_timestamp<now)但缺比分的比赛"""
+    def get_finished_without_score(
+        self,
+        days: Optional[int] = None,
+        *,
+        prefer_after_seconds: int = 2 * 3600,
+    ) -> List[Dict[str, Any]]:
+        """查询已开赛但缺比分的比赛。
+
+        开赛满 prefer_after_seconds(默认2h)的优先回填——此时大概率已完赛可出分；
+        不满2h的仍尝试(早结束/腰斩)，但不盲标 finished。
+        """
         now_ts = int(datetime.now().timestamp())
+        prefer_before = now_ts - prefer_after_seconds
         ph = PLACEHOLDER
         sql = (
-            "SELECT match_id, match_code, match_number, match_date, "
+            "SELECT match_id, match_code, match_number, match_date, match_timestamp, "
             "home_team_name, away_team_name FROM matches "
             f"WHERE match_timestamp IS NOT NULL AND match_timestamp < {ph} "
             "AND home_score IS NULL "
@@ -256,7 +278,12 @@ class OddsRepository:
             cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
             sql += f" AND match_date >= {ph}"
             params.append(cutoff)
-        sql += " ORDER BY match_date DESC"
+        # 开赛≥2h 优先，同档按开赛时间升序(先踢完的先抓)
+        sql += (
+            f" ORDER BY CASE WHEN match_timestamp <= {ph} THEN 0 ELSE 1 END, "
+            "match_timestamp ASC"
+        )
+        params.append(prefer_before)
         with get_db() as conn:
             cur = _execute(conn, sql, params)
             return list(cur.fetchall())
@@ -307,7 +334,8 @@ class OddsRepository:
             where.append(f"(match_timestamp IS NULL OR match_timestamp >= {ph})")
             params.append(now_ts)
         
-        # 默认只展示在售或未开赛的赛事
+        # 无比分且非 finished/cancelled；有分即离开(不按时长盲踢)
+        where.append("home_score IS NULL")
         where.append("(match_status IS NULL OR match_status NOT IN ('finished', 'cancelled'))")
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         

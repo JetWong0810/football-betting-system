@@ -256,7 +256,9 @@ const upOption = {
   },
 };
 
-const visibleMatches = computed(() => matches.value.filter((match) => !isFinishedMatch(match?.status)));
+const visibleMatches = computed(() =>
+  matches.value.filter((match) => !isFinishedMatch(match))
+);
 
 const groupedMatches = computed(() => {
   const bucket = visibleMatches.value.reduce((acc, match) => {
@@ -448,7 +450,10 @@ function isSingleFor(match, oddsType) {
   return Boolean(match?.isSingle);
 }
 
-function isFinishedMatch(status) {
+/** 有比分或 status 已结束/取消 → 离开在售。不按时长盲判(推迟/补时)。 */
+function isFinishedMatch(match) {
+  if (match?.homeScore != null && match?.homeScore !== "") return true;
+  const status = match?.status;
   if (!status) return false;
   const normalized = String(status).toLowerCase();
   return normalized === "finished" || normalized === "cancelled";

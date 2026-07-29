@@ -77,10 +77,22 @@ class OddsRepository:
         values = [match.get(f) for f in fields]
         placeholders = ", ".join([PLACEHOLDER] * len(fields))
         # is_single 只升不降：单关是历史事实，停售后API返回0时不回退
+        # match_status 不降级：已有比分或已 finished/cancelled 时，不被 Selling 写回 not_started
+        def _update_expr(f: str) -> str:
+            if f == "is_single":
+                return "is_single=IF(VALUES(is_single)=1,1,is_single)"
+            if f == "match_status":
+                return (
+                    "match_status=IF("
+                    "home_score IS NOT NULL, 'finished', "
+                    "IF(match_status IN ('finished','cancelled') "
+                    "AND VALUES(match_status)='not_started', match_status, VALUES(match_status))"
+                    ")"
+                )
+            return f"{f}=VALUES({f})"
+
         update_placeholders = ", ".join(
-            "is_single=IF(VALUES(is_single)=1,1,is_single)" if f == "is_single"
-            else f"{f}=VALUES({f})"
-            for f in fields if f != "match_id"
+            _update_expr(f) for f in fields if f != "match_id"
         )
         sql = f"""
             INSERT INTO matches ({columns}) VALUES ({placeholders})
@@ -251,13 +263,10 @@ class OddsRepository:
             params.append(league)
         
         latest_issue = self.get_latest_issue()
-        # 默认只展示在售或未开赛的赛事
+        # 在售列表：无比分且非 finished/cancelled。完赛硬证据=比分，不按开赛+Nh 盲踢
+        # （推迟/补时可能导致开赛后很久才出分；有分即离开）
+        where.append("home_score IS NULL")
         where.append("(match_status IS NULL OR match_status NOT IN ('finished', 'cancelled'))")
-        # 已开赛超过3小时的比赛视为已结束，不再展示
-        import time as _time
-        finished_cutoff = int(_time.time()) - 3 * 3600
-        where.append(f"(match_timestamp IS NULL OR match_timestamp > {ph})")
-        params.append(finished_cutoff)
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         
         base_sql = (

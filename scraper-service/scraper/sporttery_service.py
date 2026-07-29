@@ -86,19 +86,20 @@ class SportterySyncService:
         return self.stats
 
     def backfill_scores(self, days: int = 3) -> int:
-        """回填已完赛但缺比分的比赛比分(数据源: 500.com)
+        """回填已开赛但缺比分的比赛(数据源: 500.com)。
 
-        Args:
-            days: 仅处理最近N天的比赛，避免每次扫全表
-
-        Returns:
-            成功回填的场次数
+        开赛满 2h 的优先抓(大概率已完赛可出分)；有分才写 finished，不按时长盲标。
         """
         pending = self.repository.get_finished_without_score(days=days)
         if not pending:
             return 0
 
-        logger.info(f"待回填比分: {len(pending)} 场")
+        now_ts = int(datetime.now().timestamp())
+        ripe = sum(
+            1 for m in pending
+            if (m.get("match_timestamp") or 0) <= now_ts - 2 * 3600
+        )
+        logger.info(f"待回填比分: {len(pending)} 场(其中开赛≥2h优先 {ripe} 场)")
         clear_score_cache()  # 每轮重新抓，确保拿到最新结果
         updated = 0
         for m in pending:
