@@ -23,8 +23,8 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 3. **同侧**:历史低赔方 == 本场低赔方(同为胜/平/负某一项)。
 4. **初盘低赔 ±0.03**(TOLERANCE)。
 5. **终盘低赔 ±0.03**。
-6. **初盘高赔方 ±0.1**(高赔=**主胜/客胜中较高者**,不含平赔;旧逻辑曾误用三项max把平当高赔)。
-7. **终盘高赔方 ±0.1**。
+6. **初盘高赔方 ±0.1**；初盘高赔 **≥6.0** 时放宽为 **±0.15**(高赔=**主胜/客胜中较高者**,不含平赔)。
+7. **终盘高赔方 ±0.1**；终盘高赔 **≥6.0** 时放宽为 **±0.15**。
 8. **方向一致**:初→终盘低赔变动方向(升/降/平)。**方向降级**:本场仅 1 条 spf 快照(open==current,无变动)时 `require_direction=False`,跳过方向过滤(此时方向恒"平"是数据缺失非真稳定),仅按初/终盘接近+同侧匹配。details 显"方向不限(无变动)"。
 
 相似度=(低赔初盘接近度+低赔终盘接近度)/2;若本场有亚盘初/终,再并入历史亚盘初/终接近度:`0.7*欧赔相似+0.3*亚盘相似`(|Δ盘|/0.5归一,缺历史亚盘则欧赔×0.95)。排序:同联赛优先+相似度降序。
@@ -42,7 +42,7 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 - **refScore(0–100 多维证据强度,独立于方向阈值/因子score)**:单场权重 `w=(sim/100)*league(同联赛1.15)*hc_proximity(|Δ盘|)*time_decay`；半赢×0.5。合成 `0.40*edge + 0.25*quality + 0.20*sample + 0.15*decidable`；无变动降级×0.85；`total<3`封顶20；neutral封顶50。返回 `refScore` + `refBreakdown{edge,quality,sample,decidable}`。批量接口传入本场 `ahHandicap` 供盘口一致性。
 
 ### F6 details(predict_service.calc_factor_jczq_similar_odds)
-匹配条件(低赔初/终±0.03 + 高赔初/终±0.1 + 方向)+ 匹配场次 + 盘路分布(上盘X(全a半b) 下盘Y(全c半d) 走水Z)+ 上下盘命中 + 走水 + 参考分 + 样本场。返回 `matches`(similar_matches 列表,供弹窗:相似度/日期/联赛/队/比分/结果/初盘/终盘/让球/盘路)+ `refScore`/`refBreakdown`。
+匹配条件(低赔初/终±0.03 + 高赔初/终±0.1或≥6时±0.15 + 方向)+ 匹配场次 + 盘路分布(上盘X(全a半b) 下盘Y(全c半d) 走水Z)+ 上下盘命中 + 走水 + 参考分 + 样本场。返回 `matches`(similar_matches 列表,供弹窗:相似度/日期/联赛/队/比分/结果/初盘/终盘/让球/盘路)+ `refScore`/`refBreakdown`。
 
 ## readpl wtype 反转(关键坑)
 见 [[data-conventions]]。抓 spf 用 `wtype=nspf`。`backfill_spf_history.py` 历史曾误用 `wtype=spf` 抓成 nspf 标 spf,已修正为 `wtype=nspf`。DB 'spf' 45038 场=真 spf(已验证 jczq_46754 精确比对)。

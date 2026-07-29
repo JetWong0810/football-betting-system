@@ -2352,7 +2352,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
 
     details = [
         {"name": "匹配条件", "desc": (f"低赔初{query.get('low_open', 0):.2f}±{query.get('tolerance', 0.03):.2f} 终{query.get('low_close', 0):.2f}±{query.get('tolerance', 0.03):.2f}"
-                                      f"({query.get('low_position', '')}) | 高赔初{query.get('high_open', 0):.2f}±{query.get('high_tolerance', 0.1):.1f} 终{query.get('high_close', 0):.2f}±{query.get('high_tolerance', 0.1):.1f}"
+                                      f"({query.get('low_position', '')}) | 高赔初{query.get('high_open', 0):.2f}±{query.get('high_tolerance_open', query.get('high_tolerance', 0.1)):.2f} 终{query.get('high_close', 0):.2f}±{query.get('high_tolerance_close', query.get('high_tolerance', 0.1)):.2f}"
                                       f" | 方向{dir_label}")},
         {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf)"},
         {"name": "盘路分布", "desc": f"上盘{ah_upper}(全{full_up}半{half_up}) 下盘{ah_lower}(全{full_down}半{half_down}) 走水{ah_push} (共{ah_total}场)"},

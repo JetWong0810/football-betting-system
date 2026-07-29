@@ -17,8 +17,19 @@ import settings
 logger = logging.getLogger(__name__)
 
 TOLERANCE = 0.03
+HIGH_TOLERANCE = 0.1
+# 高赔≥该阈值时放宽容差(高赔区间稀疏, ±0.1 样本过少); 初盘/终盘同规则
+HIGH_ODDS_WIDE_THRESHOLD = 6.0
+HIGH_TOLERANCE_WIDE = 0.15
 LOW_LABEL = {"win": "胜", "draw": "平", "loss": "负"}
 RESULT_MAP = {"win": "H", "draw": "D", "loss": "A"}
+
+
+def _high_odds_tolerance(odds: Optional[float], base: float = HIGH_TOLERANCE) -> float:
+    """高赔容差: ≥6.0 用 ±0.15, 否则用 base(默认 ±0.1)。初盘/终盘共用。"""
+    if odds is not None and odds >= HIGH_ODDS_WIDE_THRESHOLD:
+        return HIGH_TOLERANCE_WIDE
+    return base
 
 # 历史池缓存: 2018-2025 静态数据，进程内只加载一次
 _pool_cache: Optional[List[Dict]] = None
@@ -305,7 +316,7 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
                       tolerance: float = TOLERANCE, league: Optional[str] = None,
                       exclude_match_id: Optional[str] = None,
                       require_direction: bool = True,
-                      high_tolerance: float = 0.1) -> Dict:
+                      high_tolerance: float = HIGH_TOLERANCE) -> Dict:
     """核心匹配(让球胜平负 nspf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
 
     league 非空时同联赛优先排序; exclude_match_id 剔除预测比赛自身。
@@ -410,15 +421,16 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
                   tolerance: float, pool_loader, league: Optional[str] = None,
                   exclude_match_id: Optional[str] = None,
                   require_direction: bool = True,
-                  high_tolerance: float = 0.1,
+                  high_tolerance: float = HIGH_TOLERANCE,
                   ah_open: Optional[float] = None,
                   ah_close: Optional[float] = None) -> Dict:
     """共享匹配逻辑: 初盘低赔±tolerance+高赔±high_tolerance, 终盘同理, + 低赔方同侧 + 变动方向一致。
 
     "上盘球队"(低赔方)必须与预测比赛同一侧(同为胜/平/负的某一项), 初盘与终盘的低赔都在
-    ±tolerance 内、高赔都在 ±high_tolerance 内, 且初→终盘变动方向一致。同侧避免主胜低赔匹配到
+    ±tolerance 内、高赔都在对应容差内, 且初→终盘变动方向一致。同侧避免主胜低赔匹配到
     客胜低赔的盘口结构相反场次。
     高赔方=主胜/客胜中较高者(对阵双方 underdog), **不含平赔**(平是中间项, 不参与高赔约束)。
+    初/终盘高赔≥6.0 时各自容差放宽为 ±0.15(高赔区间稀疏), 否则用 high_tolerance(默认 ±0.1)。
     exclude_match_id: 剔除预测比赛自身(已完赛回溯预测时该场在池中会100%自匹配)。
     require_direction=False: 当预测场仅有1条spf快照(open==close, 无真实变动)时,
       放弃"变动方向一致"过滤(此时方向恒为"平"是数据缺失而非真稳定), 仅按初/终盘接近+同侧匹配。
@@ -443,6 +455,9 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     if input_high_open is None:
         return {"query": {}, "matches": [], "stats": {}}
 
+    open_high_tol = _high_odds_tolerance(input_high_open, high_tolerance)
+    close_high_tol = _high_odds_tolerance(input_high_close, high_tolerance)
+
     use_ah_sim = ah_open is not None and ah_close is not None
 
     matched = []
@@ -466,13 +481,13 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         if input_low_close is not None and hist_low_close is not None:
             if abs(hist_low_close - input_low_close) > tolerance:
                 continue
-        # 高赔方 ±high_tolerance (主/客较高者, 不含平; 初盘+终盘)
+        # 高赔方: 初/终各自按赔率档位自适应(≥6 → ±0.15)
         hist_high_open = _side_high_odds(m["open_win"], m["open_loss"])
-        if hist_high_open is None or abs(hist_high_open - input_high_open) > high_tolerance:
+        if hist_high_open is None or abs(hist_high_open - input_high_open) > open_high_tol:
             continue
         if input_high_close is not None:
             hist_high_close = _side_high_odds(m["close_win"], m["close_loss"])
-            if hist_high_close is None or abs(hist_high_close - input_high_close) > high_tolerance:
+            if hist_high_close is None or abs(hist_high_close - input_high_close) > close_high_tol:
                 continue
         # 初→终盘变动方向一致(预测场无真实变动时跳过此过滤)
         if require_direction and hist_direction != input_direction:
@@ -519,7 +534,10 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
             "close_win": close_win, "close_draw": close_draw, "close_loss": close_loss,
             "low_position": low_label, "low_open": input_low_open, "low_close": input_low_close,
             "high_open": input_high_open, "high_close": input_high_close,
-            "direction": input_direction, "tolerance": tolerance, "high_tolerance": high_tolerance,
+            "direction": input_direction, "tolerance": tolerance,
+            "high_tolerance": high_tolerance,
+            "high_tolerance_open": open_high_tol,
+            "high_tolerance_close": close_high_tol,
             "ah_open": ah_open, "ah_close": ah_close,
             "league": league_norm or None,
         },
@@ -533,7 +551,7 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                     tolerance: float = TOLERANCE, league: Optional[str] = None,
                     exclude_match_id: Optional[str] = None,
                     require_direction: bool = True,
-                    high_tolerance: float = 0.1,
+                    high_tolerance: float = HIGH_TOLERANCE,
                     ah_open: Optional[float] = None,
                     ah_close: Optional[float] = None) -> Dict:
     """核心匹配(胜平负 spf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
