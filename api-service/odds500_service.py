@@ -826,28 +826,57 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
     home_recent = _parse_recent(home_recent_html)
     away_recent = _parse_recent(away_recent_html)
 
-    # 抓取排名信息
+    # 抓取队名+排名: <div class="team_name">曼城[英超2]</div> / <h3 class="lslayout1_stit">西班牙[世2]</h3>
     home_rank = None
     away_rank = None
-    # 方式1: <div class="team_name">曼城[英超2]</div> (联赛)
-    # 方式2: <h3 class="lslayout1_stit">西班牙[世2]</h3> (国际赛)
+    home_team_name = None
+    away_team_name = None
+
+    def _split_team_label(raw: str):
+        """'凯拉特[欧冠]' / '曼城[英超2]' → (队名, 排名orNone)"""
+        text = (raw or "").strip()
+        if not text:
+            return None, None
+        m = re.match(r"^(.+?)\[(.+)\]$", text)
+        if not m:
+            return text, None
+        name = m.group(1).strip() or None
+        rank = None
+        rm = re.search(r"(\d+)", m.group(2))
+        if rm:
+            rank = int(rm.group(1))
+        return name, rank
+
     team_name_divs = soup.find_all("div", class_="team_name")
     if len(team_name_divs) >= 2:
-        m1 = re.search(r'\[.+?(\d+)\]', team_name_divs[0].get_text(strip=True))
-        m2 = re.search(r'\[.+?(\d+)\]', team_name_divs[1].get_text(strip=True))
-        if m1:
-            home_rank = int(m1.group(1))
-        if m2:
-            away_rank = int(m2.group(1))
-    if home_rank is None or away_rank is None:
+        home_team_name, hr = _split_team_label(team_name_divs[0].get_text(strip=True))
+        away_team_name, ar = _split_team_label(team_name_divs[1].get_text(strip=True))
+        if hr is not None:
+            home_rank = hr
+        if ar is not None:
+            away_rank = ar
+    if home_rank is None or away_rank is None or not home_team_name or not away_team_name:
         h3_tags = soup.find_all("h3", class_="lslayout1_stit")
         if len(h3_tags) >= 2:
-            m1 = re.search(r'\[.+?(\d+)\]', h3_tags[0].get_text(strip=True))
-            m2 = re.search(r'\[.+?(\d+)\]', h3_tags[1].get_text(strip=True))
-            if m1 and home_rank is None:
-                home_rank = int(m1.group(1))
-            if m2 and away_rank is None:
-                away_rank = int(m2.group(1))
+            hn, hr = _split_team_label(h3_tags[0].get_text(strip=True))
+            an, ar = _split_team_label(h3_tags[1].get_text(strip=True))
+            if not home_team_name:
+                home_team_name = hn
+            if not away_team_name:
+                away_team_name = an
+            if home_rank is None and hr is not None:
+                home_rank = hr
+            if away_rank is None and ar is not None:
+                away_rank = ar
+
+    # 500 球队稳定 ID + 页面别名（页头 odds_hd_team；同页链接可出现全称/简称）
+    home_team_id, away_team_id, home_aliases, away_aliases = _extract_team_identity(
+        soup, home_team_name, away_team_name
+    )
+    if not home_team_name and home_aliases:
+        home_team_name = min(home_aliases, key=len)
+    if not away_team_name and away_aliases:
+        away_team_name = min(away_aliases, key=len)
 
     return {
         "h2h": h2h,
@@ -857,4 +886,220 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
         "awayFuture": away_future,
         "homeRank": home_rank,
         "awayRank": away_rank,
+        "homeTeamName": home_team_name,
+        "awayTeamName": away_team_name,
+        "homeTeamId": home_team_id,
+        "awayTeamId": away_team_id,
+        "homeTeamAliases": home_aliases,
+        "awayTeamAliases": away_aliases,
     }
+
+
+def _extract_team_identity(
+    soup: BeautifulSoup,
+    home_team_name: Optional[str],
+    away_team_name: Optional[str],
+) -> Tuple[Optional[str], Optional[str], List[str], List[str]]:
+    """从 shuju 页提取主客 500 team_id 及别名。
+
+    页头: <a class="odds_hd_team" href="https://liansai.500.com/team/2814/">
+          <a href=".../team/2814/">阿拉木图凯拉特</a>
+    战绩区同 id 可能再出现简称「凯拉特」。
+    """
+    def _tid_from_href(href: str) -> Optional[str]:
+        m = re.search(r"/team/(\d+)/?", href or "")
+        return m.group(1) if m else None
+
+    home_id: Optional[str] = None
+    away_id: Optional[str] = None
+
+    # 1) 页头主客图链（顺序=主→客）
+    hd_ids: List[str] = []
+    for a in soup.select("a.odds_hd_team"):
+        tid = _tid_from_href(a.get("href", ""))
+        if tid and tid not in hd_ids:
+            hd_ids.append(tid)
+    if len(hd_ids) >= 1:
+        home_id = hd_ids[0]
+    if len(hd_ids) >= 2:
+        away_id = hd_ids[1]
+
+    # 2) 回退：odds_hd_list 里带队名的 /team/ 链接
+    if not home_id or not away_id:
+        list_ids: List[str] = []
+        for a in soup.select(".odds_hd_list a[href*='/team/']"):
+            tid = _tid_from_href(a.get("href", ""))
+            name = (a.get_text(strip=True) or "").strip()
+            if tid and name and tid not in list_ids:
+                list_ids.append(tid)
+        if not home_id and len(list_ids) >= 1:
+            home_id = list_ids[0]
+        if not away_id and len(list_ids) >= 2:
+            away_id = list_ids[1]
+
+    alias_map: Dict[str, List[str]] = {}
+    if home_id:
+        alias_map[home_id] = []
+    if away_id:
+        alias_map[away_id] = []
+
+    def _add_alias(tid: Optional[str], name: Optional[str]) -> None:
+        if not tid or tid not in alias_map or not name:
+            return
+        n = name.strip()
+        if n and n not in alias_map[tid]:
+            alias_map[tid].append(n)
+
+    _add_alias(home_id, home_team_name)
+    _add_alias(away_id, away_team_name)
+
+    for a in soup.select("a[href*='/team/']"):
+        tid = _tid_from_href(a.get("href", ""))
+        if tid not in alias_map:
+            continue
+        _add_alias(tid, a.get_text(strip=True))
+
+    home_aliases = sorted(alias_map.get(home_id, []), key=len, reverse=True) if home_id else []
+    away_aliases = sorted(alias_map.get(away_id, []), key=len, reverse=True) if away_id else []
+
+    return home_id, away_id, home_aliases, away_aliases
+
+
+# ============================================================
+# 竞彩对阵球队身价 (zx.500.com/jczq/worth)
+# ============================================================
+
+_WORTH_CACHE: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_WORTH_CACHE_TS: Dict[str, float] = {}
+_WORTH_CACHE_TTL = 600  # 10min
+
+
+def _parse_worth_euro_wan(text: str) -> Optional[float]:
+    """解析 '€  1260万' / '€1.2亿' → 万欧元数值。"""
+    if not text:
+        return None
+    s = re.sub(r"\s+", "", str(text))
+    m = re.search(r"([\d.]+)\s*亿", s)
+    if m:
+        try:
+            return float(m.group(1)) * 10000.0  # 亿→万
+        except ValueError:
+            return None
+    m = re.search(r"([\d.]+)\s*万", s)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    m = re.search(r"([\d.]+)", s)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _fmt_worth_wan(v: Optional[float]) -> str:
+    if v is None:
+        return "-"
+    if v >= 10000:
+        return f"€{v / 10000:.2f}亿".rstrip("0").rstrip(".")
+    if v == int(v):
+        return f"€{int(v)}万"
+    return f"€{v:.1f}万"
+
+
+def fetch_jczq_squad_worth(sale_date: str) -> Dict[str, Dict[str, Any]]:
+    """抓取竞彩对阵球队身价，按 match_code(如周三001) 索引。
+
+    Returns:
+        {
+          "周三001": {
+            "match_code": "周三001",
+            "league": "欧冠",
+            "home_team": "凯拉特",
+            "away_team": "奥莫尼亚",
+            "home_worth": 1260.0,   # 万欧元
+            "away_worth": 1507.0,
+            "home_worth_text": "€1260万",
+            "away_worth_text": "€1507万",
+            "ratio": "1/1.2",
+          },
+          ...
+        }
+    """
+    if not sale_date:
+        return {}
+    now = time.time()
+    cached = _WORTH_CACHE.get(sale_date)
+    if cached is not None and now - _WORTH_CACHE_TS.get(sale_date, 0) < _WORTH_CACHE_TTL:
+        return cached
+
+    url = f"https://zx.500.com/jczq/worth/?d={sale_date}"
+    try:
+        with httpx.Client(timeout=15, headers=HEADERS, follow_redirects=True) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            html = resp.content.decode("gbk", errors="replace")
+    except Exception as e:
+        logger.warning(f"抓取竞彩身价失败 date={sale_date}: {e}")
+        return cached or {}
+
+    # 校验标题日期，避免参数被忽略时误用今日数据
+    title_m = re.search(r"<title>\s*(\d{4}-\d{2}-\d{2})日", html)
+    if title_m and title_m.group(1) != sale_date:
+        logger.warning(
+            f"竞彩身价日期不匹配 request={sale_date} got={title_m.group(1)}，丢弃"
+        )
+        return {}
+
+    soup = BeautifulSoup(html, "html.parser")
+    result: Dict[str, Dict[str, Any]] = {}
+    for table in soup.find_all("table"):
+        headers = [th.get_text(strip=True) for th in table.find_all("th")]
+        if "主队身价" not in headers or "客队身价" not in headers:
+            continue
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if len(tds) < 8:
+                continue
+            code = tds[0].get_text(strip=True)
+            if not re.match(r"周[一二三四五六日]\d{3}$", code):
+                continue
+            league = tds[1].get_text(strip=True)
+            home_worth_raw = tds[3].get_text(strip=True)
+            home_team = tds[4].get_text(strip=True)
+            away_team = tds[6].get_text(strip=True)
+            away_worth_raw = tds[7].get_text(strip=True)
+            ratio = tds[8].get_text(strip=True) if len(tds) > 8 else ""
+            hw = _parse_worth_euro_wan(home_worth_raw)
+            aw = _parse_worth_euro_wan(away_worth_raw)
+            result[code] = {
+                "match_code": code,
+                "league": league,
+                "home_team": home_team,
+                "away_team": away_team,
+                "home_worth": hw,
+                "away_worth": aw,
+                "home_worth_text": _fmt_worth_wan(hw) if hw is not None else home_worth_raw,
+                "away_worth_text": _fmt_worth_wan(aw) if aw is not None else away_worth_raw,
+                "ratio": ratio,
+            }
+        break
+
+    _WORTH_CACHE[sale_date] = result
+    _WORTH_CACHE_TS[sale_date] = now
+    logger.info(f"竞彩身价 date={sale_date} 抓取 {len(result)} 场")
+    return result
+
+
+def get_match_squad_worth(
+    sale_date: Optional[str],
+    match_code: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """按售卖日+场次号取单场身价。"""
+    if not sale_date or not match_code:
+        return None
+    return fetch_jczq_squad_worth(sale_date).get(str(match_code).strip()) or None
+

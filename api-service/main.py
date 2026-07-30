@@ -21,9 +21,9 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from database import init_db, fetch_sync_status
-from repository import OddsRepository
+from repository import OddsRepository, derive_sale_date
 from user_repository import UserRepository
-from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history, fetch_match_data
+from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history, fetch_match_data, get_match_squad_worth
 from predict_service import predict_match
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
@@ -212,6 +212,44 @@ class OcrParseImageRequest(BaseModel):
     image_base64: str = Field(..., description="base64编码的图片")
 
 
+def resolve_had_is_single(
+    match_is_single: Any,
+    odds_data: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """胜平负单固口径: matches.is_single 兜底, had.is_single 优先。
+
+    体彩顶层 bettingSingle 偶发为 0,但 poolList.HAD.single=1(仅胜平负开单关)。
+    F7/列表展示必须 OR had,与 batch-similar 一致;不用 hhad/任意玩法 any(pool)。
+    """
+    if match_is_single:
+        return True
+    had = (odds_data or {}).get("had") or {}
+    return int(had.get("is_single") or 0) == 1
+
+
+def _attach_squad_worth(match_info: Dict[str, Any], match: Dict[str, Any]) -> None:
+    """仅未开赛场注入身价；已结束/历史场不抓。
+
+    500 历史日身价页是「当前身价」套在旧对阵上，无赛日快照参考价值，
+    注入会污染 AI prompt，故历史场保持「无身价数据」。
+    """
+    import time as _time
+    if match.get("home_score") is not None or match.get("away_score") is not None:
+        return
+    if str(match.get("match_status") or "") == "finished":
+        return
+    ts = match.get("match_timestamp")
+    if ts is not None and int(ts) < int(_time.time()):
+        return
+    try:
+        sale_date = derive_sale_date(match) or match.get("match_date")
+        worth = get_match_squad_worth(sale_date, match.get("match_code"))
+        if worth:
+            match_info["squad_worth"] = worth
+    except Exception as e:
+        logger.warning(f"注入球队身价失败: {e}")
+
+
 def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
     kickoff_iso = None
     if row.get("match_timestamp"):
@@ -253,6 +291,11 @@ async def startup_event():
     不启动定时爬虫任务（数据同步由 mysql-backup 服务器负责）
     """
     init_db()
+    try:
+        from team_identity import ensure_team_identity_schema
+        ensure_team_identity_schema()
+    except Exception as e:
+        logger.warning(f"球队身份表初始化失败: {e}")
 
     # 后台线程预热 OCR 模型，避免首次请求阻塞
     if OCR_AVAILABLE:
@@ -1145,6 +1188,8 @@ def list_predict_matches(
         item = format_match(row)
         wdl = odds_map.get(row["match_id"], {})
         item["wdl"] = wdl
+        # 与 F7/batch-similar 同口径: matches OR had(胜平负单固)
+        item["isSingle"] = resolve_had_is_single(item.get("isSingle"), wdl)
         ts = row.get("match_timestamp")
         has_score = row.get("home_score") is not None
         item["matchStatus"] = "finished" if (has_score or (ts and ts < now_ts)) else "not_started"
@@ -1298,7 +1343,7 @@ def batch_similar(
             item["handicap"] = float(wdl["hhad"]["handicap"])
         # 同赔页单关标记按胜平负单固口径: matches.is_single 兜底, had.is_single 优先。
         # 不用任意玩法 any(pool), 避免 hhad 等玩法污染 F7/同赔的单关判断。
-        item["isSingle"] = bool(item.get("isSingle") or int((wdl.get("had") or {}).get("is_single") or 0) == 1)
+        item["isSingle"] = resolve_had_is_single(item.get("isSingle"), wdl)
         # 亚盘初/终(标准负=主让)
         ah = ah_map.get(mid) or {}
         ah_open = ah.get("open")
@@ -1428,8 +1473,9 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
 
-    # F7 单关口径: 仅 matches.is_single(胜平负单固), 不用赔率表 any(pool)
-    is_single = bool(match.get("is_single"))
+    # 获取让球盘口 + F7 单关口径(matches OR had 胜平负单固, 不用 hhad/any)
+    odds_data = repo.get_wdl_odds(match_id)
+    is_single = resolve_had_is_single(match.get("is_single"), odds_data)
 
     # 构建比赛信息
     match_info = {
@@ -1442,9 +1488,8 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
         "match_date": match.get("match_date"),
         "is_single": is_single,
     }
+    _attach_squad_worth(match_info, match)
 
-    # 获取让球盘口
-    odds_data = repo.get_wdl_odds(match_id)
     if odds_data and odds_data.get("hhad"):
         handicap_val = odds_data["hhad"].get("handicap")
         if handicap_val is not None:
@@ -1490,6 +1535,20 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
                 match_info["home_rank"] = match_data["homeRank"]
             if match_data.get("awayRank"):
                 match_info["away_rank"] = match_data["awayRank"]
+            if match_data.get("homeTeamName"):
+                match_info["home_team_500"] = match_data["homeTeamName"]
+            if match_data.get("awayTeamName"):
+                match_info["away_team_500"] = match_data["awayTeamName"]
+            if match_data.get("homeTeamId"):
+                match_info["home_team_id_500"] = match_data["homeTeamId"]
+            if match_data.get("awayTeamId"):
+                match_info["away_team_id_500"] = match_data["awayTeamId"]
+            try:
+                from team_identity import enrich_match_data_aliases, upsert_from_match_data
+                enrich_match_data_aliases(match_data)
+                upsert_from_match_data(match_id, match, match_data)
+            except Exception as e:
+                logger.warning(f"沉淀500球队身份失败: {e}")
         except Exception as e:
             logger.warning(f"获取基本面数据失败: {e}")
         try:
@@ -1626,8 +1685,9 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
 
-    # F7 单关口径: 仅 matches.is_single(胜平负单固)
-    is_single = bool(match.get("is_single"))
+    odds_data = repo.get_wdl_odds(match_id)
+    # F7 单关口径: matches OR had(胜平负单固)
+    is_single = resolve_had_is_single(match.get("is_single"), odds_data)
 
     match_info = {
         "league": match.get("league_name"),
@@ -1638,8 +1698,8 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
         "match_date": match.get("match_date"),
         "is_single": is_single,
     }
+    _attach_squad_worth(match_info, match)
 
-    odds_data = repo.get_wdl_odds(match_id)
     if odds_data and odds_data.get("hhad"):
         handicap_val = odds_data["hhad"].get("handicap")
         if handicap_val is not None:
@@ -1680,6 +1740,20 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
                 match_info["home_rank"] = match_data["homeRank"]
             if match_data.get("awayRank"):
                 match_info["away_rank"] = match_data["awayRank"]
+            if match_data.get("homeTeamName"):
+                match_info["home_team_500"] = match_data["homeTeamName"]
+            if match_data.get("awayTeamName"):
+                match_info["away_team_500"] = match_data["awayTeamName"]
+            if match_data.get("homeTeamId"):
+                match_info["home_team_id_500"] = match_data["homeTeamId"]
+            if match_data.get("awayTeamId"):
+                match_info["away_team_id_500"] = match_data["awayTeamId"]
+            try:
+                from team_identity import enrich_match_data_aliases, upsert_from_match_data
+                enrich_match_data_aliases(match_data)
+                upsert_from_match_data(match_id, match, match_data)
+            except Exception as e:
+                logger.warning(f"[worldcup] 沉淀500球队身份失败: {e}")
         except Exception as e:
             logger.warning(f"[worldcup] 获取基本面数据失败: {e}")
         try:

@@ -12,9 +12,11 @@ CREATE TABLE IF NOT EXISTS matches (
     match_time VARCHAR(20),
     match_timestamp BIGINT,
     home_team_id VARCHAR(100),
+    home_team_id_500 VARCHAR(32) DEFAULT NULL COMMENT '500.com team id 主队',
     home_team_name VARCHAR(200),
     home_team_rank VARCHAR(50),
     away_team_id VARCHAR(100),
+    away_team_id_500 VARCHAR(32) DEFAULT NULL COMMENT '500.com team id 客队',
     away_team_name VARCHAR(200),
     away_team_rank VARCHAR(50),
     is_single TINYINT DEFAULT 0,
@@ -111,4 +113,29 @@ CREATE TABLE IF NOT EXISTS prediction_history (
     predicted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_match_type (match_id, predict_type),
     INDEX idx_pred_match (match_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 500.com 球队身份（匹配主键）+ 体彩对照
+CREATE TABLE IF NOT EXISTS teams_500 (
+    team_id VARCHAR(32) PRIMARY KEY,
+    primary_name VARCHAR(200) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS team_aliases_500 (
+    team_id VARCHAR(32) NOT NULL,
+    alias VARCHAR(200) NOT NULL,
+    source VARCHAR(40) DEFAULT 'shuju',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (team_id, alias),
+    INDEX idx_alias (alias)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS team_id_map (
+    sporttery_team_id VARCHAR(100) NOT NULL,
+    team_id_500 VARCHAR(32) NOT NULL,
+    evidence_match_id VARCHAR(100) DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (sporttery_team_id, team_id_500),
+    INDEX idx_map_500 (team_id_500)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

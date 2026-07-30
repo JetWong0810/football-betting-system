@@ -108,7 +108,7 @@
         </view>
 
         <view class="reverse-tag" v-if="prediction.overallReverse">
-          <text class="reverse-text">逆向修正：多数因子共识一致，触发反向机制</text>
+          <text class="reverse-text">{{ reverseTagText }}</text>
         </view>
 
         <!-- 已结束比赛：实际结果对比 (有比分才展示) -->
@@ -384,7 +384,7 @@ const filterLeague = ref('all')
 const analyzing = ref(false)
 const analysisComplete = ref(false)
 const analysisSteps = ref([])
-const prediction = ref({ direction: '', confidence: 0, overallReverse: false })
+const prediction = ref({ direction: '', confidence: 0, overallReverse: false, consensusDir: null })
 const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
 const similarMatches = ref([])
@@ -555,7 +555,7 @@ onLoad((query) => {
   // 进入页先清空上次预测展示(不再从 storage 恢复)
   analysisSteps.value = []
   analysisComplete.value = false
-  prediction.value = { direction: '', confidence: 0, overallReverse: false }
+  prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
   aiAnalysis.value = ''
   selectedMatch.value = null
 
@@ -626,7 +626,7 @@ async function fetchMatches() {
         if (pendingAutoStart.value) {
           analysisSteps.value = []
           analysisComplete.value = false
-          prediction.value = { direction: '', confidence: 0, overallReverse: false }
+          prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
           aiAnalysis.value = ''
           // 等 onShow 跳过缓存恢复后再开跑; 标志在回调里清
           setTimeout(() => {
@@ -794,6 +794,14 @@ function directionLabel(dir) {
   return '不明'
 }
 
+const reverseTagText = computed(() => {
+  const p = prediction.value
+  if (!p?.overallReverse) return ''
+  const consensus = directionLabel(p.consensusDir || (p.direction === 'upper' ? 'lower' : 'upper'))
+  const final = directionLabel(p.direction)
+  return `逆向修正：展示共识偏${consensus}，加权仍跟风，已整体反向 → ${final}`
+})
+
 const predictionHit = computed(() => {
   if (!actualDirection.value || !prediction.value.direction) return false
   if (prediction.value.direction === 'neutral') return false
@@ -807,7 +815,7 @@ function selectMatch(match) {
   showPicker.value = false
   analysisSteps.value = []
   analysisComplete.value = false
-  prediction.value = { direction: '', confidence: 0, overallReverse: false }
+  prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
   aiAnalysis.value = ''
   uni.removeStorageSync('predict-last-result')
 }
@@ -897,7 +905,8 @@ async function startAnalysis() {
     prediction.value = {
       direction: pred.direction || 'neutral',
       confidence: pred.confidence || 60,
-      overallReverse: pred.overall_reverse || false
+      overallReverse: pred.overall_reverse || false,
+      consensusDir: pred.consensus_dir || null,
     }
     aiAnalysis.value = pred.analysis || '分析完成'
     analysisComplete.value = true

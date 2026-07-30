@@ -127,7 +127,7 @@ class SportterySyncService:
             for match_data in date_group.get("subMatchList", []):
                 if pool_name == "had_hhad":
                     single_flags = extract_pool_single_flags(match_data)
-                    match = self.build_match(match_data)
+                    match = self.build_match(match_data, single_flags)
                     self.repository.upsert_match(match)
                     self.stats["matches"] += 1
                     for odds in self.build_had_hhad(match_data, single_flags):
@@ -147,7 +147,7 @@ class SportterySyncService:
                     self.repository.upsert_odds_hafu_bulk(str(match_data.get("matchId")), items)
                     self.stats["odds"] += len(items)
 
-    def build_match(self, match_data: Dict) -> Dict:
+    def build_match(self, match_data: Dict, single_flags: Optional[Dict[str, int]] = None) -> Dict:
         match_id = str(match_data.get("matchId"))
         match_date = match_data.get("matchDate")
         match_time = match_data.get("matchTime")
@@ -166,6 +166,9 @@ class SportterySyncService:
             "Cancelled": "cancelled",
         }
         match_status = status_map.get(match_data.get("matchStatus"), "not_started")
+        # 胜平负单固: 顶层 bettingSingle 偶发为0但 poolList.HAD.single=1, OR 写入 matches
+        top_single = parse_single_flag(match_data.get("bettingSingle"))
+        had_single = int((single_flags or {}).get("had") or 0)
         return {
             "match_id": match_id,
             "match_number": match_data.get("matchNumDate"),
@@ -183,7 +186,7 @@ class SportterySyncService:
             "away_team_id": match_data.get("awayTeamId"),
             "away_team_name": match_data.get("awayTeamAbbName"),
             "away_team_rank": match_data.get("awayRank"),
-            "is_single": parse_single_flag(match_data.get("bettingSingle")),
+            "is_single": 1 if (top_single or had_single) else 0,
             "match_status": match_status,
             "notice": match_data.get("matchTips"),
             "odds_update_time": match_data.get("oddsUpdateTime"),

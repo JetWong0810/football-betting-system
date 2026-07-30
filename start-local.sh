@@ -32,17 +32,29 @@ print_message() {
     echo -e "${color}${message}${NC}"
 }
 
-# Function: Check if process is running
+# Function: Check if process is running (pidfile 或端口任一存活即算运行)
 is_running() {
     local pid_file=$1
+    local port=$2
     if [ -f "$pid_file" ]; then
         local pid=$(cat "$pid_file")
-        if ps -p "$pid" > /dev/null 2>&1; then
+        if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
             return 0
-        else
-            rm -f "$pid_file"
-            return 1
         fi
+        # npm 会再 fork 子进程: pidfile 死了但端口还在 → 按端口判定
+        if [ -n "$port" ] && check_port "$port"; then
+            local real_pid
+            real_pid=$(lsof -ti:"$port" -sTCP:LISTEN 2>/dev/null | head -1)
+            if [ -n "$real_pid" ]; then
+                echo "$real_pid" > "$pid_file"
+                return 0
+            fi
+        fi
+        rm -f "$pid_file"
+        return 1
+    fi
+    if [ -n "$port" ] && check_port "$port"; then
+        return 0
     fi
     return 1
 }
@@ -51,17 +63,27 @@ is_running() {
 stop_service() {
     local name=$1
     local pid_file=$2
+    local port=$3
     
-    if is_running "$pid_file"; then
-        local pid=$(cat "$pid_file")
-        print_message "$YELLOW" "停止 $name (PID: $pid)..."
-        kill "$pid" 2>/dev/null || true
-        sleep 2
-        
-        # Force kill if still running
-        if ps -p "$pid" > /dev/null 2>&1; then
-            print_message "$YELLOW" "强制停止 $name..."
-            kill -9 "$pid" 2>/dev/null || true
+    if is_running "$pid_file" "$port"; then
+        local pid=""
+        if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+        fi
+        if [ -z "$pid" ] && [ -n "$port" ]; then
+            pid=$(lsof -ti:"$port" -sTCP:LISTEN 2>/dev/null | head -1)
+        fi
+        if [ -n "$pid" ]; then
+            print_message "$YELLOW" "停止 $name (PID: $pid)..."
+            # 杀进程组，覆盖 npm/vite 子进程
+            kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+            sleep 2
+            
+            # Force kill if still running
+            if ps -p "$pid" > /dev/null 2>&1; then
+                print_message "$YELLOW" "强制停止 $name..."
+                kill -9 -- -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+            fi
         fi
         
         rm -f "$pid_file"
@@ -74,8 +96,8 @@ stop_service() {
 # Function: Stop all services
 stop_all() {
     print_message "$YELLOW" "=== 停止所有服务 ==="
-    stop_service "API Service" "$API_PID_FILE"
-    stop_service "Frontend" "$FRONTEND_PID_FILE"
+    stop_service "API Service" "$API_PID_FILE" 7001
+    stop_service "Frontend" "$FRONTEND_PID_FILE" 5173
     
     # Also kill by port
     print_message "$YELLOW" "清理端口占用..."
@@ -118,9 +140,9 @@ start_api() {
     print_message "$YELLOW" "=== 启动 API Service ==="
     
     # Stop existing process if running
-    if is_running "$API_PID_FILE" || check_port 7001; then
+    if is_running "$API_PID_FILE" 7001 || check_port 7001; then
         print_message "$YELLOW" "检测到 API Service 已在运行，先停止..."
-        stop_service "API Service" "$API_PID_FILE"
+        stop_service "API Service" "$API_PID_FILE" 7001
         lsof -ti:7001 | xargs kill -9 2>/dev/null || true
         sleep 1
     fi
@@ -140,8 +162,27 @@ start_api() {
     fi
     
     print_message "$YELLOW" "启动 API Service (端口 7001)..."
-    nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 7001 > "$API_LOG" 2>&1 &
-    echo $! > "$API_PID_FILE"
+    # 双 fork + setsid 脱离 Cursor/父 shell 进程组，避免会话结束被连带杀掉
+    python3 - "$API_DIR" "$API_LOG" "$API_PID_FILE" <<'PY'
+import os, sys
+api_dir, log_path, pid_path = sys.argv[1], sys.argv[2], sys.argv[3]
+if os.fork() > 0:
+    sys.exit(0)
+os.setsid()
+if os.fork() > 0:
+    sys.exit(0)
+os.chdir(api_dir)
+os.environ["PYTHONUNBUFFERED"] = "1"
+with open(log_path, "a", buffering=1) as log:
+    os.dup2(log.fileno(), 1)
+    os.dup2(log.fileno(), 2)
+devnull = os.open(os.devnull, os.O_RDONLY)
+os.dup2(devnull, 0)
+os.close(devnull)
+with open(pid_path, "w") as f:
+    f.write(str(os.getpid()))
+os.execvp(sys.executable, [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7001"])
+PY
     
     # Wait for service to start
     if wait_for_port 7001 "API Service"; then
@@ -162,9 +203,9 @@ start_frontend() {
     print_message "$YELLOW" "=== 启动 Frontend ==="
     
     # Stop existing process if running
-    if is_running "$FRONTEND_PID_FILE" || check_port 5173; then
+    if is_running "$FRONTEND_PID_FILE" 5173 || check_port 5173; then
         print_message "$YELLOW" "检测到 Frontend 已在运行，先停止..."
-        stop_service "Frontend" "$FRONTEND_PID_FILE"
+        stop_service "Frontend" "$FRONTEND_PID_FILE" 5173
         lsof -ti:5173 | xargs kill -9 2>/dev/null || true
         sleep 1
     fi
@@ -178,8 +219,27 @@ start_frontend() {
     fi
     
     print_message "$YELLOW" "启动 Frontend (端口 5173)..."
-    nohup npm run dev:h5 > "$FRONTEND_LOG" 2>&1 &
-    echo $! > "$FRONTEND_PID_FILE"
+    # 双 fork + setsid 脱离 Cursor/父 shell 进程组
+    python3 - "$FRONTEND_DIR" "$FRONTEND_LOG" "$FRONTEND_PID_FILE" <<'PY'
+import os, sys, shutil
+fe_dir, log_path, pid_path = sys.argv[1], sys.argv[2], sys.argv[3]
+npm = shutil.which("npm") or "npm"
+if os.fork() > 0:
+    sys.exit(0)
+os.setsid()
+if os.fork() > 0:
+    sys.exit(0)
+os.chdir(fe_dir)
+with open(log_path, "a", buffering=1) as log:
+    os.dup2(log.fileno(), 1)
+    os.dup2(log.fileno(), 2)
+devnull = os.open(os.devnull, os.O_RDONLY)
+os.dup2(devnull, 0)
+os.close(devnull)
+with open(pid_path, "w") as f:
+    f.write(str(os.getpid()))
+os.execvp(npm, [npm, "run", "dev:h5"])
+PY
     
     # Wait for service to start
     if wait_for_port 5173 "Frontend"; then
@@ -198,14 +258,14 @@ start_frontend() {
 show_status() {
     print_message "$YELLOW" "=== 服务状态 ==="
     
-    if is_running "$API_PID_FILE"; then
-        print_message "$GREEN" "✓ API Service: 运行中 (PID: $(cat $API_PID_FILE), 端口 7001)"
+    if is_running "$API_PID_FILE" 7001; then
+        print_message "$GREEN" "✓ API Service: 运行中 (PID: $(cat $API_PID_FILE 2>/dev/null || echo '?'), 端口 7001)"
     else
         print_message "$RED" "✗ API Service: 未运行"
     fi
     
-    if is_running "$FRONTEND_PID_FILE"; then
-        print_message "$GREEN" "✓ Frontend: 运行中 (PID: $(cat $FRONTEND_PID_FILE), 端口 5173)"
+    if is_running "$FRONTEND_PID_FILE" 5173; then
+        print_message "$GREEN" "✓ Frontend: 运行中 (PID: $(cat $FRONTEND_PID_FILE 2>/dev/null || echo '?'), 端口 5173)"
     else
         print_message "$RED" "✗ Frontend: 未运行"
     fi
