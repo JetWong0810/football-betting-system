@@ -81,9 +81,9 @@
         >命中</text>
         <text
           class="ctrl-btn sample"
-          :class="{ active: dirFilters.includes('sample5') }"
-          @tap="toggleFilter('sample5')"
-        >同赔≥5</text>
+          :class="{ active: dirFilters.includes('sample8') }"
+          @tap="toggleFilter('sample8')"
+        >同赔≥8</text>
         <text
           class="ctrl-btn hitpct"
           :class="{ active: dirFilters.includes('hitPct65') }"
@@ -624,16 +624,16 @@ const filteredItems = computed(() => {
   let list = sortedItems.value
   const dirs = dirFilters.value
   if (dirs.length) {
-    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample5' && k !== 'hitPct65' && k !== 'score60' && k !== 'single')
+    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample8' && k !== 'hitPct65' && k !== 'score60' && k !== 'single')
     const needHit = dirs.includes('hit')
-    const needSample5 = dirs.includes('sample5')
+    const needSample8 = dirs.includes('sample8')
     const needHitPct65 = dirs.includes('hitPct65')
     const needScore60 = dirs.includes('score60')
     const needSingle = dirs.includes('single')
     list = list.filter(it => {
       const okDir = !dirSet.length || dirSet.includes(it.f6?.direction || 'neutral')
       const okHit = !needHit || it.hit === true
-      const okSample = !needSample5 || similarHistCount(it) >= 5
+      const okSample = !needSample8 || similarHistCount(it) >= 8
       const okHitPct = !needHitPct65 || itemHitPct(it) >= 65
       const okScore = !needScore60 || itemRefScore(it) >= 60
       const okSingle = !needSingle || !!it.isSingle
