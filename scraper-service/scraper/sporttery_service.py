@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import httpx
@@ -9,6 +9,45 @@ from repository import OddsRepository
 from scraper.score_500 import fetch_match_score, clear_cache as clear_score_cache
 
 logger = logging.getLogger(__name__)
+
+# 体彩 matchDate/matchTime 是北京墙钟；容器常为 UTC，naive .timestamp() 会 +8h
+_BJ = timezone(timedelta(hours=8))
+
+
+def _normalize_wall_clock(match_date, match_time) -> Optional[tuple]:
+    """归一化 DB/API 的日期时间 → (YYYY-MM-DD, HH:MM:SS)。"""
+    if match_date is None or match_time is None or match_time == "":
+        return None
+    if hasattr(match_date, "strftime"):
+        d = match_date.strftime("%Y-%m-%d")
+    else:
+        d = str(match_date)[:10]
+    if isinstance(match_time, timedelta):
+        total = int(match_time.total_seconds())
+        if total < 0:
+            return None
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        t = f"{h:02d}:{m:02d}:{s:02d}"
+    else:
+        t = str(match_time).strip()
+        if len(t) == 5 and t[2] == ":":
+            t = t + ":00"
+    return d, t
+
+
+def beijing_kickoff_ts(match_date, match_time) -> Optional[int]:
+    """把竞彩开赛墙钟(北京)转成 unix 秒。"""
+    norm = _normalize_wall_clock(match_date, match_time)
+    if not norm:
+        return None
+    d, t = norm
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return int(datetime.strptime(f"{d} {t}", fmt).replace(tzinfo=_BJ).timestamp())
+        except ValueError:
+            continue
+    return None
 
 
 def derive_sale_date(match: Dict) -> Optional[str]:
@@ -151,15 +190,11 @@ class SportterySyncService:
         match_id = str(match_data.get("matchId"))
         match_date = match_data.get("matchDate")
         match_time = match_data.get("matchTime")
-        timestamp = None
-        if match_date and match_time:
-            try:
-                dt = datetime.strptime(f"{match_date} {match_time}", "%Y-%m-%d %H:%M:%S")
-                timestamp = int(dt.timestamp())
-            except ValueError:
-                dt = None
-        else:
-            dt = None
+        timestamp = (
+            beijing_kickoff_ts(match_date, match_time)
+            if match_date and match_time
+            else None
+        )
         status_map = {
             "Selling": "not_started",
             "Finished": "finished",

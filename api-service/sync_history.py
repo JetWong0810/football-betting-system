@@ -10,9 +10,11 @@
 
 import sqlite3
 import pymysql
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import settings
+
+_BJ = timezone(timedelta(hours=8))
 
 JCZQ_DB = "/Users/jetwong/Projects/personal/world-cup/data/jczq.db"
 
@@ -92,19 +94,19 @@ def sync_matches(sqlite_conn, mysql_conn):
         match_num = row["match_num"] or ""
         kickoff_time = row["kickoff_time"] or ""
 
-        # 解析开赛时间戳
+        # 解析开赛时间戳（竞彩墙钟=北京，勿用容器本地 TZ）
         match_timestamp = None
         if kickoff_time:
             try:
                 year = int(match_date[:4])
                 time_str = f"{year}-{kickoff_time}"
-                dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+                dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M").replace(tzinfo=_BJ)
                 match_timestamp = int(dt.timestamp())
             except Exception:
                 pass
         if match_timestamp is None and match_date:
             try:
-                dt = datetime.strptime(match_date, "%Y-%m-%d")
+                dt = datetime.strptime(match_date, "%Y-%m-%d").replace(tzinfo=_BJ)
                 match_timestamp = int(dt.timestamp())
             except Exception:
                 pass
