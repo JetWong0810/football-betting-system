@@ -1117,23 +1117,19 @@ class PredictRequest(BaseModel):
 
 
 def _predict_is_finished_sql(alias: str = "") -> str:
-    """与赛果口径一致的完赛判定: 已开赛(timestamp<now) 或 已有比分。
+    """完赛判定: 仅已有比分。
 
-    timestamp 为空但有比分 → 完赛(修复误留未开始); 无时间无比分 → 仍算未开始。
+    不用 match_timestamp<now——开赛后/进行中无比分时仍应留在「在售」,
+    否则同赔已结束列表会混进未踢完场(如美职跨午场)。
     """
     p = f"{alias}." if alias else ""
-    return (
-        f"(({p}match_timestamp IS NOT NULL AND {p}match_timestamp < %s) "
-        f"OR {p}home_score IS NOT NULL)"
-    )
+    return f"({p}home_score IS NOT NULL)"
 
 
 def _predict_is_not_started_sql(alias: str = "") -> str:
+    """在售/未出赛果: 无比分(含未开赛与进行中)。"""
     p = f"{alias}." if alias else ""
-    return (
-        f"({p}home_score IS NULL AND "
-        f"({p}match_timestamp IS NULL OR {p}match_timestamp >= %s))"
-    )
+    return f"({p}home_score IS NULL)"
 
 
 @app.get("/api/predict/matches")
@@ -1144,9 +1140,7 @@ def list_predict_matches(
     page_size: int = Query(default=50, ge=1, le=100),
 ):
     """获取预测页可选赛事列表。日期按竞彩售卖期(match_number)归期, 与赛果查询一致。"""
-    import time as _time
     offset = (page - 1) * page_size
-    now_ts = int(_time.time())
 
     where: List = []
     params: List = []
@@ -1154,11 +1148,9 @@ def list_predict_matches(
     if status == "finished":
         # 已结束含历史导入 jczq_*(与赛果一致); 未开始只看体彩在售 ID
         where.append(_predict_is_finished_sql())
-        params.append(now_ts)
     else:
         where.append("match_id NOT LIKE 'jczq%%'")
         where.append(_predict_is_not_started_sql())
-        params.append(now_ts)
 
     # 与赛果页相同: 按售卖期号前缀过滤(含跨凌晨场), 不用 match_date
     if date:
@@ -1190,9 +1182,8 @@ def list_predict_matches(
         item["wdl"] = wdl
         # 与 F7/batch-similar 同口径: matches OR had(胜平负单固)
         item["isSingle"] = resolve_had_is_single(item.get("isSingle"), wdl)
-        ts = row.get("match_timestamp")
         has_score = row.get("home_score") is not None
-        item["matchStatus"] = "finished" if (has_score or (ts and ts < now_ts)) else "not_started"
+        item["matchStatus"] = "finished" if has_score else "not_started"
         if wdl.get("hhad") and wdl["hhad"].get("handicap") is not None:
             item["handicap"] = float(wdl["hhad"]["handicap"])
         items.append(item)
@@ -1219,16 +1210,13 @@ def batch_similar(
     if not date:
         date = _time.strftime("%Y-%m-%d", _time.localtime())
 
-    now_ts = int(_time.time())
     where: List = []
     params: List = []
     if status == "finished":
         where.append(_predict_is_finished_sql())
-        params.append(now_ts)
     else:
         where.append("match_id NOT LIKE 'jczq%%'")
         where.append(_predict_is_not_started_sql())
-        params.append(now_ts)
     # 未开始/已结束统一按售卖期号归期(与赛果查询一致, 含跨凌晨场)
     date_prefix = date[2:].replace("-", "")
     where.append("match_number LIKE %s")
@@ -1425,9 +1413,6 @@ def list_predict_dates(
     status: str = Query(default="finished", description="not_started 或 finished"),
 ):
     """获取预测页可选日期列表——按售卖期号(match_number前6位)分组，与赛果查询一致"""
-    import time as _time
-    now_ts = int(_time.time())
-
     from database import get_db
     with get_db() as conn:
         cur = conn.cursor()
@@ -1441,7 +1426,6 @@ def list_predict_dates(
                    GROUP BY sale_prefix
                    ORDER BY sale_prefix DESC
                    LIMIT 400""",
-                (now_ts,),
             )
         else:
             cur.execute(
@@ -1453,7 +1437,6 @@ def list_predict_dates(
                    GROUP BY sale_prefix
                    ORDER BY sale_prefix ASC
                    LIMIT 30""",
-                (now_ts,),
             )
         dates = []
         for r in cur.fetchall():
