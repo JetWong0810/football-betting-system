@@ -340,6 +340,8 @@ const loading = ref(true)
 const items = ref([])
 const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
 const saleDates = ref([])
+/** 翻页用: 在售∪已结束售卖日, 避免「在售」稀疏日期导致跨大半个月 */
+const navDates = ref([])
 const showCalendar = ref(false)
 const calYear = ref(2026)
 const calMonth = ref(6)
@@ -359,18 +361,19 @@ const sortMode = ref('default')
 const isFinished = computed(() => status.value === 'finished')
 const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0)
 const dateLabel = computed(() => (date.value || '').slice(5) || '--')
-const saleDateSet = computed(() => new Set(saleDates.value))
+/** 日历打点用全量售卖日, 方便从在售点进已结束期 */
+const saleDateSet = computed(() => new Set(navDates.value.length ? navDates.value : saleDates.value))
 
-/** 按日历早晚翻期, 不依赖 API 返回升/降序 */
-const sortedSaleDates = computed(() => [...saleDates.value].sort())
-const dateIndex = computed(() => sortedSaleDates.value.indexOf(date.value))
+/** 按日历早晚翻期; 用 navDates(双状态并集) */
+const sortedNavDates = computed(() => [...navDates.value].sort())
+const dateIndex = computed(() => sortedNavDates.value.indexOf(date.value))
 const prevSaleDate = computed(() => {
   const i = dateIndex.value
-  return i > 0 ? sortedSaleDates.value[i - 1] : null
+  return i > 0 ? sortedNavDates.value[i - 1] : null
 })
 const nextSaleDate = computed(() => {
   const i = dateIndex.value
-  const list = sortedSaleDates.value
+  const list = sortedNavDates.value
   return i >= 0 && i < list.length - 1 ? list[i + 1] : null
 })
 
@@ -451,6 +454,9 @@ async function switchDate(next) {
   if (!saleDates.value.includes(next)) {
     saleDates.value = [next, ...saleDates.value]
   }
+  if (!navDates.value.includes(next)) {
+    navDates.value = [...navDates.value, next].sort()
+  }
   if (simBet.hasLegs) simBet.clearLegs()
   await loadBatch({ autoFlipStatus: true })
 }
@@ -470,17 +476,22 @@ async function switchStatus(next) {
 }
 
 async function loadSaleDates() {
+  const otherStatus = status.value === 'not_started' ? 'finished' : 'not_started'
   try {
-    const data = await request({
-      url: '/api/predict/dates',
-      data: { status: status.value },
-    })
-    saleDates.value = data?.dates || []
+    const [cur, other] = await Promise.all([
+      request({ url: '/api/predict/dates', data: { status: status.value } }),
+      request({ url: '/api/predict/dates', data: { status: otherStatus } }),
+    ])
+    saleDates.value = cur?.dates || []
     if (date.value && !saleDates.value.includes(date.value)) {
       saleDates.value = [date.value, ...saleDates.value]
     }
+    const merged = new Set([...(cur?.dates || []), ...(other?.dates || [])])
+    if (date.value) merged.add(date.value)
+    navDates.value = [...merged].sort()
   } catch {
     saleDates.value = date.value ? [date.value] : []
+    navDates.value = [...saleDates.value]
   }
 }
 

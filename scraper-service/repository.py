@@ -298,6 +298,100 @@ class OddsRepository:
         with get_db() as conn:
             _execute(conn, sql, (home_score, away_score, match_id))
 
+    def get_match_timestamp(self, match_id: str) -> Optional[int]:
+        """取开赛 unix 秒, 供终盘 change_time 对齐 kickoff。"""
+        if not match_id:
+            return None
+        with get_db() as conn:
+            cur = _execute(
+                conn,
+                "SELECT match_timestamp FROM matches WHERE match_id=%s",
+                (match_id,),
+            )
+            row = cur.fetchone()
+        if not row or row.get("match_timestamp") is None:
+            return None
+        try:
+            return int(row["match_timestamp"])
+        except (TypeError, ValueError):
+            return None
+
+    def apply_closing_spf(
+        self,
+        match_id: str,
+        win: float,
+        draw: float,
+        lose: float,
+        change_time: Optional[datetime] = None,
+    ) -> bool:
+        """用体彩赛果终赔校正 spf 终盘。
+
+        在售池抓取常在封盘前停更, history 最后一条≠真终盘。
+        与最后一条差异>0.005 则 append; 同步更新 odds_win_draw_lose.had。
+        返回是否写入 history。
+        """
+        if not match_id:
+            return False
+        try:
+            win_f, draw_f, lose_f = float(win), float(draw), float(lose)
+        except (TypeError, ValueError):
+            return False
+        if win_f <= 0 or draw_f <= 0 or lose_f <= 0:
+            return False
+
+        with get_db() as conn:
+            cur = _execute(
+                conn,
+                """SELECT odds_win, odds_draw, odds_loss, change_time FROM jczq_odds_history
+                   WHERE match_id=%s AND odds_type='spf'
+                   ORDER BY change_time DESC LIMIT 1""",
+                (match_id,),
+            )
+            prev = cur.fetchone()
+            if prev:
+                pw, pd, pl = float(prev["odds_win"]), float(prev["odds_draw"]), float(prev["odds_loss"])
+                if abs(win_f - pw) < 0.005 and abs(draw_f - pd) < 0.005 and abs(lose_f - pl) < 0.005:
+                    # history 已是终盘, 仍校正当前表(可能停在中间值)
+                    _execute(
+                        conn,
+                        """UPDATE odds_win_draw_lose
+                           SET win_odds=%s, draw_odds=%s, lose_odds=%s, updated_at=CURRENT_TIMESTAMP
+                           WHERE match_id=%s AND odds_type='had'
+                             AND (ABS(win_odds-%s)>=0.005 OR ABS(draw_odds-%s)>=0.005
+                                  OR ABS(lose_odds-%s)>=0.005)""",
+                        (win_f, draw_f, lose_f, match_id, win_f, draw_f, lose_f),
+                    )
+                    return False
+                dw = 0 if abs(win_f - pw) < 0.005 else (1 if win_f > pw else -1)
+                dd = 0 if abs(draw_f - pd) < 0.005 else (1 if draw_f > pd else -1)
+                dl = 0 if abs(lose_f - pl) < 0.005 else (1 if lose_f > pl else -1)
+                prev_ct = prev["change_time"]
+            else:
+                dw = dd = dl = 0
+                prev_ct = None
+
+            ct = change_time or datetime.utcnow().replace(microsecond=0)
+            if prev_ct is not None and ct <= prev_ct:
+                ct = prev_ct + timedelta(seconds=1)
+
+            _execute(
+                conn,
+                """INSERT IGNORE INTO jczq_odds_history
+                   (match_id, odds_type, odds_win, odds_draw, odds_loss,
+                    direction_win, direction_draw, direction_loss, change_time)
+                   VALUES (%s,'spf',%s,%s,%s,%s,%s,%s,%s)""",
+                (match_id, win_f, draw_f, lose_f, dw, dd, dl, ct),
+            )
+            # 当前赔率表也落到终盘
+            _execute(
+                conn,
+                """UPDATE odds_win_draw_lose
+                   SET win_odds=%s, draw_odds=%s, lose_odds=%s, updated_at=CURRENT_TIMESTAMP
+                   WHERE match_id=%s AND odds_type='had'""",
+                (win_f, draw_f, lose_f, match_id),
+            )
+            return True
+
     def get_latest_issue(self) -> Optional[str]:
         with get_db() as conn:
             cur = _execute(conn, "SELECT MAX(match_number) AS max_match_number FROM matches")

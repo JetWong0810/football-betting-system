@@ -1127,9 +1127,18 @@ def _predict_is_finished_sql(alias: str = "") -> str:
 
 
 def _predict_is_not_started_sql(alias: str = "") -> str:
-    """在售/未出赛果: 无比分(含未开赛与进行中)。"""
+    """在售/未出赛果: 无比分(含未开赛与进行中)。
+
+    开赛已超 72h 仍无比分视为脏数据(超出 scraper backfill_scores(days=3) 窗口),
+    不再算在售——否则会污染日期翻页(如 07-16 脏场导致 08-03 左翻直接跳过去)。
+    match_timestamp 为空时仍按无比分保留(避免误杀缺时间戳的在售场)。
+    """
     p = f"{alias}." if alias else ""
-    return f"({p}home_score IS NULL)"
+    return (
+        f"({p}home_score IS NULL"
+        f" AND ({p}match_timestamp IS NULL"
+        f" OR {p}match_timestamp > UNIX_TIMESTAMP(NOW() - INTERVAL 72 HOUR)))"
+    )
 
 
 @app.get("/api/predict/matches")
@@ -1209,6 +1218,14 @@ def batch_similar(
 
     if not date:
         date = _time.strftime("%Y-%m-%d", _time.localtime())
+
+    # 已结束: 用体彩赛果终赔校正 spf(在售池封盘前停更会导致末条非真终盘)
+    if status == "finished":
+        try:
+            from closing_odds import ensure_closing_spf_for_sale_date
+            ensure_closing_spf_for_sale_date(date)
+        except Exception as _e:
+            logger.warning(f"终盘懒回填失败 date={date}: {_e}")
 
     where: List = []
     params: List = []

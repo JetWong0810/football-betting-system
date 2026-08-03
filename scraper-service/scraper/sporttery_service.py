@@ -111,8 +111,13 @@ class SportterySyncService:
         response.raise_for_status()
         return response.json()
 
+    RESULT_API_URL = (
+        "https://webapi.sporttery.cn/gateway/uniform/football/"
+        "getUniformMatchResultV1.qry"
+    )
+
     def run_once(self) -> Dict[str, int]:
-        self.stats = {"matches": 0, "odds": 0, "scores": 0}
+        self.stats = {"matches": 0, "odds": 0, "scores": 0, "closing_odds": 0}
         for pool_name, pool_code in settings.POOL_CODES.items():
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
@@ -121,8 +126,83 @@ class SportterySyncService:
             self.stats["scores"] = self.backfill_scores(days=3)
         except Exception as e:
             logger.warning(f"比分回填失败: {e}")
+        # 赛果终赔校正(在售池封盘前停更, history 末条常不是真终盘)
+        try:
+            self.stats["closing_odds"] = self.backfill_closing_odds(days=3)
+        except Exception as e:
+            logger.warning(f"终盘回填失败: {e}")
         self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
         return self.stats
+
+    def fetch_match_results(self, begin_date: str, end_date: str) -> List[Dict]:
+        """体彩赛果列表。h/d/a = 胜平负终赔。"""
+        params = {
+            "matchBeginDate": begin_date,
+            "matchEndDate": end_date,
+            "leagueId": "",
+            "pageSize": 100,
+            "pageNo": 1,
+            "isFix": 0,
+            "matchPage": 1,
+            "pcOrWap": 1,
+        }
+        rows: List[Dict] = []
+        while True:
+            resp = self.client.get(self.RESULT_API_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("success"):
+                break
+            batch = (data.get("value") or {}).get("matchResult") or []
+            if not batch:
+                break
+            rows.extend(batch)
+            total = int((data.get("value") or {}).get("total") or 0)
+            if len(rows) >= total or len(batch) < params["pageSize"]:
+                break
+            params["pageNo"] += 1
+        return rows
+
+    def backfill_closing_odds(self, days: int = 3) -> int:
+        """从体彩赛果 API 回填 spf 终盘。
+
+        在售计算器接口在封盘/停售后不再推送变动, scraper 末条常停在中间值
+        (例:索尔纳 1.37, 真终盘 1.40)。赛果页 h/d/a 为官方终赔。
+        """
+        end = datetime.now(_BJ).date()
+        begin = end - timedelta(days=max(days - 1, 0))
+        begin_s, end_s = begin.isoformat(), end.isoformat()
+        try:
+            results = self.fetch_match_results(begin_s, end_s)
+        except Exception as e:
+            logger.warning(f"拉取赛果终赔失败 {begin_s}~{end_s}: {e}")
+            return 0
+        if not results:
+            return 0
+
+        updated = 0
+        for m in results:
+            mid = str(m.get("matchId") or "").strip()
+            h, d, a = m.get("h"), m.get("d"), m.get("a")
+            if not mid or h in (None, "", "-") or d in (None, "", "-") or a in (None, "", "-"):
+                continue
+            try:
+                win, draw, lose = float(h), float(d), float(a)
+            except (TypeError, ValueError):
+                continue
+            # change_time 用开赛 UTC(与 append_odds_history 的 utcnow 口径一致)
+            ct = None
+            kickoff_ts = self.repository.get_match_timestamp(mid)
+            if kickoff_ts:
+                ct = datetime.utcfromtimestamp(int(kickoff_ts)).replace(microsecond=0)
+            if self.repository.apply_closing_spf(mid, win, draw, lose, change_time=ct):
+                updated += 1
+                logger.info(
+                    f"  终盘 {m.get('homeTeam')} {win:.2f}/{draw:.2f}/{lose:.2f} {m.get('awayTeam')}"
+                )
+        if updated:
+            logger.info(f"终盘回填: {updated} 场 ({begin_s}~{end_s})")
+        return updated
 
     def backfill_scores(self, days: int = 3) -> int:
         """回填已开赛但缺比分的比赛(数据源: 500.com)。
