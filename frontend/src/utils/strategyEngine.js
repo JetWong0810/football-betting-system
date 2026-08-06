@@ -75,14 +75,21 @@ export function getAllPresets() {
  * @param {object} [opts.customConfig] 自定义配置
  * @returns {{amount:number, tierRatio:number}}
  */
+/** 真实投注按 100 元倍数; 四舍五入到最近百元,不足 50 归零 */
+export function roundStakeToHundred(amount) {
+  const n = Number(amount)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.round(n / 100) * 100
+}
+
 export function calcTieredStake({ effectiveBankroll, tier, riskLevel = 'balanced', customConfig = null }) {
   const preset = (riskLevel === 'custom' && customConfig)
     ? resolveCustomPreset(customConfig)
     : (PRESETS[riskLevel] || PRESETS.balanced)
   const ratio = Number(preset.tierRatios?.[tier])
   const bank = Math.max(Number(effectiveBankroll) || 0, 0)
-  const amount = Number.isFinite(ratio) && ratio > 0 ? Math.round(bank * ratio) : 0
-  return { amount, tierRatio: Number.isFinite(ratio) ? ratio : 0 }
+  const raw = Number.isFinite(ratio) && ratio > 0 ? bank * ratio : 0
+  return { amount: roundStakeToHundred(raw), tierRatio: Number.isFinite(ratio) ? ratio : 0 }
 }
 
 /**

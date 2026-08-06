@@ -8,6 +8,7 @@
 """
 
 import logging
+from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
 import pymysql
@@ -405,6 +406,10 @@ def get_spf_pool() -> List[Dict]:
 
 
 AH_LINE_TOL = 0.5  # 亚盘相似: |Δ|≥0.5 球 → 该项贡献归零
+LEAGUE_SOFT_BOOST = 1.12  # 同联赛软加成(不再硬插队)
+# 欧赔结构相似: 低赔为主、高赔过线后参与打分
+LOW_ODDS_SIM_WEIGHT = 0.65
+HIGH_ODDS_SIM_WEIGHT = 0.35
 
 
 def _ah_line_sim(hist: Optional[float], query: Optional[float], tol: float = AH_LINE_TOL) -> Optional[float]:
@@ -415,6 +420,67 @@ def _ah_line_sim(hist: Optional[float], query: Optional[float], tol: float = AH_
         return max(0.0, 1.0 - abs(float(hist) - float(query)) / tol)
     except (TypeError, ValueError):
         return None
+
+
+def _time_decay_rank(match_date) -> float:
+    """时效权重: 近3年1.0 / 3–6年0.85 / 更旧0.7(与 refScore 对齐)。"""
+    md = None
+    if isinstance(match_date, datetime):
+        md = match_date.date()
+    elif isinstance(match_date, date):
+        md = match_date
+    elif match_date:
+        try:
+            md = datetime.strptime(str(match_date)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            md = None
+    if md is None:
+        return 0.85
+    age_years = (date.today() - md).days / 365.25
+    if age_years <= 3:
+        return 1.0
+    if age_years <= 6:
+        return 0.85
+    return 0.7
+
+
+def _hc_proximity_rank(hist_hc: Optional[float], query_hc: Optional[float]) -> float:
+    """终盘盘口接近权重: ≤0.25→1.0 / ≤0.5→0.7 / ≤1.0→0.4 / 更远0.2; 缺一侧中性0.6。"""
+    if hist_hc is None or query_hc is None:
+        return 0.6
+    try:
+        delta = abs(float(hist_hc) - float(query_hc))
+    except (TypeError, ValueError):
+        return 0.6
+    if delta <= 0.25:
+        return 1.0
+    if delta <= 0.5:
+        return 0.7
+    if delta <= 1.0:
+        return 0.4
+    return 0.2
+
+
+def _blend_structural_sim(
+    odds_sim: float,
+    hist_open_hc: Optional[float],
+    hist_close_hc: Optional[float],
+    ah_open: Optional[float],
+    ah_close: Optional[float],
+) -> float:
+    """结构相似度[0,1]: 欧赔 + 亚盘分档并入(有多少算多少, 避免缺初盘整段掉崖)。"""
+    if ah_open is None and ah_close is None:
+        return odds_sim
+    s_ah_o = _ah_line_sim(hist_open_hc, ah_open)
+    s_ah_c = _ah_line_sim(hist_close_hc, ah_close)
+    if s_ah_o is not None and s_ah_c is not None:
+        return 0.7 * odds_sim + 0.3 * ((s_ah_o + s_ah_c) / 2)
+    if s_ah_c is not None:
+        return 0.8 * odds_sim + 0.2 * s_ah_c
+    if s_ah_o is not None:
+        return 0.85 * odds_sim + 0.15 * s_ah_o
+    # 本场有亚盘但历史全缺: 略降权防虚高
+    return odds_sim * 0.95
 
 
 def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
@@ -435,9 +501,11 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     require_direction=False: 当预测场仅有1条spf快照(open==close, 无真实变动)时,
       放弃"变动方向一致"过滤(此时方向恒为"平"是数据缺失而非真稳定), 仅按初/终盘接近+同侧匹配。
 
-    相似度: 默认低赔初/终接近度均值; 若传入本场亚盘初/终(ah_open/ah_close),
-      再并入历史亚盘初/终接近度: 0.7*欧赔相似 + 0.3*亚盘相似(|Δ|/0.5 归一)。
-    排序: 同联赛优先, 再按相似度降序(league 非空时生效)。
+    相似度(展示=排序):
+      1) 欧赔结构 = 0.65*低赔初终接近 + 0.35*高赔初终接近(各自容差归一)
+      2) 亚盘分档并入: 初+终→0.3; 仅终→0.2; 仅初→0.15; 历史全缺→×0.95
+      3) 软因子: 同联赛×1.12 × 时效衰减 × 终盘盘口接近; 封顶100
+    排序: 按上述综合相似度降序(同联赛不再硬插队)。
     """
     input_low_key, input_low_open, input_low_close, input_direction = _get_low_odds_info(
         open_win, open_draw, open_loss, close_win, close_draw, close_loss
@@ -457,8 +525,6 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
 
     open_high_tol = _high_odds_tolerance(input_high_open, high_tolerance)
     close_high_tol = _high_odds_tolerance(input_high_close, high_tolerance)
-
-    use_ah_sim = ah_open is not None and ah_close is not None
 
     matched = []
     for m in pool:
@@ -485,6 +551,7 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         hist_high_open = _side_high_odds(m["open_win"], m["open_loss"])
         if hist_high_open is None or abs(hist_high_open - input_high_open) > open_high_tol:
             continue
+        hist_high_close = None
         if input_high_close is not None:
             hist_high_close = _side_high_odds(m["close_win"], m["close_loss"])
             if hist_high_close is None or abs(hist_high_close - input_high_close) > close_high_tol:
@@ -493,26 +560,33 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         if require_direction and hist_direction != input_direction:
             continue
 
-        # 相似度 = 欧赔低赔初/终接近度; 有本场亚盘初终时再并入亚盘路径相似
-        sim_open = max(0.0, 1 - abs(hist_low_open - input_low_open) / tolerance)
+        # 1) 欧赔结构: 低赔 + 高赔(过线后按容差归一打分)
+        sim_low_open = max(0.0, 1 - abs(hist_low_open - input_low_open) / tolerance)
         if input_low_close is not None and hist_low_close is not None:
-            sim_close = max(0.0, 1 - abs(hist_low_close - input_low_close) / tolerance)
+            sim_low_close = max(0.0, 1 - abs(hist_low_close - input_low_close) / tolerance)
         else:
-            sim_close = 0.0
-        odds_sim = (sim_open + sim_close) / 2
-        if use_ah_sim:
-            s_ah_o = _ah_line_sim(m.get("open_handicap"), ah_open)
-            s_ah_c = _ah_line_sim(m.get("handicap"), ah_close)
-            if s_ah_o is not None and s_ah_c is not None:
-                ah_sim = (s_ah_o + s_ah_c) / 2
-                similarity = round((0.7 * odds_sim + 0.3 * ah_sim) * 100, 1)
-            else:
-                # 历史无亚盘: 仅用欧赔, 略降权避免无盘场虚高
-                similarity = round(odds_sim * 0.95 * 100, 1)
-        else:
-            similarity = round(odds_sim * 100, 1)
+            sim_low_close = 0.0
+        low_sim = (sim_low_open + sim_low_close) / 2
 
+        sim_high_open = max(0.0, 1 - abs(hist_high_open - input_high_open) / open_high_tol)
+        if input_high_close is not None and hist_high_close is not None and close_high_tol > 0:
+            sim_high_close = max(0.0, 1 - abs(hist_high_close - input_high_close) / close_high_tol)
+            high_sim = (sim_high_open + sim_high_close) / 2
+        else:
+            high_sim = sim_high_open
+        odds_sim = LOW_ODDS_SIM_WEIGHT * low_sim + HIGH_ODDS_SIM_WEIGHT * high_sim
+
+        # 2) 亚盘分档并入
+        structural = _blend_structural_sim(
+            odds_sim, m.get("open_handicap"), m.get("handicap"), ah_open, ah_close
+        )
+
+        # 3) 软因子: 同联赛 / 时效 / 终盘盘口接近 → 综合相似度(展示即排序键)
         same_league = bool(league_norm) and (m.get("league_name") or "").strip() == league_norm
+        w_lg = LEAGUE_SOFT_BOOST if same_league else 1.0
+        w_time = _time_decay_rank(m.get("match_date"))
+        w_hc = _hc_proximity_rank(m.get("handicap"), ah_close)
+        similarity = round(min(100.0, structural * w_lg * w_time * w_hc * 100), 1)
 
         m["similarity"] = similarity
         m["hist_low_key"] = hist_low_key
@@ -524,8 +598,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         m["away_team_cn"] = m["away_team"]
         matched.append(m)
 
-    # 同联赛优先, 再按相似度降序
-    matched.sort(key=lambda x: (-int(x["same_league"]), -x["similarity"]))
+    # 综合相似度降序(同联赛/时效/盘口已并入 similarity)
+    matched.sort(key=lambda x: -x["similarity"])
     stats = _calc_stats(matched)
 
     return {
@@ -556,8 +630,8 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                     ah_close: Optional[float] = None) -> Dict:
     """核心匹配(胜平负 spf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
 
-    ah_open/ah_close: 本场亚盘初/终(标准负=主让), 传入则相似度并入亚盘路径接近度。
-    league 非空时同联赛优先排序; exclude_match_id 剔除预测比赛自身。
+    ah_open/ah_close: 本场亚盘初/终(标准负=主让), 传入则相似度分档并入亚盘路径接近度。
+    league 非空时同联赛软加成(×1.12)并入相似度; exclude_match_id 剔除预测比赛自身。
     require_direction=False: 预测场仅有1条spf快照(无真实变动)时放弃方向过滤。
     Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
     """

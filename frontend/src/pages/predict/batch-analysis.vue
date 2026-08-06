@@ -249,33 +249,58 @@
         </view>
         <text class="similar-close" @tap="closeSimilar">关闭</text>
       </view>
+      <view v-if="similarStats.total > 0" class="similar-stats">
+        <view class="stats-row">
+          <text class="stats-label">胜平负</text>
+          <text class="stats-item r-win">主胜 {{ similarStats.win }}({{ similarStats.winPct }}%)</text>
+          <text class="stats-item r-draw">平 {{ similarStats.draw }}({{ similarStats.drawPct }}%)</text>
+          <text class="stats-item r-loss">客胜 {{ similarStats.loss }}({{ similarStats.lossPct }}%)</text>
+          <text class="stats-n">{{ similarStats.total }}场</text>
+        </view>
+        <view class="stats-row">
+          <text class="stats-label">盘路</text>
+          <template v-if="similarStats.ahTotal > 0">
+            <text class="stats-item ah-upper">上盘 {{ similarStats.upper }}({{ similarStats.upperPct }}%){{ similarStats.halfUp ? ` 含半${similarStats.halfUp}` : '' }}</text>
+            <text class="stats-item ah-push">走水 {{ similarStats.push }}({{ similarStats.pushPct }}%)</text>
+            <text class="stats-item ah-lower">下盘 {{ similarStats.lower }}({{ similarStats.lowerPct }}%){{ similarStats.halfDown ? ` 含半${similarStats.halfDown}` : '' }}</text>
+            <text class="stats-n">{{ similarStats.ahTotal }}场</text>
+          </template>
+          <text v-else class="stats-empty">无亚盘数据</text>
+        </view>
+      </view>
       <scroll-view class="similar-body" scroll-y scroll-x>
         <view class="similar-table">
           <view class="similar-row similar-thead">
             <text class="col-sim">相似度</text>
-            <text class="col-single">单</text>
             <text class="col-team">主队</text>
             <text class="col-score">比分</text>
             <text class="col-team">客队</text>
             <text class="col-result">结果</text>
+            <text class="col-ah-result">盘路</text>
             <text class="col-ah">亚初</text>
             <text class="col-ah">亚终</text>
-            <text class="col-ah-result">盘路</text>
             <text class="col-odds">初盘</text>
             <text class="col-odds">终盘</text>
             <text class="col-date">日期</text>
             <text class="col-league">联赛</text>
           </view>
-          <view class="similar-row" v-for="(m, mi) in similarMatches" :key="mi">
-            <text class="col-sim">{{ m.similarity }}%</text>
-            <text class="col-single" :class="{ on: m.isSingle }">{{ m.isSingle ? '单' : '-' }}</text>
+          <view
+            class="similar-row"
+            :class="{ 'is-single': m.isSingle }"
+            v-for="(m, mi) in similarMatches"
+            :key="mi"
+          >
+            <view class="col-sim">
+              <text class="sim-num">{{ m.similarity }}%</text>
+              <text class="single-mark" :class="{ on: m.isSingle }">{{ m.isSingle ? '单' : '' }}</text>
+            </view>
             <text class="col-team">{{ m.homeTeam }}</text>
             <text class="col-score">{{ m.score }}</text>
             <text class="col-team">{{ m.awayTeam }}</text>
             <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
+            <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
             <text class="col-ah">{{ m.handicapOpen || '-' }}</text>
             <text class="col-ah">{{ m.handicapClose || m.handicap || '-' }}</text>
-            <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
             <text class="col-odds">{{ m.openOdds }}</text>
             <text class="col-odds">{{ m.closeOdds }}</text>
             <text class="col-date">{{ m.date }}</text>
@@ -330,6 +355,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 import { useSimBetStore } from '@/stores/simBetStore'
 import { lowKeyFromSpf } from '@/utils/simBet'
+import { calcSimilarStats } from '@/utils/similarStats'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
 import SimBetSlip from '@/components/SimBetSlip.vue'
 
@@ -349,6 +375,7 @@ const calSelected = ref('')
 const showSimilar = ref(false)
 const similarMatches = ref([])
 const similarRefScore = ref(null)
+const similarStats = computed(() => calcSimilarStats(similarMatches.value))
 const showSimSheet = ref(false)
 const simTarget = ref(null)
 /** 多选: upper/lower/neutral/hit */
@@ -1222,14 +1249,42 @@ onLoad(async (options) => {
   .similar-ref { font-size: 22rpx; color: #64748b; font-variant-numeric: tabular-nums; }
   .similar-close { font-size: 24rpx; color: $frbt-primary; padding: 8rpx 4rpx; }
 }
+.similar-stats {
+  flex-shrink: 0;
+  padding: 12rpx 24rpx;
+  background: #f8fafb;
+  border-bottom: 1rpx solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.stats-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8rpx 16rpx;
+  font-size: 22rpx;
+  font-variant-numeric: tabular-nums;
+}
+.stats-label {
+  width: 72rpx;
+  flex-shrink: 0;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 20rpx;
+}
+.stats-item { font-weight: 500; }
+.stats-n { color: #94a3b8; font-size: 20rpx; margin-left: 4rpx; }
+.stats-empty { color: #94a3b8; font-size: 20rpx; }
 .similar-body {
   flex: 0 1 auto; overflow: auto; min-height: 0;
-  max-height: calc(88vh - 100rpx);
+  max-height: calc(88vh - 200rpx);
 }
-.similar-table { min-width: 1480rpx; padding: 0 16rpx 24rpx; }
+.similar-table { min-width: 1430rpx; padding: 0 16rpx 24rpx; }
 .similar-row {
   display: flex; align-items: center; padding: 14rpx 0;
   border-bottom: 1rpx solid #f1f5f9; gap: 4rpx;
+  &.is-single { background: #fff7f7; }
 }
 .similar-thead {
   position: sticky; top: 0; background: #f8fafb;
@@ -1238,10 +1293,21 @@ onLoad(async (options) => {
 .similar-row:not(.similar-thead) { font-size: 20rpx; color: #334155; }
 .similar-empty { text-align: center; padding: 60rpx; color: #94a3b8; font-size: 24rpx; }
 
-.col-sim { width: 90rpx; text-align: center; }
-.col-single {
-  width: 48rpx; text-align: center; color: #94a3b8; flex-shrink: 0;
-  &.on { color: #dc2626; font-weight: 600; }
+.col-sim {
+  width: 120rpx; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; gap: 4rpx;
+}
+.sim-num {
+  width: 72rpx; text-align: right; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.single-mark {
+  width: 28rpx; height: 28rpx; flex-shrink: 0;
+  font-size: 16rpx; font-weight: 700;
+  color: transparent; text-align: center;
+  border: 1rpx solid transparent; border-radius: 6rpx;
+  line-height: 26rpx;
+  &.on { color: #dc2626; border-color: #dc2626; }
 }
 .col-date { width: 110rpx; text-align: center; }
 .col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

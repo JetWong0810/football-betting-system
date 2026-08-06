@@ -9,7 +9,7 @@ globs: "**/strategyEngine*", "**/bankrollLayer*", "**/controlStore*", "**/betSto
 6 因子置信度不准不稳(校准样本少、85 折拍脑袋),p 不可靠 → 凯利/EV 建立在不可靠概率上。改方案 A:**信心档作主决策,绕开置信度/EV/凯利**。
 
 ## 主决策:信心档 × 固定比例
-信心档(低/中/高)× 比例,金额 = 有效资金 × 比例:
+信心档(低/中/高)× 比例,金额 = 有效资金 × 比例,再**四舍五入到 100 元倍数**(真实投注口径,`roundStakeToHundred`):
 - 激进 3/5/8% / 稳健 2/3.5/5% / 保守 1.5/2.5/3%
 - 三档比例在 `strategyEngine.PRESETS.tierRatios`。
 

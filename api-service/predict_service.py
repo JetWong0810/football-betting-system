@@ -2558,7 +2558,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
-    ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 均有时相似度并入亚盘路径。
+    ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 相似度=低赔+高赔结构 + 亚盘分档 + 同联赛/时效/盘口软因子。
     方向判定(以盘路为准, 与弹窗"盘路"列口径一致, 不用胜平负低赔命中):
     - 匹配 < 3场 或 无盘口: neutral, score=5
     - 盘路上盘命中 > 65%: upper, score=7
