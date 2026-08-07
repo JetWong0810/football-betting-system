@@ -15,6 +15,8 @@ from jp_scraper.zh_display import (
     source_zh,
     venue_zh,
 )
+from jp_scraper.formation_util import resolve_formation
+
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +275,13 @@ def get_japan_context(match_id: str) -> Dict[str, Any]:
 
                 players = _load_json(r.get("players_json")) or []
                 bench = _load_json(r.get("bench_json")) or []
+                form_info = resolve_formation(players, explicit=r.get("formation"))
                 picked[side] = {
                     "side": side,
                     "clubShort": r.get("club_short"),
                     "clubId": r.get("club_id"),
-                    "formation": r.get("formation"),
+                    "formation": form_info.get("formation"),
+                    "formationEstimated": form_info.get("formationEstimated", False),
                     "source": r.get("source"),
                     "sourceUrl": r.get("source_url"),
                     "isConfirmed": bool(r.get("is_confirmed")),

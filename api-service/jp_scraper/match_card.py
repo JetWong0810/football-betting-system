@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
 
 from .http_client import DATA_BASE, JpHttp
+from .formation_util import resolve_formation, extract_formation_from_text
+
 
 POS = {"GK", "DF", "MF", "FW"}
 
@@ -24,6 +26,14 @@ def parse_match_card(html: str) -> Dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
     weather = _parse_weather(soup)
     lineups = _parse_lineups(soup)
+    text = soup.get_text("\n", strip=True)
+    global_form = extract_formation_from_text(text)
+    for lu in lineups:
+        info = resolve_formation(lu.get("players"), text=text)
+        if not info.get("formation") and global_form:
+            info = {"formation": global_form, "formationEstimated": False}
+        lu["formation"] = info.get("formation")
+        lu["formationEstimated"] = info.get("formationEstimated", False)
     return {"weather": weather, "lineups": lineups}
 
 

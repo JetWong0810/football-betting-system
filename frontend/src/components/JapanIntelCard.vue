@@ -31,7 +31,10 @@
         :key="lu.side"
         class="jp-xi-col"
       >
-        <text class="jp-xi-club">{{ lu.clubShort || sideLabel(lu.side) }} 首发</text>
+        <view class="jp-xi-club">
+          <text class="jp-xi-club-name">{{ lu.clubShort || sideLabel(lu.side) }} 首发</text>
+          <text v-if="lu.formation" class="jp-form">{{ lu.formation }}</text>
+        </view>
         <view
           v-for="(p, pi) in visiblePlayers(lu)"
           :key="pi"
@@ -208,11 +211,26 @@ function visiblePlayers(lu) {
   padding: 10rpx;
 }
 .jp-xi-club {
-  display: block;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6rpx 8rpx;
+  margin-bottom: 6rpx;
+}
+.jp-xi-club-name {
   font-size: 20rpx;
   font-weight: 600;
   color: #334155;
-  margin-bottom: 6rpx;
+}
+.jp-form {
+  font-size: 18rpx;
+  font-weight: 600;
+  color: #0f766e;
+  background: #ccfbf1;
+  border-radius: 6rpx;
+  padding: 0 8rpx;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 .jp-pl {
   display: flex;

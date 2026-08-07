@@ -7,7 +7,8 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from .http_client import GEKI_BASE, JpHttp
+from .formation_util import resolve_formation, extract_formation_from_text
+
 
 LIST_URL = f"{GEKI_BASE}/news/jleague/"
 
@@ -60,16 +61,23 @@ def parse_stamen_html(html: str) -> Dict[str, Any]:
     text = article.get_text("\n", strip=True).replace("\u3000", " ")
 
     blocks = _split_team_blocks(text)
+    # 全文/分队正文里的明文阵型（少见）
+    global_form = extract_formation_from_text(text)
     lineups = []
     for i, block in enumerate(blocks[:2]):
         starters, bench = _extract_xi_and_bench(block["body"])
         if len(starters) < 8:
             continue
+        form_info = resolve_formation(starters, text=block["body"])
+        if not form_info.get("formation") and global_form:
+            form_info = {"formation": global_form, "formationEstimated": False}
         lineups.append({
             "team_hint": block["name"],
             "side": "home" if i == 0 else "away",
             "players": starters[:11],
             "bench": bench,
+            "formation": form_info.get("formation"),
+            "formationEstimated": form_info.get("formationEstimated", False),
         })
 
     return {

@@ -143,7 +143,8 @@ def sync_cards(http: JpHttp, limit: int, apply: bool) -> int:
                     db.upsert_lineup(
                         cur, int(row["jp_match_id"]), int(club_id), lu["side"],
                         lu.get("players") or [], source="sfms02",
-                        bench=lu.get("bench"), source_url=data.get("source_url"),
+                        bench=lu.get("bench"), formation=lu.get("formation"),
+                        source_url=data.get("source_url"),
                     )
                 n += 1
                 if n % 10 == 0:
@@ -246,6 +247,7 @@ def sync_gekisaka(http: JpHttp, apply: bool) -> int:
                     db.upsert_lineup(
                         cur, mid, club_id, side, lu.get("players") or [],
                         source="gekisaka", bench=lu.get("bench"),
+                        formation=lu.get("formation"),
                         source_url=data.get("source_url"), is_confirmed=1,
                     )
                 n_ok += 1
