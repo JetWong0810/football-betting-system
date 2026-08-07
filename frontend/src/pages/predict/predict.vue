@@ -30,6 +30,12 @@
       <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
     </view>
 
+    <!-- 日职辅助情报（仅展示，不参与因子） -->
+    <JapanIntelCard v-if="isJapanMatch && japanContext" :data="japanContext" />
+    <view v-else-if="isJapanMatch && japanContextLoading" class="jp-loading">
+      <text>加载日本情报…</text>
+    </view>
+
     <!-- 分析流程区域 -->
     <scroll-view class="analysis-flow" scroll-y>
       <!-- 空状态 -->
@@ -77,9 +83,13 @@
                 <text class="sub-desc">{{ sub.desc }}</text>
               </view>
             </view>
-            <!-- 历史同赔详情入口 -->
-            <view v-if="step.status === 'done' && step.matches && step.matches.length > 0" class="detail-action" @tap="openSimilarModal">
-              <text class="detail-action-text">查看详细同赔数据 ▸</text>
+            <!-- 历史同赔详情入口(日职0场也可进弹窗开「仅日本」) -->
+            <view
+              v-if="step.status === 'done' && step.name === '历史同赔' && ((step.matches && step.matches.length > 0) || isJapanMatch)"
+              class="detail-action"
+              @tap="openSimilarModal"
+            >
+              <text class="detail-action-text">查看详细同赔数据{{ step.matches?.length ? ` ${step.matches.length}场` : '' }} ▸</text>
             </view>
           </view>
         </view>
@@ -288,8 +298,19 @@
     <view class="similar-mask" v-if="showSimilarModal" @tap="closeSimilarModal"></view>
     <view class="similar-modal" :class="{ show: showSimilarModal }">
       <view class="similar-header">
-        <text class="similar-title">历史同赔详情</text>
+        <view class="similar-title-wrap">
+          <text class="similar-title">历史同赔详情</text>
+          <text
+            v-if="isJapanMatch"
+            class="jp-toggle"
+            :class="{ on: similarJapanOnly, loading: similarJapanLoading }"
+            @tap.stop="toggleJapanOnly"
+          >仅日本</text>
+        </view>
         <text class="similar-close" @tap="closeSimilarModal">关闭</text>
+      </view>
+      <view v-if="similarJapanOnly" class="jp-hint">
+        <text>仅日职/日乙/杯赛 · 低赔±0.05 · 高赔±0.15</text>
       </view>
       <view v-if="similarStats.total > 0" class="similar-stats">
         <view class="stats-row">
@@ -400,6 +421,8 @@ import { useBetStore } from '@/stores/betStore'
 import { calcRecommendedStake, calcTieredStakes, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
 import { loadCalibration } from '@/utils/calibration'
 import { calcSimilarStats } from '@/utils/similarStats'
+import { isJapanLeague } from '@/utils/japanLeague'
+import JapanIntelCard from '@/components/JapanIntelCard.vue'
 
 const matchStatus = ref('not_started')
 const selectedMatch = ref(null)
@@ -414,7 +437,13 @@ const prediction = ref({ direction: '', confidence: 0, overallReverse: false, co
 const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
 const similarMatches = ref([])
+const similarDefaultMatches = ref([])
+const similarJapanOnly = ref(false)
+const similarJapanLoading = ref(false)
 const similarStats = computed(() => calcSimilarStats(similarMatches.value))
+const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
+const japanContext = ref(null)
+const japanContextLoading = ref(false)
 
 // 横屏全屏展示同赔表格(安卓H5): 打开时进全屏+锁横屏, 关闭时还原
 const _lockLandscape = async () => {
@@ -442,12 +471,47 @@ const _exitFullscreen = async () => {
   }
 }
 const openSimilarModal = async () => {
+  similarJapanOnly.value = false
+  similarJapanLoading.value = false
+  // 打开时用当前 F6 默认结果
+  if (similarDefaultMatches.value.length) {
+    similarMatches.value = similarDefaultMatches.value
+  }
   showSimilarModal.value = true
   await _lockLandscape()
 }
 const closeSimilarModal = async () => {
   showSimilarModal.value = false
+  similarJapanOnly.value = false
+  similarJapanLoading.value = false
   await _exitFullscreen()
+}
+async function toggleJapanOnly() {
+  if (!isJapanMatch.value || similarJapanLoading.value) return
+  if (similarJapanOnly.value) {
+    similarJapanOnly.value = false
+    similarMatches.value = similarDefaultMatches.value
+    return
+  }
+  const mid = selectedMatch.value?.matchId
+  if (!mid) {
+    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
+    return
+  }
+  similarJapanLoading.value = true
+  try {
+    const data = await request({
+      url: `/api/predict/${encodeURIComponent(mid)}/similar-odds`,
+      method: 'GET',
+      data: { japan_only: true },
+    })
+    similarJapanOnly.value = true
+    similarMatches.value = data?.matches || []
+  } catch (e) {
+    uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
+  } finally {
+    similarJapanLoading.value = false
+  }
 }
 // 用户按ESC退出全屏时同步关闭弹窗
 if (typeof document !== 'undefined') {
@@ -650,6 +714,7 @@ async function fetchMatches() {
       if (found) {
         selectedMatch.value = found
         pendingMatchId.value = null
+        loadJapanContext(found.matchId)
         if (pendingAutoStart.value) {
           analysisSteps.value = []
           analysisComplete.value = false
@@ -837,6 +902,34 @@ const predictionHit = computed(() => {
 
 const factorNames = ['近期状态', '实力定位', '市场信号', '市场热度', '竞彩赔率', '历史同赔', '单关修正']
 
+async function loadJapanContext(matchId) {
+  japanContext.value = null
+  if (!matchId || !isJapanLeague(selectedMatch.value?.league)) return
+  japanContextLoading.value = true
+  try {
+    const data = await request({
+      url: `/api/predict/${encodeURIComponent(matchId)}/japan-context`,
+      method: 'GET',
+    })
+    if (selectedMatch.value?.matchId === matchId) {
+      japanContext.value = data
+    }
+  } catch (e) {
+    if (selectedMatch.value?.matchId === matchId) {
+      japanContext.value = {
+        available: true,
+        isJapanLeague: true,
+        note: e?.message || '日本情报加载失败',
+        lineups: [],
+        weather: null,
+        attackNotes: [],
+      }
+    }
+  } finally {
+    japanContextLoading.value = false
+  }
+}
+
 function selectMatch(match) {
   selectedMatch.value = match
   showPicker.value = false
@@ -845,6 +938,7 @@ function selectMatch(match) {
   prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
   aiAnalysis.value = ''
   uni.removeStorageSync('predict-last-result')
+  loadJapanContext(match?.matchId)
 }
 
 function goBatchSimilar() {
@@ -908,8 +1002,10 @@ async function startAnalysis() {
       analysisSteps.value[i].dirClass = factor.direction || 'neutral'
       analysisSteps.value[i].details = factor.details || []
       analysisSteps.value[i].matches = factor.matches || []
-      if (factor.matches && factor.matches.length > 0) {
-        similarMatches.value = factor.matches
+      if (factor.name === '历史同赔') {
+        similarDefaultMatches.value = factor.matches || []
+        similarMatches.value = factor.matches || []
+        similarJapanOnly.value = false
       }
       analysisSteps.value[i].status = 'done'
     }
@@ -1016,6 +1112,7 @@ function pickLeagueColor(league) {
 
 watch(matchStatus, async () => {
   selectedMatch.value = null
+  japanContext.value = null
   analysisSteps.value = []
   analysisComplete.value = false
   searchKey.value = ''
@@ -1183,6 +1280,12 @@ onShow(async () => {
     line-height: 36rpx;
     text { font-size: 20rpx; color: #ef4444; line-height: 36rpx; }
   }
+}
+
+.jp-loading {
+  margin: 12rpx 24rpx 0;
+  font-size: 22rpx;
+  color: #64748b;
 }
 
 /* ===== 分析流程 ===== */
@@ -1432,7 +1535,33 @@ onShow(async () => {
   border-bottom: 1rpx solid #e2e8f0;
   flex-shrink: 0;
 }
+.similar-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+  flex-wrap: wrap;
+}
 .similar-title { font-size: 28rpx; font-weight: 600; color: #1e293b; }
+.jp-toggle {
+  font-size: 22rpx;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1rpx solid #cbd5e1;
+  border-radius: 6rpx;
+  padding: 4rpx 12rpx;
+  line-height: 1.4;
+  &.on { color: #fff; background: #0f766e; border-color: #0f766e; }
+  &.loading { opacity: 0.55; }
+}
+.jp-hint {
+  flex-shrink: 0;
+  padding: 8rpx 24rpx;
+  background: #f0fdfa;
+  border-bottom: 1rpx solid #ccfbf1;
+  font-size: 20rpx;
+  color: #0f766e;
+}
 .similar-close { font-size: 24rpx; color: #0d9488; padding: 8rpx 4rpx; }
 .similar-stats {
   flex-shrink: 0;

@@ -1867,14 +1867,107 @@ def worldcup_similar_odds(
 def jczq_similar_odds(
     open_win: float = None, open_draw: float = None, open_loss: float = None,
     close_win: float = None, close_draw: float = None, close_loss: float = None,
+    japan_only: bool = False,
 ):
-    """竞彩历史同赔独立查询接口(spf胜平负口径, 2018-2026全量池)"""
+    """竞彩历史同赔独立查询接口(spf胜平负口径, 2018-2026全量池)
+
+    japan_only=true: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(弹窗「仅日本」开关)。
+    """
     from jczq_similar_odds import find_similar_spf
 
     if None in (open_win, open_draw, open_loss, close_win, close_draw, close_loss):
         raise HTTPException(status_code=400, detail="请填写完整的初盘和终盘赔率")
 
-    return find_similar_spf(open_win, open_draw, open_loss, close_win, close_draw, close_loss)
+    return find_similar_spf(
+        open_win, open_draw, open_loss, close_win, close_draw, close_loss,
+        japan_mode=japan_only,
+    )
+
+
+@app.get("/api/predict/{match_id}/similar-odds")
+def predict_similar_odds_detail(
+    match_id: str,
+    japan_only: bool = Query(False, description="仅日本赛事+放宽容差(弹窗开关)"),
+):
+    """单场历史同赔详情(供弹窗「仅日本」切换重查)。
+
+    默认口径与 F6 一致; japan_only 时硬过滤日职/日乙/杯赛并放宽为低赔±0.05/高赔±0.15。
+    不影响批量分析/预测里的默认 F6 结果。
+    """
+    from predict_service import calc_factor_jczq_similar_odds
+    from jczq_similar_odds import get_match_spf_odds, is_japan_league
+    from database import get_db
+
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+
+    league = match.get("league_name") or ""
+    if japan_only and not is_japan_league(league):
+        raise HTTPException(status_code=400, detail="仅日本模式仅适用于日职/日乙/天皇杯等日本赛事")
+
+    spf = get_match_spf_odds(match_id)
+    if not spf:
+        return {
+            "matchId": match_id,
+            "league": league,
+            "japanOnly": japan_only,
+            "isJapanLeague": is_japan_league(league),
+            "matches": [],
+            "refScore": 0,
+            "reason": "无竞彩spf赔率，无法匹配历史同赔",
+        }
+
+    # 亚盘初/终: jczq_ah_history → matches.asian_handicap 取反
+    ah_open = ah_close = None
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT open_handicap, close_handicap FROM jczq_ah_history WHERE match_id=%s",
+                (match_id,),
+            )
+            ah = cur.fetchone()
+            if ah:
+                if ah.get("open_handicap") is not None:
+                    ah_open = float(ah["open_handicap"])
+                if ah.get("close_handicap") is not None:
+                    ah_close = float(ah["close_handicap"])
+    except Exception as e:
+        logger.warning(f"similar-odds 读亚盘失败 {match_id}: {e}")
+    if ah_close is None and match.get("asian_handicap") is not None:
+        try:
+            ah_close = -float(match["asian_handicap"])  # matches 存正=主让, 取反
+        except (TypeError, ValueError):
+            pass
+
+    f6 = calc_factor_jczq_similar_odds(
+        spf, league=league, exclude_match_id=match_id,
+        ah_handicap=ah_close, ah_open=ah_open, japan_mode=japan_only,
+    )
+    return {
+        "matchId": match_id,
+        "league": league,
+        "japanOnly": japan_only,
+        "isJapanLeague": is_japan_league(league),
+        "matches": f6.get("matches") or [],
+        "refScore": f6.get("refScore"),
+        "refBreakdown": f6.get("refBreakdown"),
+        "direction": f6.get("direction"),
+        "reason": f6.get("reason"),
+        "details": f6.get("details") or [],
+    }
+
+
+@app.get("/api/predict/{match_id}/japan-context")
+def predict_japan_context(match_id: str):
+    """日职辅助情报（阵容/天气/进攻点），仅展示参考，不参与因子加权。"""
+    from japan_context_service import get_japan_context
+
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+    return get_japan_context(match_id)
 
 
 @app.get("/api/match-results")
