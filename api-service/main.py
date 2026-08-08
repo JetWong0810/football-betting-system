@@ -1271,14 +1271,14 @@ def batch_similar(
                 except (TypeError, ValueError):
                     pass
 
-    # 缺终盘: 懒抓500.com(优先Bet365初终, 否则澳门)
-    # 注意: 仅缺初盘时不再阻塞整页——matches.asian_handicap 已有终盘即可分析;
-    # 初盘可在单场同赔详情再补。否则 20+ 场串行抓取易超前端超时→「加载失败」。
+    # 缺终盘或缺初盘: 并行懒抓500.com(优先Bet365初终, 否则澳门)
+    # 并行+写入 jczq_ah_history, 避免串行超时, 且下次直接命中初/终盘。
     if rows:
         need_asian = [
             r for r in rows
             if r["match_id"] not in ah_map
             or ah_map[r["match_id"]].get("close") is None
+            or ah_map[r["match_id"]].get("open") is None
         ]
         if need_asian:
             try:
@@ -1320,6 +1320,8 @@ def batch_similar(
                         "hc": hc,
                         "home_odds": curr.get("home"),
                         "away_odds": curr.get("away"),
+                        "open_home": ini.get("home"),
+                        "open_away": ini.get("away"),
                         "company": preferred.get("bookmaker", ""),
                         "open_std": open_std,
                         "close_std": close_std,
@@ -1339,7 +1341,7 @@ def batch_similar(
                         prev = ah_map.get(mid) or {}
                         ah_map[mid] = {
                             "open": got["open_std"] if got["open_std"] is not None else prev.get("open"),
-                            "close": got["close_std"],
+                            "close": got["close_std"] if got["close_std"] is not None else prev.get("close"),
                         }
                         for m in need_asian:
                             if m["match_id"] == mid:
@@ -1348,13 +1350,36 @@ def batch_similar(
                                 break
                         try:
                             with _get_db_ah() as _conn_ah:
-                                _conn_ah.cursor().execute(
+                                cur_ah = _conn_ah.cursor()
+                                cur_ah.execute(
                                     "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
                                     "asian_away_odds=%s, asian_company=%s, fid_500=%s "
                                     "WHERE match_id=%s",
                                     (got["hc"], got["home_odds"], got["away_odds"],
                                      got["company"], got["fid"], mid),
                                 )
+                                # 标准约定负=主让; 写入后下次批量不再重复抓
+                                if got["open_std"] is not None or got["close_std"] is not None:
+                                    cur_ah.execute(
+                                        "INSERT INTO jczq_ah_history "
+                                        "(match_id, open_handicap, open_home_odds, open_away_odds, "
+                                        " close_handicap, close_home_odds, close_away_odds, company) "
+                                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+                                        "ON DUPLICATE KEY UPDATE "
+                                        "open_handicap=COALESCE(VALUES(open_handicap), open_handicap), "
+                                        "open_home_odds=COALESCE(VALUES(open_home_odds), open_home_odds), "
+                                        "open_away_odds=COALESCE(VALUES(open_away_odds), open_away_odds), "
+                                        "close_handicap=COALESCE(VALUES(close_handicap), close_handicap), "
+                                        "close_home_odds=COALESCE(VALUES(close_home_odds), close_home_odds), "
+                                        "close_away_odds=COALESCE(VALUES(close_away_odds), close_away_odds), "
+                                        "company=COALESCE(VALUES(company), company)",
+                                        (
+                                            mid,
+                                            got["open_std"], got["open_home"], got["open_away"],
+                                            got["close_std"], got["home_odds"], got["away_odds"],
+                                            got["company"] or None,
+                                        ),
+                                    )
                         except Exception as _we:
                             logger.warning(f"批量同赔亚盘落库失败 {mid}: {_we}")
             except Exception as e:
