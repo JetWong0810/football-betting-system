@@ -574,6 +574,8 @@ async function fetchBatch(forStatus) {
   return request({
     url: '/api/predict/batch-similar',
     data: { date: date.value, status: forStatus },
+    // 当日场次多时后端会懒抓亚盘，常超默认 15s
+    timeout: 60000,
   })
 }
 

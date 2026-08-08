@@ -1271,28 +1271,30 @@ def batch_similar(
                 except (TypeError, ValueError):
                     pass
 
-    # 缺终盘或缺初盘: 懒抓500.com(优先Bet365初终, 否则澳门)
-    # 仅有 matches.asian_handicap 时 open=None, 必须再抓才能显示真初盘(勿用终盘冒充)
+    # 缺终盘: 懒抓500.com(优先Bet365初终, 否则澳门)
+    # 注意: 仅缺初盘时不再阻塞整页——matches.asian_handicap 已有终盘即可分析;
+    # 初盘可在单场同赔详情再补。否则 20+ 场串行抓取易超前端超时→「加载失败」。
     if rows:
         need_asian = [
             r for r in rows
             if r["match_id"] not in ah_map
             or ah_map[r["match_id"]].get("close") is None
-            or ah_map[r["match_id"]].get("open") is None
         ]
         if need_asian:
             try:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
                 from repository import derive_sale_date as _derive_sale_ah
                 from odds500_service import get_fid_for_match, fetch_asian_handicap
                 from database import get_db as _get_db_ah
-                for m in need_asian:
+
+                def _fetch_one_asian(m):
                     sale_date = _derive_sale_ah(m) or m.get("match_date")
                     mcode = m.get("match_code")
                     if not sale_date or not mcode:
-                        continue
+                        return None
                     fid = m.get("fid_500") or get_fid_for_match(sale_date, mcode)
                     if not fid:
-                        continue
+                        return None
                     asian_list = fetch_asian_handicap(fid)
                     preferred = next(
                         (a for a in asian_list if a.get("bookmaker") == "Bet365"), None
@@ -1300,38 +1302,61 @@ def batch_similar(
                         (a for a in asian_list if a.get("bookmaker") == "澳门"), None
                     ) or (asian_list[0] if asian_list else None)
                     if not preferred or not preferred.get("current"):
-                        continue
+                        return None
                     curr = preferred["current"]
                     ini = preferred.get("initial") or {}
                     hc = curr.get("handicap")
                     if hc is None:
-                        continue
-                    oh_raw = ini.get("handicap")
-                    home_odds = curr.get("home")
-                    away_odds = curr.get("away")
-                    company = preferred.get("bookmaker", "")
-                    m["asian_handicap"] = hc
-                    m["fid_500"] = fid
+                        return None
                     try:
                         close_std = -float(hc)
+                        oh_raw = ini.get("handicap")
                         open_std = -float(oh_raw) if oh_raw is not None else None
-                        prev = ah_map.get(m["match_id"]) or {}
-                        ah_map[m["match_id"]] = {
-                            "open": open_std if open_std is not None else prev.get("open"),
-                            "close": close_std,
-                        }
                     except (TypeError, ValueError):
-                        continue
-                    try:
-                        with _get_db_ah() as _conn_ah:
-                            _conn_ah.cursor().execute(
-                                "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
-                                "asian_away_odds=%s, asian_company=%s, fid_500=%s "
-                                "WHERE match_id=%s",
-                                (hc, home_odds, away_odds, company, fid, m["match_id"]),
-                            )
-                    except Exception as _we:
-                        logger.warning(f"批量同赔亚盘落库失败 {m['match_id']}: {_we}")
+                        return None
+                    return {
+                        "match_id": m["match_id"],
+                        "fid": fid,
+                        "hc": hc,
+                        "home_odds": curr.get("home"),
+                        "away_odds": curr.get("away"),
+                        "company": preferred.get("bookmaker", ""),
+                        "open_std": open_std,
+                        "close_std": close_std,
+                    }
+
+                with ThreadPoolExecutor(max_workers=min(8, len(need_asian))) as pool:
+                    futs = [pool.submit(_fetch_one_asian, m) for m in need_asian]
+                    for fut in as_completed(futs):
+                        try:
+                            got = fut.result()
+                        except Exception as _fe:
+                            logger.warning(f"批量同赔亚盘单场失败: {_fe}")
+                            continue
+                        if not got:
+                            continue
+                        mid = got["match_id"]
+                        prev = ah_map.get(mid) or {}
+                        ah_map[mid] = {
+                            "open": got["open_std"] if got["open_std"] is not None else prev.get("open"),
+                            "close": got["close_std"],
+                        }
+                        for m in need_asian:
+                            if m["match_id"] == mid:
+                                m["asian_handicap"] = got["hc"]
+                                m["fid_500"] = got["fid"]
+                                break
+                        try:
+                            with _get_db_ah() as _conn_ah:
+                                _conn_ah.cursor().execute(
+                                    "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
+                                    "asian_away_odds=%s, asian_company=%s, fid_500=%s "
+                                    "WHERE match_id=%s",
+                                    (got["hc"], got["home_odds"], got["away_odds"],
+                                     got["company"], got["fid"], mid),
+                                )
+                        except Exception as _we:
+                            logger.warning(f"批量同赔亚盘落库失败 {mid}: {_we}")
             except Exception as e:
                 logger.warning(f"批量同赔亚盘懒回填失败: {e}")
 
