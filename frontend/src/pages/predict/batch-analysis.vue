@@ -250,14 +250,18 @@
         </view>
         <text class="note-close" @tap="closeNoteEditor">关闭</text>
       </view>
-      <textarea
-        class="note-input"
-        v-model="noteDraft"
-        :maxlength="noteMaxLen"
-        placeholder="记录对本场的看法、关注点、计划等，可随时修改"
-        :disabled="noteSaving"
-        auto-height
-      />
+      <view class="note-body">
+        <textarea
+          class="note-input"
+          v-model="noteDraft"
+          :maxlength="noteMaxLen"
+          placeholder="记录对本场的看法、关注点、计划等，可随时修改"
+          :disabled="noteSaving"
+          :show-confirm-bar="false"
+          :adjust-position="true"
+          :cursor-spacing="20"
+        />
+      </view>
       <view class="note-footer">
         <text class="note-count">{{ noteDraft.length }}/{{ noteMaxLen }}</text>
         <view class="note-actions">
@@ -1601,11 +1605,13 @@ onLoad(async (options) => {
   transition: transform 0.2s ease, opacity 0.2s ease;
   pointer-events: none;
   max-height: 64vh;
+  overflow: hidden;
   &.show { transform: translateY(0) scale(1); opacity: 1; pointer-events: auto; }
 }
 .note-header {
   display: flex; justify-content: space-between; align-items: flex-start;
   gap: 16rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid #e2e8f0;
+  flex-shrink: 0;
 }
 .note-title-wrap { min-width: 0; flex: 1; }
 .note-title { display: block; font-size: 28rpx; font-weight: 600; color: #1e293b; }
@@ -1614,10 +1620,18 @@ onLoad(async (options) => {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .note-close { font-size: 24rpx; color: $frbt-primary; padding: 4rpx; flex-shrink: 0; }
-.note-input {
+.note-body {
+  flex: 1;
+  min-height: 0;
   margin: 16rpx 24rpx 0;
-  min-height: 280rpx;
-  max-height: 420rpx;
+  overflow: hidden;
+}
+.note-input {
+  display: block;
+  width: 100%;
+  height: 36vh;
+  min-height: 240rpx;
+  max-height: 36vh;
   padding: 16rpx;
   font-size: 26rpx;
   line-height: 1.55;
@@ -1626,11 +1640,16 @@ onLoad(async (options) => {
   border: 1rpx solid #e2e8f0;
   border-radius: 6rpx;
   box-sizing: border-box;
-  width: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .note-footer {
   display: flex; justify-content: space-between; align-items: center;
   padding: 16rpx 24rpx 20rpx; gap: 16rpx;
+  flex-shrink: 0;
 }
 .note-count { font-size: 20rpx; color: #94a3b8; }
 .note-actions { display: flex; gap: 12rpx; }
