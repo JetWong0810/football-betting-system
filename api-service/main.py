@@ -1258,7 +1258,7 @@ def batch_similar(
 
     status=not_started(在售) 或 finished(已结束, 回测视角)。
     仅 F6(纯历史同赔,无 AI 调用);池(45038场)进程内缓存,~20场 <1s。
-    在售/已结束均返回 ahHandicap(亚盘,缺则懒抓500.com); 已结束额外返回
+    在售/已结束均返回 ahHandicap(亚盘仅 Bet365,缺则无亚盘); 已结束额外返回
     actualScore/actualResult/actualAh/hit, 供对比 F6 方向与实际盘路(回测)。
     """
     import time as _time
@@ -1296,12 +1296,13 @@ def batch_similar(
         cur.execute(f"SELECT * FROM matches {where_clause} {order}", params)
         rows = cur.fetchall()
         # 批量取本场亚盘初/终(标准约定: 负=主让)
-        # 优先 jczq_ah_history; 在售/体彩场几乎不在此表,靠 matches.asian_handicap(仅终盘)
+        # 强制 Bet365 系(company LIKE 'Bet365%'); 不用澳门/matches.asian_handicap 兜底
         ah_map = {}  # mid -> {"open": float|None, "close": float|None}
         if rows:
             mids = [r["match_id"] for r in rows]
             cur.execute(
-                "SELECT match_id, open_handicap, close_handicap FROM jczq_ah_history WHERE match_id IN (%s)"
+                "SELECT match_id, open_handicap, close_handicap FROM jczq_ah_history "
+                "WHERE match_id IN (%s) AND company LIKE 'Bet365%%'"
                 % ",".join(["%s"] * len(mids)), mids)
             for ar in cur.fetchall():
                 oh = ar.get("open_handicap")
@@ -1312,15 +1313,8 @@ def batch_similar(
                     "open": float(oh) if oh is not None else None,
                     "close": float(ch) if ch is not None else None,
                 }
-        # 兜底: matches.asian_handicap(500.com 原值正=主让 → 取反) 仅终盘, 初盘待懒抓
-        for r in rows:
-            if r["match_id"] not in ah_map and r.get("asian_handicap") is not None:
-                try:
-                    ah_map[r["match_id"]] = {"open": None, "close": -float(r["asian_handicap"])}
-                except (TypeError, ValueError):
-                    pass
 
-    # 缺终盘或缺初盘: 并行懒抓500.com(优先Bet365初终, 否则澳门)
+    # 缺终盘或缺初盘: 并行懒抓500.com 仅 Bet365; 无则本场无亚盘
     # 并行+写入 jczq_ah_history, 避免串行超时, 且下次直接命中初/终盘。
     if rows:
         need_asian = [
@@ -1347,9 +1341,7 @@ def batch_similar(
                     asian_list = fetch_asian_handicap(fid)
                     preferred = next(
                         (a for a in asian_list if a.get("bookmaker") == "Bet365"), None
-                    ) or next(
-                        (a for a in asian_list if a.get("bookmaker") == "澳门"), None
-                    ) or (asian_list[0] if asian_list else None)
+                    )
                     if not preferred or not preferred.get("current"):
                         return None
                     curr = preferred["current"]
@@ -1371,7 +1363,7 @@ def batch_similar(
                         "away_odds": curr.get("away"),
                         "open_home": ini.get("home"),
                         "open_away": ini.get("away"),
-                        "company": preferred.get("bookmaker", ""),
+                        "company": "Bet365",
                         "open_std": open_std,
                         "close_std": close_std,
                     }
@@ -1407,7 +1399,8 @@ def batch_similar(
                                     (got["hc"], got["home_odds"], got["away_odds"],
                                      got["company"], got["fid"], mid),
                                 )
-                                # 标准约定负=主让; 写入后下次批量不再重复抓
+                                # 标准约定负=主让; 写入后下次批量不再重复抓;
+                                # 覆盖原澳门等非 Bet365 行
                                 if got["open_std"] is not None or got["close_std"] is not None:
                                     cur_ah.execute(
                                         "INSERT INTO jczq_ah_history "
@@ -1421,12 +1414,12 @@ def batch_similar(
                                         "close_handicap=COALESCE(VALUES(close_handicap), close_handicap), "
                                         "close_home_odds=COALESCE(VALUES(close_home_odds), close_home_odds), "
                                         "close_away_odds=COALESCE(VALUES(close_away_odds), close_away_odds), "
-                                        "company=COALESCE(VALUES(company), company)",
+                                        "company=VALUES(company)",
                                         (
                                             mid,
                                             got["open_std"], got["open_home"], got["open_away"],
                                             got["close_std"], got["home_odds"], got["away_odds"],
-                                            got["company"] or None,
+                                            got["company"],
                                         ),
                                     )
                         except Exception as _we:
@@ -2026,13 +2019,14 @@ def predict_similar_odds_detail(
             "reason": "无竞彩spf赔率，无法匹配历史同赔",
         }
 
-    # 亚盘初/终: jczq_ah_history → matches.asian_handicap 取反
+    # 亚盘初/终: 仅 Bet365 系 jczq_ah_history, 不用澳门/matches 兜底
     ah_open = ah_close = None
     try:
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT open_handicap, close_handicap FROM jczq_ah_history WHERE match_id=%s",
+                "SELECT open_handicap, close_handicap FROM jczq_ah_history "
+                "WHERE match_id=%s AND company LIKE 'Bet365%%'",
                 (match_id,),
             )
             ah = cur.fetchone()
@@ -2043,11 +2037,6 @@ def predict_similar_odds_detail(
                     ah_close = float(ah["close_handicap"])
     except Exception as e:
         logger.warning(f"similar-odds 读亚盘失败 {match_id}: {e}")
-    if ah_close is None and match.get("asian_handicap") is not None:
-        try:
-            ah_close = -float(match["asian_handicap"])  # matches 存正=主让, 取反
-        except (TypeError, ValueError):
-            pass
 
     f6 = calc_factor_jczq_similar_odds(
         spf, league=league, exclude_match_id=match_id,

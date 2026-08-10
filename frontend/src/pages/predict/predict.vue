@@ -457,32 +457,7 @@ const isSameLeagueMatch = computed(() => isSameLeagueEligible(selectedMatch.valu
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
 
-// 横屏全屏展示同赔表格(安卓H5): 打开时进全屏+锁横屏, 关闭时还原
-const _lockLandscape = async () => {
-  if (typeof document === 'undefined') return
-  try {
-    const el = document.documentElement
-    if (el.requestFullscreen && !document.fullscreenElement) {
-      await el.requestFullscreen()
-    }
-  } catch (e) { /* 忽略 */ }
-  try {
-    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.lock === 'function') {
-      await screen.orientation.lock('landscape')
-    }
-  } catch (e) { /* 静默失败:退回竖屏弹窗 */ }
-}
-const _exitFullscreen = async () => {
-  try {
-    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.unlock === 'function') {
-      screen.orientation.unlock()
-    }
-  } catch (e) { /* 忽略 */ }
-  if (typeof document !== 'undefined' && document.fullscreenElement) {
-    try { await document.exitFullscreen() } catch (e) { /* 忽略 */ }
-  }
-}
-const openSimilarModal = async () => {
+const openSimilarModal = () => {
   similarJapanOnly.value = false
   similarLeagueOnly.value = false
   similarModeLoading.value = false
@@ -491,14 +466,12 @@ const openSimilarModal = async () => {
     similarMatches.value = similarDefaultMatches.value
   }
   showSimilarModal.value = true
-  await _lockLandscape()
 }
-const closeSimilarModal = async () => {
+const closeSimilarModal = () => {
   showSimilarModal.value = false
   similarJapanOnly.value = false
   similarLeagueOnly.value = false
   similarModeLoading.value = false
-  await _exitFullscreen()
 }
 function _restoreDefaultSimilarPredict() {
   similarJapanOnly.value = false
@@ -558,14 +531,6 @@ async function toggleLeagueOnly() {
   } finally {
     similarModeLoading.value = false
   }
-}
-// 用户按ESC退出全屏时同步关闭弹窗
-if (typeof document !== 'undefined') {
-  document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && showSimilarModal.value) {
-      showSimilarModal.value = false
-    }
-  })
 }
 
 const allMatches = ref([])

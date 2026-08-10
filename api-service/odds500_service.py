@@ -41,7 +41,9 @@ COMPANY_MAP = {
     "Pi****le": "Pinnacle", "Pi****le平*": "Pinnacle",
     "*冠": "皇冠", "*冠*冠": "皇冠",
     "**t3*5": "Bet365", "**t3*5**t3*5": "Bet365",
+    "B*****": "Bet365", "B*****B*****": "Bet365",
     "威**尔": "威廉希尔", "威**尔威**尔": "威廉希尔",
+    "威***": "威廉希尔", "威***威***": "威廉希尔",
     "易*博": "易胜博", "易*博易*博": "易胜博",
     "*门": "澳门", "*门*门": "澳门",
     "立*": "立博", "立*立*": "立博",
@@ -98,6 +100,12 @@ def _identify_company(raw_name: str) -> str:
             return short
     return raw_name
 
+
+def _identify_asian_company(raw_name: str, cid: str = "") -> str:
+    """亚盘行识别: 优先 cid(Bet365=3), 再走脱敏名映射。"""
+    if cid and str(cid).isdigit() and int(cid) == 3:
+        return "Bet365"
+    return _identify_company(raw_name)
 
 def _parse_odds(text: str) -> Optional[float]:
     text = text.strip().replace("↑", "").replace("↓", "")
@@ -368,8 +376,8 @@ def _parse_asian_page(html: str) -> List[Dict[str, Any]]:
         tds = tr.find_all("td")
         if len(tds) >= 12 and tds[0].get("class") == ["td_one"]:
             company_raw = tds[1].get_text(strip=True)
-            company = _identify_company(company_raw)
             cid = tr.get("id", "")
+            company = _identify_asian_company(company_raw, cid)
 
             latest_home = _parse_odds(tds[3].get_text(strip=True))
             latest_hcap_text = _clean_handicap(tds[4].get_text(strip=True))

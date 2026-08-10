@@ -27,6 +27,12 @@ globs: scraper-service/**, api-service/sync_history.py, api-service/odds500_serv
 - scraper `backfill_scores(days=3)` 在每次 run_once 末尾从 500 网竞彩列表页(`score_500.py` fetch_match_score)回填已完赛缺比分场。
 - api-service 预测时若已完赛无比分也实时回填(main.py predict 端点)。
 
+## 在售 Bet365 亚盘定时刷新
+- scraper 每轮(`SYNC_INTERVAL_SECONDS` 默认 600s)在体彩同步后调用 `refresh_live_asian_bet365()`([scraper/asian_bet365.py](scraper-service/scraper/asian_bet365.py))。
+- 范围: 体彩在售/未出赛果(同同赔 not_started 口径, 开赛超 72h 脏数据排除)。
+- 仅 Bet365; 写 `jczq_ah_history`(终盘每次覆盖, 初盘保留首抓) + `matches.asian_*`/`fid_500`。
+- 同赔页读库; 仅缺初/终时懒抓兜底, 不每次打开全量重抓。
+
 ## timestamp 坑(已修)
 15 场 2026-05-29 历史比赛因 world-cup 源 kickoff_time 空致 match_timestamp=NULL,前端按 timestamp<now 判断状态失效→已完赛误显"未开始"。已用 match_date 兜底,sync_history.py 加兜底。
 

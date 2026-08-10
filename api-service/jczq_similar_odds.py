@@ -3,7 +3,7 @@
 镜像 wc_similar_odds.py 的匹配逻辑，数据源换 MySQL jczq_odds_history。
 匹配条件: 初盘低赔 ±tolerance + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致(升/降)
 
-数据口径: 胜平负(spf)。每场取最早 change_time 行=初盘、最晚=终盘；
+数据口径: 胜平负(spf)。每场初盘=history 最早行、终盘优先 odds_win_draw_lose.had(与列表同步);
 结果(result)按 raw 比分算主胜/平/客胜。样本: 46673 场有 spf 变动≥2 + 已完赛(2018-2026)。
 """
 
@@ -347,29 +347,66 @@ def _calc_stats(matches: List[Dict]) -> Dict:
 def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict]:
     """取某场竞彩比赛指定口径的初盘/终盘, 组装成 jczq_company dict。
 
-    odds_type: 'nspf'(让球胜平负, 供F6历史同赔匹配历史池) 或 'spf'(胜平负, 供F5竞彩赔率, 同世界杯口径)。
-    initial=最早变动行, current=最晚变动行。无记录返回 None。
+    odds_type: 'nspf'(让球胜平负) 或 'spf'(胜平负, 同世界杯口径)。
+    initial = jczq_odds_history 最早变动行。
+    current 优先 odds_win_draw_lose 即时快照(与赛事列表同口径: spf←had / nspf←hhad),
+    避免 scraper 已更新列表但 history 因变动门槛未 append 导致同赔仍用旧终盘;
+    无即时快照则回退 history 最晚行。
+    无 history 但有即时快照时 initial==current(等同 live 补种, 配合 F6 无变动降级)。
     """
-    sql = """
+    live_type = {"spf": "had", "nspf": "hhad"}.get(odds_type)
+    hist_sql = """
         SELECT odds_win, odds_draw, odds_loss, change_time
         FROM jczq_odds_history
         WHERE match_id = %s AND odds_type = %s
         ORDER BY change_time
     """
+    live_sql = """
+        SELECT win_odds, draw_odds, lose_odds
+        FROM odds_win_draw_lose
+        WHERE match_id = %s AND odds_type = %s
+        LIMIT 1
+    """
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (match_id, odds_type))
+            cur.execute(hist_sql, (match_id, odds_type))
             rows = cur.fetchall()
+            live = None
+            if live_type:
+                cur.execute(live_sql, (match_id, live_type))
+                live = cur.fetchone()
     finally:
         conn.close()
-    if not rows:
-        return None
-    first, last = rows[0], rows[-1]
-    return {
-        "initial": {"win": float(first["odds_win"]), "draw": float(first["odds_draw"]), "lose": float(first["odds_loss"])},
-        "current": {"win": float(last["odds_win"]), "draw": float(last["odds_draw"]), "lose": float(last["odds_loss"])},
-    }
+
+    live_current = None
+    if live:
+        try:
+            lw = float(live["win_odds"] or 0)
+            ld = float(live["draw_odds"] or 0)
+            ll = float(live["lose_odds"] or 0)
+        except (TypeError, ValueError):
+            lw = ld = ll = 0.0
+        if lw > 0 or ld > 0 or ll > 0:
+            live_current = {"win": lw, "draw": ld, "lose": ll}
+
+    if rows:
+        first, last = rows[0], rows[-1]
+        initial = {
+            "win": float(first["odds_win"]),
+            "draw": float(first["odds_draw"]),
+            "lose": float(first["odds_loss"]),
+        }
+        current = live_current or {
+            "win": float(last["odds_win"]),
+            "draw": float(last["odds_draw"]),
+            "lose": float(last["odds_loss"]),
+        }
+        return {"initial": initial, "current": current}
+
+    if live_current:
+        return {"initial": dict(live_current), "current": dict(live_current)}
+    return None
 
 
 def get_match_nspf_odds(match_id: str) -> Optional[Dict]:
@@ -403,9 +440,9 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
 def get_spf_pool() -> List[Dict]:
     """spf(胜平负)历史同赔池: 每场初盘+终盘+比分+亚盘让球, 结果按raw比分算(主胜/平/客胜)。
 
-    让球用亚盘收盘线(jczq_ah_history.close_handicap, 标准亚盘: 正=主受让 负=主让)结算盘路;
-    另带 open_handicap 供弹窗展示初→终。无亚盘则 handicap/open_handicap=None。
-    过滤: spf变动≥2 + 已完赛。
+    让球用 Bet365 系亚盘收盘线(jczq_ah_history.close_handicap, company LIKE 'Bet365%',
+    标准亚盘: 正=主受让 负=主让)结算盘路; 另带 open_handicap 供弹窗展示初→终。
+    无 Bet365 亚盘则 handicap/open_handicap=None。过滤: spf变动≥2 + 已完赛。
     """
     global _spf_pool_cache
     if _spf_pool_cache is not None:
@@ -430,7 +467,7 @@ def get_spf_pool() -> List[Dict]:
         JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'spf' AND f.change_time = t.mn
         JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'spf' AND l.change_time = t.mx
         JOIN matches m ON m.match_id = t.match_id
-        LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id
+        LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id AND ah.company LIKE 'Bet365%%'
         WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
     """
     conn = _get_conn()

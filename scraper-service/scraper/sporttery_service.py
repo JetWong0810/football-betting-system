@@ -117,7 +117,7 @@ class SportterySyncService:
     )
 
     def run_once(self) -> Dict[str, int]:
-        self.stats = {"matches": 0, "odds": 0, "scores": 0, "closing_odds": 0}
+        self.stats = {"matches": 0, "odds": 0, "scores": 0, "closing_odds": 0, "asian": 0}
         for pool_name, pool_code in settings.POOL_CODES.items():
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
@@ -131,6 +131,11 @@ class SportterySyncService:
             self.stats["closing_odds"] = self.backfill_closing_odds(days=3)
         except Exception as e:
             logger.warning(f"终盘回填失败: {e}")
+        # 在售 Bet365 亚盘定时刷新(终盘覆盖, 供同赔页)
+        try:
+            self.stats["asian"] = self.refresh_live_asian_bet365()
+        except Exception as e:
+            logger.warning(f"在售亚盘刷新失败: {e}")
         self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
         return self.stats
 
@@ -235,6 +240,65 @@ class SportterySyncService:
                 self.repository.update_match_score(m["match_id"], score[0], score[1])
                 logger.info(f"  回填 {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
                 updated += 1
+        return updated
+
+    def refresh_live_asian_bet365(self, max_workers: int = 4) -> int:
+        """在售场强制刷新 Bet365 亚盘终盘(每轮 scraper 调用)。
+
+        仅 Bet365; 写入 jczq_ah_history(终盘覆盖, 初盘保留首抓) + matches.asian_*。
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from scraper.asian_bet365 import clear_fid_cache, fetch_bet365_line, get_fid
+
+        live = self.repository.list_live_for_asian()
+        if not live:
+            return 0
+        clear_fid_cache()
+        logger.info(f"在售亚盘刷新: {len(live)} 场(Bet365)")
+
+        def _one(m: Dict) -> Optional[str]:
+            mid = m.get("match_id")
+            sale_date = derive_sale_date(m) or m.get("match_date")
+            mcode = m.get("match_code")
+            if not mid or not sale_date or not mcode:
+                return None
+            if hasattr(sale_date, "strftime"):
+                sale_date = sale_date.strftime("%Y-%m-%d")
+            else:
+                sale_date = str(sale_date)[:10]
+            fid = m.get("fid_500") or get_fid(sale_date, mcode)
+            if not fid:
+                return None
+            line = fetch_bet365_line(fid)
+            if not line or line.get("close_hc") is None:
+                return None
+            try:
+                self.repository.upsert_asian_bet365(
+                    mid,
+                    str(fid),
+                    raw_close_hc=float(line["close_hc"]),
+                    raw_open_hc=line.get("open_hc"),
+                    close_home=line.get("close_home"),
+                    close_away=line.get("close_away"),
+                    open_home=line.get("open_home"),
+                    open_away=line.get("open_away"),
+                )
+            except Exception as e:
+                logger.warning(f"亚盘落库失败 {mid}: {e}")
+                return None
+            return mid
+
+        updated = 0
+        workers = min(max_workers, max(1, len(live)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(_one, m) for m in live]
+            for fut in as_completed(futs):
+                try:
+                    if fut.result():
+                        updated += 1
+                except Exception as e:
+                    logger.warning(f"亚盘单场失败: {e}")
+        logger.info(f"在售亚盘刷新完成: {updated}/{len(live)}")
         return updated
 
     # Parsing helpers -----------------------------------------------------
