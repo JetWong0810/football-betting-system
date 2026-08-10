@@ -1300,10 +1300,12 @@ def batch_similar(
         ah_map = {}  # mid -> {"open": float|None, "close": float|None}
         if rows:
             mids = [r["match_id"] for r in rows]
+            ph = ",".join(["%s"] * len(mids))
             cur.execute(
-                "SELECT match_id, open_handicap, close_handicap FROM jczq_ah_history "
-                "WHERE match_id IN (%s) AND company LIKE 'Bet365%%'"
-                % ",".join(["%s"] * len(mids)), mids)
+                f"SELECT match_id, open_handicap, close_handicap FROM jczq_ah_history "
+                f"WHERE match_id IN ({ph}) AND company LIKE %s",
+                (*mids, "Bet365%"),
+            )
             for ar in cur.fetchall():
                 oh = ar.get("open_handicap")
                 ch = ar.get("close_handicap")
@@ -2026,8 +2028,8 @@ def predict_similar_odds_detail(
             cur = conn.cursor()
             cur.execute(
                 "SELECT open_handicap, close_handicap FROM jczq_ah_history "
-                "WHERE match_id=%s AND company LIKE 'Bet365%%'",
-                (match_id,),
+                "WHERE match_id=%s AND company LIKE %s",
+                (match_id, "Bet365%"),
             )
             ah = cur.fetchone()
             if ah:

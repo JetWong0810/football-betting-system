@@ -467,7 +467,7 @@ def get_spf_pool() -> List[Dict]:
         JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'spf' AND f.change_time = t.mn
         JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'spf' AND l.change_time = t.mx
         JOIN matches m ON m.match_id = t.match_id
-        LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id AND ah.company LIKE 'Bet365%%'
+        LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id AND ah.company LIKE 'Bet365%'
         WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
     """
     conn = _get_conn()
