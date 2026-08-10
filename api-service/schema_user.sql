@@ -54,6 +54,20 @@ ALTER TABLE user_configs ADD COLUMN withdraw_ratio DECIMAL(5,4) DEFAULT 0.5000 C
 ALTER TABLE user_configs ADD COLUMN realized_withdraw DECIMAL(10,2) DEFAULT 0.00 COMMENT '已提取落袋的盈利' AFTER withdraw_ratio;
 ALTER TABLE user_configs ADD COLUMN cool_hours INT DEFAULT 2 COMMENT '连不中暂停后冷静时长(小时)' AFTER realized_withdraw;
 
+-- 比赛个人分析备注（关联用户 + match_id）
+CREATE TABLE IF NOT EXISTS match_personal_notes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    match_id VARCHAR(64) NOT NULL COMMENT 'matches.match_id',
+    content TEXT NOT NULL COMMENT '个人分析正文',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_match (user_id, match_id),
+    INDEX idx_match_id (match_id),
+    INDEX idx_user_updated (user_id, updated_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='比赛个人分析备注';
+
 -- 用户投注记录表（关联用户）
 CREATE TABLE IF NOT EXISTS user_bets (
     id INT AUTO_INCREMENT PRIMARY KEY,

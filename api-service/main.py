@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from database import init_db, fetch_sync_status
 from repository import OddsRepository, derive_sale_date
 from user_repository import UserRepository
+from match_note_repository import MatchNoteRepository, NOTE_MAX_LEN
 from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history, fetch_match_data, get_match_squad_worth
 from predict_service import predict_match
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
@@ -97,6 +98,7 @@ app.add_middleware(
 
 repo = OddsRepository()
 user_repo = UserRepository()
+match_note_repo = MatchNoteRepository()
 
 
 def save_avatar_from_base64(data: str, file_ext: Optional[str] = None) -> str:
@@ -206,6 +208,10 @@ class UpdateBetRequest(BaseModel):
     stake: Optional[float] = None
     odds: Optional[float] = None
     profit: Optional[float] = None
+
+
+class UpsertMatchNoteRequest(BaseModel):
+    content: str = Field(default="", description="个人分析正文; 空字符串表示删除")
 
 
 class OcrParseImageRequest(BaseModel):
@@ -1065,6 +1071,49 @@ def delete_bet(bet_id: int, user_id: int = Depends(require_auth)):
     if not success:
         raise HTTPException(status_code=404, detail="投注记录不存在")
     return {"message": "删除成功"}
+
+
+# ==================== 比赛个人分析备注 ====================
+
+@app.get("/api/match-notes")
+def list_match_notes(
+    match_ids: str = Query(..., description="逗号分隔的 match_id 列表"),
+    user_id: int = Depends(require_auth),
+):
+    """批量查询当前用户对若干场次的个人分析。"""
+    ids = [x.strip() for x in (match_ids or "").split(",") if x.strip()]
+    if len(ids) > 200:
+        raise HTTPException(status_code=400, detail="单次最多查询 200 场")
+    notes = match_note_repo.list_by_match_ids(user_id, ids)
+    return {"notes": notes, "maxLen": NOTE_MAX_LEN}
+
+
+@app.get("/api/match-notes/{match_id}")
+def get_match_note(match_id: str, user_id: int = Depends(require_auth)):
+    note = match_note_repo.get_note(user_id, match_id)
+    if not note:
+        return {"matchId": match_id, "content": "", "updatedAt": None, "createdAt": None}
+    return note
+
+
+@app.put("/api/match-notes/{match_id}")
+def upsert_match_note(
+    match_id: str,
+    req: UpsertMatchNoteRequest,
+    user_id: int = Depends(require_auth),
+):
+    """创建或更新个人分析; content 为空则删除。"""
+    try:
+        note = match_note_repo.upsert_note(user_id, match_id, req.content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return note
+
+
+@app.delete("/api/match-notes/{match_id}")
+def delete_match_note(match_id: str, user_id: int = Depends(require_auth)):
+    match_note_repo.delete_note(user_id, match_id)
+    return {"message": "已删除", "matchId": match_id}
 
 
 # ==================== OCR图片识别相关API ====================
@@ -1938,14 +1987,17 @@ def jczq_similar_odds(
 def predict_similar_odds_detail(
     match_id: str,
     japan_only: bool = Query(False, description="仅日本赛事+放宽容差(弹窗开关)"),
+    league_only: bool = Query(False, description="仅本场同名赛事+放宽容差(弹窗「同赛事」)"),
 ):
-    """单场历史同赔详情(供弹窗「仅日本」切换重查)。
+    """单场历史同赔详情(供弹窗「仅日本」/「同赛事」切换重查)。
 
-    默认口径与 F6 一致; japan_only 时硬过滤日职/日乙/杯赛并放宽为低赔±0.05/高赔±0.15。
+    默认口径与 F6 一致;
+    japan_only: 硬过滤日职/日乙/杯赛 + 低赔±0.05/高赔±0.15;
+    league_only: 硬过滤本场 league_name 完全同名 + 同上容差(不含日本; 与 japan_only 互斥)。
     不影响批量分析/预测里的默认 F6 结果。
     """
     from predict_service import calc_factor_jczq_similar_odds
-    from jczq_similar_odds import get_match_spf_odds, is_japan_league
+    from jczq_similar_odds import get_match_spf_odds, is_japan_league, is_same_league_eligible
     from database import get_db
 
     match = repo.get_match(match_id)
@@ -1953,8 +2005,12 @@ def predict_similar_odds_detail(
         raise HTTPException(status_code=404, detail="未找到比赛")
 
     league = match.get("league_name") or ""
+    if japan_only and league_only:
+        raise HTTPException(status_code=400, detail="japan_only 与 league_only 不能同时开启")
     if japan_only and not is_japan_league(league):
         raise HTTPException(status_code=400, detail="仅日本模式仅适用于日职/日乙/天皇杯等日本赛事")
+    if league_only and not is_same_league_eligible(league):
+        raise HTTPException(status_code=400, detail="同赛事模式仅适用于五大联赛及二级、葡超/荷甲等指定赛事")
 
     spf = get_match_spf_odds(match_id)
     if not spf:
@@ -1962,7 +2018,9 @@ def predict_similar_odds_detail(
             "matchId": match_id,
             "league": league,
             "japanOnly": japan_only,
+            "leagueOnly": league_only,
             "isJapanLeague": is_japan_league(league),
+            "isSameLeagueEligible": is_same_league_eligible(league),
             "matches": [],
             "refScore": 0,
             "reason": "无竞彩spf赔率，无法匹配历史同赔",
@@ -1993,13 +2051,16 @@ def predict_similar_odds_detail(
 
     f6 = calc_factor_jczq_similar_odds(
         spf, league=league, exclude_match_id=match_id,
-        ah_handicap=ah_close, ah_open=ah_open, japan_mode=japan_only,
+        ah_handicap=ah_close, ah_open=ah_open,
+        japan_mode=japan_only, same_league_mode=league_only,
     )
     return {
         "matchId": match_id,
         "league": league,
         "japanOnly": japan_only,
+        "leagueOnly": league_only,
         "isJapanLeague": is_japan_league(league),
+        "isSameLeagueEligible": is_same_league_eligible(league),
         "matches": f6.get("matches") or [],
         "refScore": f6.get("refScore"),
         "refBreakdown": f6.get("refBreakdown"),

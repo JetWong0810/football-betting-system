@@ -227,12 +227,54 @@
             <text class="ol-move" :class="moveClass(it.spf)">{{ moveLabel(it.spf) }}</text>
           </view>
 
+          <view class="row-note" @tap.stop="openNoteEditor(it)">
+            <text class="note-lab">个人分析</text>
+            <text class="note-sum" :class="{ empty: !notePreview(it.matchId) }">{{ notePreview(it.matchId) || '写分析' }}</text>
+            <text class="note-go">{{ noteMap[it.matchId] ? '编辑' : '填写' }} ›</text>
+          </view>
+
           <view class="row-detail" @tap="openSimilar(it)">
             <text>同赔详情 {{ it.f6?.matches?.length || 0 }} 场 ›</text>
           </view>
         </view>
       </view>
     </scroll-view>
+
+    <!-- 个人分析编辑 -->
+    <view class="note-mask" v-if="showNoteEditor" @tap="closeNoteEditor"></view>
+    <view class="note-modal" :class="{ show: showNoteEditor }" @tap.stop>
+      <view class="note-header">
+        <view class="note-title-wrap">
+          <text class="note-title">个人分析</text>
+          <text v-if="noteTarget" class="note-teams">{{ noteTarget.homeTeam?.name }} vs {{ noteTarget.awayTeam?.name }}</text>
+        </view>
+        <text class="note-close" @tap="closeNoteEditor">关闭</text>
+      </view>
+      <textarea
+        class="note-input"
+        v-model="noteDraft"
+        :maxlength="noteMaxLen"
+        placeholder="记录对本场的看法、关注点、计划等，可随时修改"
+        :disabled="noteSaving"
+        auto-height
+      />
+      <view class="note-footer">
+        <text class="note-count">{{ noteDraft.length }}/{{ noteMaxLen }}</text>
+        <view class="note-actions">
+          <text
+            v-if="noteMap[noteTarget?.matchId]"
+            class="note-btn danger"
+            :class="{ disabled: noteSaving }"
+            @tap="clearNote"
+          >清空</text>
+          <text
+            class="note-btn primary"
+            :class="{ disabled: noteSaving }"
+            @tap="saveNote"
+          >{{ noteSaving ? '保存中' : '保存' }}</text>
+        </view>
+      </view>
+    </view>
 
     <SimBetLineSheet
       :visible="showSimSheet"
@@ -259,14 +301,23 @@
           <text
             v-if="similarIsJapan"
             class="jp-toggle"
-            :class="{ on: similarJapanOnly, loading: similarJapanLoading }"
+            :class="{ on: similarJapanOnly, loading: similarModeLoading }"
             @tap.stop="toggleJapanOnly"
           >仅日本</text>
+          <text
+            v-else-if="similarSameLeagueEligible"
+            class="jp-toggle"
+            :class="{ on: similarLeagueOnly, loading: similarModeLoading }"
+            @tap.stop="toggleLeagueOnly"
+          >同赛事</text>
         </view>
         <text class="similar-close" @tap="closeSimilar">关闭</text>
       </view>
       <view v-if="similarJapanOnly" class="jp-hint">
         <text>仅日职/日乙/杯赛 · 低赔±0.05 · 高赔±0.15</text>
+      </view>
+      <view v-else-if="similarLeagueOnly" class="jp-hint">
+        <text>仅{{ similarLeagueName || '同名赛事' }} · 低赔±0.05 · 高赔±0.15</text>
       </view>
       <view v-if="similarStats.total > 0" class="similar-stats">
         <view class="stats-row">
@@ -386,13 +437,15 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
+import { requireAuth, isLoggedIn } from '@/utils/auth'
 import { useSimBetStore } from '@/stores/simBetStore'
 import { lowKeyFromSpf } from '@/utils/simBet'
 import { calcSimilarStats } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
+import { isSameLeagueEligible } from '@/utils/sameLeague'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
 import SimBetSlip from '@/components/SimBetSlip.vue'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
@@ -416,9 +469,12 @@ const similarRefScore = ref(null)
 const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const similarMatchId = ref('')
+const similarLeagueName = ref('')
 const similarIsJapan = ref(false)
+const similarSameLeagueEligible = ref(false)
 const similarJapanOnly = ref(false)
-const similarJapanLoading = ref(false)
+const similarLeagueOnly = ref(false)
+const similarModeLoading = ref(false)
 const similarStats = computed(() => calcSimilarStats(similarMatches.value))
 const showJapanIntel = ref(false)
 const japanIntelData = ref(null)
@@ -426,6 +482,13 @@ const japanIntelLoading = ref(false)
 const japanIntelCache = ref({})
 const showSimSheet = ref(false)
 const simTarget = ref(null)
+/** matchId -> { content, updatedAt } */
+const noteMap = reactive({})
+const showNoteEditor = ref(false)
+const noteTarget = ref(null)
+const noteDraft = ref('')
+const noteSaving = ref(false)
+const noteMaxLen = 5000
 /** 多选: upper/lower/neutral/hit */
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
@@ -922,46 +985,83 @@ function openSimilar(it) {
   similarMatches.value = similarDefaultMatches.value
   similarRefScore.value = similarDefaultRef.value
   similarMatchId.value = it?.matchId || ''
+  similarLeagueName.value = it?.league || ''
   similarIsJapan.value = isJapanLeague(it?.league)
+  similarSameLeagueEligible.value = isSameLeagueEligible(it?.league)
   similarJapanOnly.value = false
-  similarJapanLoading.value = false
+  similarLeagueOnly.value = false
+  similarModeLoading.value = false
   showSimilar.value = true
 }
 function closeSimilar() {
   showSimilar.value = false
   similarRefScore.value = null
   similarJapanOnly.value = false
-  similarJapanLoading.value = false
+  similarLeagueOnly.value = false
+  similarModeLoading.value = false
   similarMatchId.value = ''
+  similarLeagueName.value = ''
   similarIsJapan.value = false
+  similarSameLeagueEligible.value = false
+}
+function _restoreDefaultSimilar() {
+  similarJapanOnly.value = false
+  similarLeagueOnly.value = false
+  similarMatches.value = similarDefaultMatches.value
+  similarRefScore.value = similarDefaultRef.value
 }
 async function toggleJapanOnly() {
-  if (!similarIsJapan.value || similarJapanLoading.value) return
+  if (!similarIsJapan.value || similarModeLoading.value) return
   if (similarJapanOnly.value) {
-    // 关: 恢复默认全联赛匹配
-    similarJapanOnly.value = false
-    similarMatches.value = similarDefaultMatches.value
-    similarRefScore.value = similarDefaultRef.value
+    _restoreDefaultSimilar()
     return
   }
   if (!similarMatchId.value) {
     uni.showToast({ title: '比赛ID缺失', icon: 'none' })
     return
   }
-  similarJapanLoading.value = true
+  similarModeLoading.value = true
   try {
     const data = await request({
       url: `/api/predict/${encodeURIComponent(similarMatchId.value)}/similar-odds`,
       method: 'GET',
       data: { japan_only: true },
     })
+    similarLeagueOnly.value = false
     similarJapanOnly.value = true
     similarMatches.value = data?.matches || []
     similarRefScore.value = data?.refScore != null ? data.refScore : null
   } catch (e) {
     uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
   } finally {
-    similarJapanLoading.value = false
+    similarModeLoading.value = false
+  }
+}
+async function toggleLeagueOnly() {
+  if (!similarSameLeagueEligible.value || similarModeLoading.value) return
+  if (similarLeagueOnly.value) {
+    _restoreDefaultSimilar()
+    return
+  }
+  if (!similarMatchId.value) {
+    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
+    return
+  }
+  similarModeLoading.value = true
+  try {
+    const data = await request({
+      url: `/api/predict/${encodeURIComponent(similarMatchId.value)}/similar-odds`,
+      method: 'GET',
+      data: { league_only: true },
+    })
+    similarJapanOnly.value = false
+    similarLeagueOnly.value = true
+    similarMatches.value = data?.matches || []
+    similarRefScore.value = data?.refScore != null ? data.refScore : null
+  } catch (e) {
+    uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
+  } finally {
+    similarModeLoading.value = false
   }
 }
 
@@ -1024,6 +1124,101 @@ function goPredict(it) {
   uni.navigateTo({ url })
 }
 
+function notePreview(matchId) {
+  const raw = (noteMap[matchId]?.content || '').replace(/\s+/g, ' ').trim()
+  if (!raw) return ''
+  return raw.length > 36 ? raw.slice(0, 36) + '…' : raw
+}
+
+async function loadNotesForItems(list) {
+  if (!isLoggedIn()) return
+  const ids = (list || []).map((it) => it.matchId).filter(Boolean)
+  if (!ids.length) return
+  try {
+    const data = await request({
+      url: '/api/match-notes',
+      data: { match_ids: ids.join(',') },
+    })
+    const notes = data?.notes || {}
+    // 清掉本次列表以外的缓存以免串日残留误导; 仅保留仍在列表内的
+    Object.keys(noteMap).forEach((k) => {
+      if (!ids.includes(k)) delete noteMap[k]
+    })
+    Object.keys(notes).forEach((mid) => {
+      noteMap[mid] = notes[mid]
+    })
+  } catch {
+    // 未登录/接口失败不阻断同赔列表
+  }
+}
+
+function openNoteEditor(it) {
+  if (!requireAuth()) return
+  noteTarget.value = it
+  noteDraft.value = noteMap[it.matchId]?.content || ''
+  showNoteEditor.value = true
+}
+
+function closeNoteEditor(force = false) {
+  if (noteSaving.value && !force) return
+  showNoteEditor.value = false
+  noteTarget.value = null
+  noteDraft.value = ''
+}
+
+async function saveNote() {
+  const it = noteTarget.value
+  if (!it?.matchId || noteSaving.value) return
+  if (!requireAuth()) return
+  noteSaving.value = true
+  try {
+    const data = await request({
+      url: `/api/match-notes/${encodeURIComponent(it.matchId)}`,
+      method: 'PUT',
+      data: { content: noteDraft.value },
+    })
+    if (data?.deleted || !(data?.content || '').trim()) {
+      delete noteMap[it.matchId]
+      uni.showToast({ title: '已清空', icon: 'none' })
+    } else {
+      noteMap[it.matchId] = {
+        content: data.content,
+        updatedAt: data.updatedAt,
+        createdAt: data.createdAt,
+      }
+      uni.showToast({ title: '已保存', icon: 'none' })
+    }
+    noteSaving.value = false
+    closeNoteEditor(true)
+  } catch (e) {
+    uni.showToast({ title: e?.message || '保存失败', icon: 'none' })
+  } finally {
+    noteSaving.value = false
+  }
+}
+
+async function clearNote() {
+  const it = noteTarget.value
+  if (!it?.matchId || noteSaving.value) return
+  if (!requireAuth()) return
+  noteSaving.value = true
+  try {
+    await request({
+      url: `/api/match-notes/${encodeURIComponent(it.matchId)}`,
+      method: 'DELETE',
+    })
+    delete noteMap[it.matchId]
+    noteDraft.value = ''
+    uni.showToast({ title: '已清空', icon: 'none' })
+    noteSaving.value = false
+    closeNoteEditor(true)
+  } catch (e) {
+    uni.showToast({ title: e?.message || '清空失败', icon: 'none' })
+  } finally {
+    noteSaving.value = false
+  }
+}
+
 async function loadBatch(opts = {}) {
   const autoFlipStatus = !!opts.autoFlipStatus
   loading.value = true
@@ -1052,6 +1247,7 @@ async function loadBatch(opts = {}) {
     items.value = list
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
     if (status.value === 'finished') applySimSettlement()
+    await loadNotesForItems(list)
   } catch (e) {
     uni.showToast({ title: '加载失败', icon: 'none' })
   } finally {
@@ -1359,6 +1555,93 @@ onLoad(async (options) => {
   padding: 10rpx 0 2rpx; text-align: right;
   text { font-size: 22rpx; color: $frbt-primary; }
   &:active { opacity: 0.6; }
+}
+
+.row-note {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-top: 10rpx;
+  padding: 10rpx 12rpx;
+  background: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 6rpx;
+  &:active { opacity: 0.75; }
+}
+.note-lab {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: #475569;
+  flex-shrink: 0;
+}
+.note-sum {
+  flex: 1;
+  min-width: 0;
+  font-size: 20rpx;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  &.empty { color: #94a3b8; }
+}
+.note-go {
+  font-size: 20rpx;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.note-mask {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 220;
+}
+.note-modal {
+  position: fixed; left: 4vw; right: 4vw; top: 18vh;
+  background: #fff; border-radius: 12rpx; z-index: 221;
+  display: flex; flex-direction: column;
+  transform: translateY(12rpx) scale(0.98); opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  pointer-events: none;
+  max-height: 64vh;
+  &.show { transform: translateY(0) scale(1); opacity: 1; pointer-events: auto; }
+}
+.note-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid #e2e8f0;
+}
+.note-title-wrap { min-width: 0; flex: 1; }
+.note-title { display: block; font-size: 28rpx; font-weight: 600; color: #1e293b; }
+.note-teams {
+  display: block; margin-top: 6rpx; font-size: 22rpx; color: #64748b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.note-close { font-size: 24rpx; color: $frbt-primary; padding: 4rpx; flex-shrink: 0; }
+.note-input {
+  margin: 16rpx 24rpx 0;
+  min-height: 280rpx;
+  max-height: 420rpx;
+  padding: 16rpx;
+  font-size: 26rpx;
+  line-height: 1.55;
+  color: #1e293b;
+  background: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 6rpx;
+  box-sizing: border-box;
+  width: auto;
+}
+.note-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16rpx 24rpx 20rpx; gap: 16rpx;
+}
+.note-count { font-size: 20rpx; color: #94a3b8; }
+.note-actions { display: flex; gap: 12rpx; }
+.note-btn {
+  font-size: 24rpx;
+  border-radius: 6rpx;
+  padding: 10rpx 22rpx;
+  line-height: 1.3;
+  &.primary { color: #fff; background: #2563eb; }
+  &.danger { color: #dc2626; background: #fef2f2; border: 1rpx solid #fecaca; }
+  &.disabled { opacity: 0.5; }
 }
 
 /* 弹窗 */

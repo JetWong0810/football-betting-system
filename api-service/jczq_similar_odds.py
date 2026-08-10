@@ -31,6 +31,41 @@ JP_LEAGUES = frozenset({"日职", "日职乙", "日乙", "日联杯", "日天皇
 JP_TOLERANCE = 0.05          # 初/终盘低赔 ±0.05(默认 ±0.03)
 JP_HIGH_TOLERANCE = 0.15     # 初/终盘高赔 ±0.15(默认 ±0.1; ≥6 仍用 ±0.15)
 
+# 同赛事模式(弹窗开关, 与日本模式独立): 仅匹配本场同赛事(+别名) + 同日本放宽容差
+# 不混同国二级/杯赛。日本场仍走 japan_mode, 不走本开关。
+# 白名单按 spf 同赔池体量(已完赛且初终盘齐全)选取: 五大联赛及二级 + 北欧/美洲/亚澳等大体量联赛 + 欧冠/欧罗巴。
+SAME_LEAGUE_ELIGIBLE = frozenset({
+    "英超", "英冠", "英甲",
+    "西甲",
+    "意甲",
+    "德甲", "德乙",
+    "法甲", "法乙",
+    "葡超",
+    "荷甲", "荷乙",
+    # 北欧 / 美洲 / 亚澳 / 东欧(池内 ≥300 场; 含改名别名)
+    "瑞超", "瑞典超",
+    "挪超",
+    "美职联", "美职",
+    "巴甲",
+    "K1联赛", "韩职",
+    "澳超",
+    "俄超",
+    "比甲",
+    "阿甲",
+    "墨西联",
+    # 洲际俱乐部赛事(同名硬过滤, 体量 ≥1000)
+    "欧冠",
+    "欧罗巴",
+})
+# 竞彩历史改名: 同赛事模式须一并纳入过滤(否则「瑞超」只能命中 25 场新名)
+SAME_LEAGUE_ALIAS_GROUPS = (
+    frozenset({"瑞超", "瑞典超"}),
+    frozenset({"美职", "美职联"}),
+    frozenset({"韩职", "K1联赛"}),
+)
+SAME_LEAGUE_TOLERANCE = JP_TOLERANCE
+SAME_LEAGUE_HIGH_TOLERANCE = JP_HIGH_TOLERANCE
+
 
 def is_japan_league(league: Optional[str]) -> bool:
     """是否日本本土赛事(日职/日乙/天皇杯/联杯等)。"""
@@ -39,6 +74,25 @@ def is_japan_league(league: Optional[str]) -> bool:
         return True
     # 兜底: 罕见别名
     return name.startswith("日职") or name.startswith("日乙") or name.startswith("日天皇") or name.startswith("日联")
+
+
+def same_league_name_set(league: Optional[str]) -> frozenset:
+    """本场赛事名 + 改名别名集合(无别名则仅自身)。"""
+    name = (league or "").strip()
+    if not name:
+        return frozenset()
+    for group in SAME_LEAGUE_ALIAS_GROUPS:
+        if name in group:
+            return group
+    return frozenset({name})
+
+
+def is_same_league_eligible(league: Optional[str]) -> bool:
+    """是否可开「同赛事」同赔开关(大体量联赛/欧冠欧罗巴; 不含日本)。"""
+    name = (league or "").strip()
+    if not name or is_japan_league(name):
+        return False
+    return name in SAME_LEAGUE_ELIGIBLE
 
 
 def _high_odds_tolerance(odds: Optional[float], base: float = HIGH_TOLERANCE,
@@ -615,7 +669,9 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         )
 
         # 3) 软因子: 同联赛 / 时效 / 终盘盘口接近 → 综合相似度(展示即排序键)
-        same_league = bool(league_norm) and (m.get("league_name") or "").strip() == league_norm
+        # 改名别名(瑞超/瑞典超等)亦计同联赛
+        hist_lg_name = (m.get("league_name") or "").strip()
+        same_league = bool(league_norm) and hist_lg_name in same_league_name_set(league_norm)
         w_lg = LEAGUE_SOFT_BOOST if same_league else 1.0
         w_time = _time_decay_rank(m.get("match_date"))
         w_hc = _hc_proximity_rank(m.get("handicap"), ah_close)
@@ -668,13 +724,15 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                     league_filter: Optional[frozenset] = None,
                     soft_high: bool = False,
                     high_tolerance_wide: float = HIGH_TOLERANCE_WIDE,
-                    japan_mode: bool = False) -> Dict:
+                    japan_mode: bool = False,
+                    same_league_mode: bool = False) -> Dict:
     """核心匹配(胜平负 spf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
 
     ah_open/ah_close: 本场亚盘初/终(标准负=主让), 传入则相似度分档并入亚盘路径接近度。
     league 非空时同联赛软加成(×1.12)并入相似度; exclude_match_id 剔除预测比赛自身。
     require_direction=False: 预测场仅有1条spf快照(无真实变动)时放弃方向过滤。
     japan_mode=True: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 与默认同结构)。
+    same_league_mode=True: 仅匹配 league 同赛事(+改名别名) + 同上放宽容差(与 japan_mode 互斥, 日本场不用)。
     Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
     """
     if japan_mode:
@@ -683,6 +741,16 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
         high_tolerance = JP_HIGH_TOLERANCE
         high_tolerance_wide = JP_HIGH_TOLERANCE
         league_filter = JP_LEAGUES
+        soft_high = False
+    elif same_league_mode:
+        league_name = (league or "").strip()
+        if not league_name:
+            return {"query": {}, "matches": [], "stats": {}}
+        tolerance = SAME_LEAGUE_TOLERANCE
+        close_tolerance = SAME_LEAGUE_TOLERANCE
+        high_tolerance = SAME_LEAGUE_HIGH_TOLERANCE
+        high_tolerance_wide = SAME_LEAGUE_HIGH_TOLERANCE
+        league_filter = same_league_name_set(league_name)
         soft_high = False
     return _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
                          tolerance, pool_loader=get_spf_pool, league=league,

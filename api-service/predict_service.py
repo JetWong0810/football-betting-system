@@ -2555,11 +2555,13 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                                   exclude_match_id: Optional[str] = None,
                                   ah_handicap: Optional[float] = None,
                                   ah_open: Optional[float] = None,
-                                  japan_mode: bool = False) -> Dict[str, Any]:
+                                  japan_mode: bool = False,
+                                  same_league_mode: bool = False) -> Dict[str, Any]:
     """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
     japan_mode: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 弹窗开关, 不改默认F6)
+    same_league_mode: 仅匹配本场 league 完全同名 + 同上放宽容差(弹窗「同赛事」, 与日本模式独立)
     ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 相似度=低赔+高赔结构 + 亚盘分档 + 同联赛/时效/盘口软因子。
     方向判定(以盘路为准, 与弹窗"盘路"列口径一致, 不用胜平负低赔命中):
     - 匹配 < 3场 或 无盘口: neutral, score=5
@@ -2570,11 +2572,15 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     另返回 refScore(0–100 多维证据强度) + refBreakdown, 不并入因子 score。
     """
     _empty_ref = {"refScore": 0, "refBreakdown": {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}}
+    # 日本模式优先; 二者勿同时开
+    if japan_mode:
+        same_league_mode = False
+    _mode = {"japanMode": japan_mode, "sameLeagueMode": same_league_mode}
 
     if not jczq_company:
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
                 "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
-                "japanMode": japan_mode, **_empty_ref}
+                **_mode, **_empty_ref}
 
     initial = jczq_company.get("initial", {})
     current = jczq_company.get("current", {})
@@ -2589,7 +2595,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
                 "reason": "竞彩spf赔率不完整，无法匹配", "details": [], "matches": [],
-                "japanMode": japan_mode, **_empty_ref}
+                **_mode, **_empty_ref}
 
     # 预测场仅有1条spf快照(open==current)时, 无真实变动, 方向恒"平"是数据缺失而非真稳定。
     # 此时放弃"变动方向一致"过滤, 仅按初/终盘接近+同侧匹配(方向降级)。
@@ -2601,12 +2607,13 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                                   league=league, exclude_match_id=exclude_match_id,
                                   require_direction=has_move,
                                   ah_open=ah_open, ah_close=ah_handicap,
-                                  japan_mode=japan_mode)
+                                  japan_mode=japan_mode,
+                                  same_league_mode=same_league_mode)
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
                 "reason": f"查询异常: {e}", "details": [], "matches": [],
-                "japanMode": japan_mode, **_empty_ref}
+                **_mode, **_empty_ref}
 
     stats = result.get("stats", {})
     matches = result.get("matches", [])
@@ -2652,7 +2659,15 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     dir_label = query.get("direction", "") if has_move else "不限(无变动)"
     open_tol = query.get("tolerance", 0.03)
     close_tol = query.get("close_tolerance", open_tol)
-    mode_tag = "仅日本 " if japan_mode else ""
+    if japan_mode:
+        mode_tag = "仅日本 "
+        mode_suffix = "·仅日本"
+    elif same_league_mode:
+        mode_tag = f"同赛事({(league or '').strip()}) "
+        mode_suffix = "·同赛事"
+    else:
+        mode_tag = ""
+        mode_suffix = ""
     soft_high_tag = " 高赔软约束" if query.get("soft_high") else ""
     match_cond = (f"{mode_tag}低赔初{query.get('low_open', 0):.2f}±{open_tol:.2f} "
                   f"终{query.get('low_close', 0):.2f}±{close_tol:.2f}"
@@ -2668,7 +2683,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                     {"name": "参考分", "desc": f"{ref_score} (证据强度)"},
                 ],
                 "matches": similar_matches, "refScore": ref_score, "refBreakdown": breakdown,
-                "japanMode": japan_mode}
+                **_mode}
 
     # 方向以盘路(亚盘上盘/下盘)统计为准, 与弹窗"盘路"列口径一致
     ah_total = stats.get("ah_total", 0)
@@ -2706,7 +2721,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
         {"name": "匹配条件", "desc": (f"{mode_tag}低赔初{query.get('low_open', 0):.2f}±{open_tol:.2f} 终{query.get('low_close', 0):.2f}±{close_tol:.2f}"
                                       f"({query.get('low_position', '')}) | 高赔初{query.get('high_open', 0):.2f}±{query.get('high_tolerance_open', query.get('high_tolerance', 0.1)):.2f} 终{query.get('high_close', 0):.2f}±{query.get('high_tolerance_close', query.get('high_tolerance', 0.1)):.2f}"
                                       f" | 方向{dir_label}{soft_high_tag}")},
-        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf{'·仅日本' if japan_mode else ''})"},
+        {"name": "匹配场次", "desc": f"{total}场竞彩历史比赛(spf{mode_suffix})"},
         {"name": "盘路分布", "desc": f"上盘{ah_upper}(全{full_up}半{half_up}) 下盘{ah_lower}(全{full_down}半{half_down}) 走水{ah_push} (共{ah_total}场)"},
         {"name": "上盘命中", "desc": f"{ah_upper_pct:.0f}% ({ah_upper}/{ah_total})"},
         {"name": "下盘命中", "desc": f"{ah_lower_pct:.0f}% ({ah_lower}/{ah_total})"},
@@ -2724,7 +2739,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
 
     return {"name": "历史同赔", "score": score, "direction": direction,
             "reason": reason, "details": details, "matches": similar_matches,
-            "refScore": ref_score, "refBreakdown": breakdown, "japanMode": japan_mode}
+            "refScore": ref_score, "refBreakdown": breakdown, **_mode}
 
 
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,

@@ -303,14 +303,23 @@
           <text
             v-if="isJapanMatch"
             class="jp-toggle"
-            :class="{ on: similarJapanOnly, loading: similarJapanLoading }"
+            :class="{ on: similarJapanOnly, loading: similarModeLoading }"
             @tap.stop="toggleJapanOnly"
           >仅日本</text>
+          <text
+            v-else-if="isSameLeagueMatch"
+            class="jp-toggle"
+            :class="{ on: similarLeagueOnly, loading: similarModeLoading }"
+            @tap.stop="toggleLeagueOnly"
+          >同赛事</text>
         </view>
         <text class="similar-close" @tap="closeSimilarModal">关闭</text>
       </view>
       <view v-if="similarJapanOnly" class="jp-hint">
         <text>仅日职/日乙/杯赛 · 低赔±0.05 · 高赔±0.15</text>
+      </view>
+      <view v-else-if="similarLeagueOnly" class="jp-hint">
+        <text>仅{{ selectedMatch?.league || '同名赛事' }} · 低赔±0.05 · 高赔±0.15</text>
       </view>
       <view v-if="similarStats.total > 0" class="similar-stats">
         <view class="stats-row">
@@ -422,6 +431,7 @@ import { calcRecommendedStake, calcTieredStakes, getStrategyPreset, checkRiskSta
 import { loadCalibration } from '@/utils/calibration'
 import { calcSimilarStats } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
+import { isSameLeagueEligible } from '@/utils/sameLeague'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
 
 const matchStatus = ref('not_started')
@@ -439,9 +449,11 @@ const showSimilarModal = ref(false)
 const similarMatches = ref([])
 const similarDefaultMatches = ref([])
 const similarJapanOnly = ref(false)
-const similarJapanLoading = ref(false)
+const similarLeagueOnly = ref(false)
+const similarModeLoading = ref(false)
 const similarStats = computed(() => calcSimilarStats(similarMatches.value))
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
+const isSameLeagueMatch = computed(() => isSameLeagueEligible(selectedMatch.value?.league))
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
 
@@ -472,7 +484,8 @@ const _exitFullscreen = async () => {
 }
 const openSimilarModal = async () => {
   similarJapanOnly.value = false
-  similarJapanLoading.value = false
+  similarLeagueOnly.value = false
+  similarModeLoading.value = false
   // 打开时用当前 F6 默认结果
   if (similarDefaultMatches.value.length) {
     similarMatches.value = similarDefaultMatches.value
@@ -483,14 +496,19 @@ const openSimilarModal = async () => {
 const closeSimilarModal = async () => {
   showSimilarModal.value = false
   similarJapanOnly.value = false
-  similarJapanLoading.value = false
+  similarLeagueOnly.value = false
+  similarModeLoading.value = false
   await _exitFullscreen()
 }
+function _restoreDefaultSimilarPredict() {
+  similarJapanOnly.value = false
+  similarLeagueOnly.value = false
+  similarMatches.value = similarDefaultMatches.value
+}
 async function toggleJapanOnly() {
-  if (!isJapanMatch.value || similarJapanLoading.value) return
+  if (!isJapanMatch.value || similarModeLoading.value) return
   if (similarJapanOnly.value) {
-    similarJapanOnly.value = false
-    similarMatches.value = similarDefaultMatches.value
+    _restoreDefaultSimilarPredict()
     return
   }
   const mid = selectedMatch.value?.matchId
@@ -498,19 +516,47 @@ async function toggleJapanOnly() {
     uni.showToast({ title: '比赛ID缺失', icon: 'none' })
     return
   }
-  similarJapanLoading.value = true
+  similarModeLoading.value = true
   try {
     const data = await request({
       url: `/api/predict/${encodeURIComponent(mid)}/similar-odds`,
       method: 'GET',
       data: { japan_only: true },
     })
+    similarLeagueOnly.value = false
     similarJapanOnly.value = true
     similarMatches.value = data?.matches || []
   } catch (e) {
     uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
   } finally {
-    similarJapanLoading.value = false
+    similarModeLoading.value = false
+  }
+}
+async function toggleLeagueOnly() {
+  if (!isSameLeagueMatch.value || similarModeLoading.value) return
+  if (similarLeagueOnly.value) {
+    _restoreDefaultSimilarPredict()
+    return
+  }
+  const mid = selectedMatch.value?.matchId
+  if (!mid) {
+    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
+    return
+  }
+  similarModeLoading.value = true
+  try {
+    const data = await request({
+      url: `/api/predict/${encodeURIComponent(mid)}/similar-odds`,
+      method: 'GET',
+      data: { league_only: true },
+    })
+    similarJapanOnly.value = false
+    similarLeagueOnly.value = true
+    similarMatches.value = data?.matches || []
+  } catch (e) {
+    uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
+  } finally {
+    similarModeLoading.value = false
   }
 }
 // 用户按ESC退出全屏时同步关闭弹窗
@@ -1006,6 +1052,7 @@ async function startAnalysis() {
         similarDefaultMatches.value = factor.matches || []
         similarMatches.value = factor.matches || []
         similarJapanOnly.value = false
+        similarLeagueOnly.value = false
       }
       analysisSteps.value[i].status = 'done'
     }
