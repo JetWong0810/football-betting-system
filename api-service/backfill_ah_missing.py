@@ -6,6 +6,8 @@
 用法:
   python3 -u backfill_ah_missing.py
   DELAY=0.8 LIMIT=50 python3 -u backfill_ah_missing.py
+  # 有 fid、缺 Bet365(含仅有澳门), 排除俄超:
+  TARGET=has_fid_no_bet365 EXCLUDE_LEAGUE=俄超 python3 -u backfill_ah_missing.py
 """
 from __future__ import annotations
 
@@ -22,6 +24,10 @@ from odds500_service import fetch_asian_history, get_fid_for_match
 DELAY = float(os.getenv("DELAY", "0.8"))
 LIMIT = int(os.getenv("LIMIT", "0"))
 CID_BET365 = 3
+# missing: 任意公司都没有亚盘行(旧默认)
+# has_fid_no_bet365: 有 fid_500 且无 Bet365 终盘(可覆盖澳门行)
+TARGET = os.getenv("TARGET", "missing").strip() or "missing"
+EXCLUDE_LEAGUE = os.getenv("EXCLUDE_LEAGUE", "").strip()
 
 
 def get_conn():
@@ -37,21 +43,46 @@ def sale_date_of(row) -> Optional[str]:
 
 
 def load_missing() -> List[dict]:
-    sql = """
-      SELECT m.match_id, m.match_date, m.match_number, m.match_code,
-             m.league_name, m.fid_500, m.home_team_name, m.away_team_name
-      FROM (
-        SELECT DISTINCT match_id FROM jczq_odds_history WHERE odds_type='spf'
-      ) s
-      JOIN matches m ON m.match_id = s.match_id
-      LEFT JOIN jczq_ah_history a ON a.match_id = s.match_id
-      WHERE a.match_id IS NULL AND m.home_score IS NOT NULL
-      ORDER BY m.match_date ASC
-    """
+    if TARGET == "has_fid_no_bet365":
+        sql = """
+          SELECT m.match_id, m.match_date, m.match_number, m.match_code,
+                 m.league_name, m.fid_500, m.home_team_name, m.away_team_name
+          FROM (
+            SELECT match_id, COUNT(*) AS cnt
+            FROM jczq_odds_history
+            WHERE odds_type='spf'
+            GROUP BY match_id
+            HAVING cnt >= 2
+          ) t
+          JOIN matches m ON m.match_id = t.match_id
+          LEFT JOIN jczq_ah_history ah
+            ON ah.match_id = t.match_id AND ah.company LIKE %s
+          WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+            AND ah.close_handicap IS NULL
+            AND m.fid_500 IS NOT NULL AND TRIM(m.fid_500) <> ''
+        """
+        params: list = ["Bet365%"]
+        if EXCLUDE_LEAGUE:
+            sql += " AND COALESCE(m.league_name,'') <> %s"
+            params.append(EXCLUDE_LEAGUE)
+        sql += " ORDER BY m.match_date ASC"
+    else:
+        sql = """
+          SELECT m.match_id, m.match_date, m.match_number, m.match_code,
+                 m.league_name, m.fid_500, m.home_team_name, m.away_team_name
+          FROM (
+            SELECT DISTINCT match_id FROM jczq_odds_history WHERE odds_type='spf'
+          ) s
+          JOIN matches m ON m.match_id = s.match_id
+          LEFT JOIN jczq_ah_history a ON a.match_id = s.match_id
+          WHERE a.match_id IS NULL AND m.home_score IS NOT NULL
+          ORDER BY m.match_date ASC
+        """
+        params = []
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             rows = list(cur.fetchall())
     finally:
         conn.close()
@@ -77,7 +108,11 @@ def resolve_fid(row) -> Optional[str]:
 
 def main():
     rows = load_missing()
-    print(f"缺亚盘: {len(rows)} 场 (LIMIT={LIMIT or 'all'})", flush=True)
+    print(
+        f"缺亚盘: {len(rows)} 场 TARGET={TARGET} EXCLUDE_LEAGUE={EXCLUDE_LEAGUE or '-'} "
+        f"(LIMIT={LIMIT or 'all'})",
+        flush=True,
+    )
     conn = get_conn()
     batch = []
     stats = {"ok": 0, "no_fid": 0, "no_hist": 0, "err": 0, "fid_saved": 0}
@@ -129,7 +164,7 @@ def main():
         batch.append((mid, *rec, "Bet365-500"))
         stats["ok"] += 1
         print(
-            f"  + {mid} {md} {row['home_team_name']} "
+            f"  + {mid} {md} {row['league_name']} {row['home_team_name']} "
             f"初{rec[0]:+.2f} 终{rec[3]:+.2f}",
             flush=True,
         )

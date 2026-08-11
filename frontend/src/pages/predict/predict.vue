@@ -429,7 +429,7 @@ import { useConfigStore } from '@/stores/configStore'
 import { useBetStore } from '@/stores/betStore'
 import { calcRecommendedStake, calcTieredStakes, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
 import { loadCalibration } from '@/utils/calibration'
-import { calcSimilarStats } from '@/utils/similarStats'
+import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import { isSameLeagueEligible } from '@/utils/sameLeague'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
@@ -457,13 +457,17 @@ const isSameLeagueMatch = computed(() => isSameLeagueEligible(selectedMatch.valu
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
 
+function applyPredictSimilarList(list) {
+  return filterSimilarWithAh(list || [])
+}
+
 const openSimilarModal = () => {
   similarJapanOnly.value = false
   similarLeagueOnly.value = false
   similarModeLoading.value = false
-  // 打开时用当前 F6 默认结果
+  // 打开时用当前 F6 默认结果(已剔缺亚盘)
   if (similarDefaultMatches.value.length) {
-    similarMatches.value = similarDefaultMatches.value
+    similarMatches.value = applyPredictSimilarList(similarDefaultMatches.value)
   }
   showSimilarModal.value = true
 }
@@ -476,7 +480,7 @@ const closeSimilarModal = () => {
 function _restoreDefaultSimilarPredict() {
   similarJapanOnly.value = false
   similarLeagueOnly.value = false
-  similarMatches.value = similarDefaultMatches.value
+  similarMatches.value = applyPredictSimilarList(similarDefaultMatches.value)
 }
 async function toggleJapanOnly() {
   if (!isJapanMatch.value || similarModeLoading.value) return
@@ -498,7 +502,7 @@ async function toggleJapanOnly() {
     })
     similarLeagueOnly.value = false
     similarJapanOnly.value = true
-    similarMatches.value = data?.matches || []
+    similarMatches.value = applyPredictSimilarList(data?.matches || [])
   } catch (e) {
     uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
   } finally {
@@ -525,7 +529,7 @@ async function toggleLeagueOnly() {
     })
     similarJapanOnly.value = false
     similarLeagueOnly.value = true
-    similarMatches.value = data?.matches || []
+    similarMatches.value = applyPredictSimilarList(data?.matches || [])
   } catch (e) {
     uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
   } finally {
@@ -1014,8 +1018,8 @@ async function startAnalysis() {
       analysisSteps.value[i].details = factor.details || []
       analysisSteps.value[i].matches = factor.matches || []
       if (factor.name === '历史同赔') {
-        similarDefaultMatches.value = factor.matches || []
-        similarMatches.value = factor.matches || []
+        similarDefaultMatches.value = applyPredictSimilarList(factor.matches || [])
+        similarMatches.value = similarDefaultMatches.value
         similarJapanOnly.value = false
         similarLeagueOnly.value = false
       }

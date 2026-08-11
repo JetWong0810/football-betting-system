@@ -307,8 +307,9 @@ def _calc_stats(matches: List[Dict]) -> Dict:
         elif m["hist_low_key"] == "loss" and m["result"] == "A":
             low_hit += 1
 
-    # 亚盘盘路: 仅对有亚盘让球的场次统计。半上算上盘、半下算下盘(各计1, 不再拆给两边),
-    # 走水单独列。保留全上/半上/全下/半下/走水子计数供展示。
+    # 亚盘盘路: 仅对有亚盘让球的场次统计(调用方应已剔除缺盘场)。
+    # 半上算上盘、半下算下盘(各计1, 不再拆给两边), 走水单独列。
+    # 保留全上/半上/全下/半下/走水子计数供展示。
     ah_upper = ah_lower = ah_push = ah_total = 0
     full_up = half_up = full_down = half_down = push = 0
     for m in matches:
@@ -726,6 +727,10 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
 
     # 综合相似度降序(同联赛/时效/盘口已并入 similarity)
     matched.sort(key=lambda x: -x["similarity"])
+
+    # 缺亚盘终盘: 不进弹窗、不进盘路/胜平负统计(避免无盘样本稀释或用本场盘口硬填)
+    matched = [m for m in matched if m.get("handicap") is not None]
+
     stats = _calc_stats(matched)
 
     return {

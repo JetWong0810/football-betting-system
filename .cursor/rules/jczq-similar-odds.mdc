@@ -41,7 +41,7 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 
 ### 统计 `_calc_stats`
 - 胜平负分布 + 低赔命中(参考,不主导方向)。
-- **盘路纯亚盘口径**:仅对 handicap 非None 场统计。**半上归上盘、半下归下盘(各计1,不再拆给两边)**,走水单列。保留 full_up/half_up/full_down/half_down/push 子计数。上盘+下盘+走水=ah_total。
+- **盘路纯亚盘口径**:仅对 handicap 非None 场统计。**`_find_similar` 在统计/返回前剔除缺亚盘终盘的同赔场**(弹窗不展示、不进胜平负/盘路统计)。**半上归上盘、半下归下盘(各计1,不再拆给两边)**,走水单列。保留 full_up/half_up/full_down/half_down/push 子计数。上盘+下盘+走水=ah_total。
 - F6 方向:`ah_total<3`→neutral;`ah_upper_pct>65`→upper(score 7);`<40`→lower(score 7);否则 neutral(score 5)。
 - **refScore(0–100 多维证据强度,独立于方向阈值/因子score)**:单场权重 `w=(sim/100)*league(同联赛1.15)*hc_proximity(|Δ盘|)*time_decay`；半赢×0.5。合成 `0.40*edge + 0.25*quality + 0.20*sample + 0.15*decidable`；无变动降级×0.85；`total<3`封顶20；neutral封顶50。返回 `refScore` + `refBreakdown{edge,quality,sample,decidable}`。批量接口传入本场 `ahHandicap` 供盘口一致性。
 
@@ -66,7 +66,7 @@ sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 
 - 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 右上角方向旁 refScore + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
 
 同赔弹窗(predict.vue / batch-analysis.vue)
-表头:相似度/主队/比分/客队/结果/盘路/亚初/亚终/初盘/终盘/日期/联赛。单关不占列:行浅红底,相似度右侧描边「单」标记(占位对齐,无竖线)。亚初/亚终=jczq_ah_history Bet365 系 open/close_handicap。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动。
+表头:相似度/主队/比分/客队/结果/盘路/亚初/亚终/初盘/终盘/日期/联赛。单关不占列:行浅红底,相似度右侧描边「单」标记(占位对齐,无竖线)。亚初/亚终=jczq_ah_history Bet365 系 open/close_handicap。**缺亚盘终盘的同赔场不展示、不进弹窗胜平负/盘路统计**。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动。
 
 ## NL 查询(analysis_functions.similar_odds)
 优先竞彩 spf 池(`find_match_by_question` 按问题文本搜队名,绕过 KNOWN_TEAMS),回退世界杯 SQLite。`_jczq_similar_rows` 用 `_ah_outcome` 算盘口结果 + 亚盘让球列。

@@ -8,6 +8,13 @@
           <text class="date-arr" :class="{ disabled: !nextSaleDate }" @tap.stop="goNextDate">›</text>
         </view>
         <view class="sum-right">
+          <view
+            class="refresh-btn"
+            :class="{ spinning: loading || refreshing }"
+            @tap="refreshBatch"
+          >
+            <view class="refresh-ring"></view>
+          </view>
           <text
             class="sim-toggle"
             :class="{ on: simBet.simMode }"
@@ -447,7 +454,7 @@ import { request } from '@/utils/http'
 import { requireAuth, isLoggedIn } from '@/utils/auth'
 import { useSimBetStore } from '@/stores/simBetStore'
 import { lowKeyFromSpf } from '@/utils/simBet'
-import { calcSimilarStats } from '@/utils/similarStats'
+import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import { isSameLeagueEligible } from '@/utils/sameLeague'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
@@ -458,6 +465,7 @@ const simBet = useSimBetStore()
 const date = ref('')
 const status = ref('not_started')
 const loading = ref(true)
+const refreshing = ref(false)
 const items = ref([])
 const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
 const saleDates = ref([])
@@ -480,6 +488,10 @@ const similarJapanOnly = ref(false)
 const similarLeagueOnly = ref(false)
 const similarModeLoading = ref(false)
 const similarStats = computed(() => calcSimilarStats(similarMatches.value))
+
+function applySimilarList(list) {
+  return filterSimilarWithAh(list || [])
+}
 const showJapanIntel = ref(false)
 const japanIntelData = ref(null)
 const japanIntelLoading = ref(false)
@@ -984,7 +996,7 @@ function ahResultClass(ah) {
   return ''
 }
 function openSimilar(it) {
-  similarDefaultMatches.value = it?.f6?.matches || []
+  similarDefaultMatches.value = applySimilarList(it?.f6?.matches || [])
   similarDefaultRef.value = it?.f6?.refScore != null ? it.f6.refScore : null
   similarMatches.value = similarDefaultMatches.value
   similarRefScore.value = similarDefaultRef.value
@@ -1033,7 +1045,7 @@ async function toggleJapanOnly() {
     })
     similarLeagueOnly.value = false
     similarJapanOnly.value = true
-    similarMatches.value = data?.matches || []
+    similarMatches.value = applySimilarList(data?.matches || [])
     similarRefScore.value = data?.refScore != null ? data.refScore : null
   } catch (e) {
     uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
@@ -1060,7 +1072,7 @@ async function toggleLeagueOnly() {
     })
     similarJapanOnly.value = false
     similarLeagueOnly.value = true
-    similarMatches.value = data?.matches || []
+    similarMatches.value = applySimilarList(data?.matches || [])
     similarRefScore.value = data?.refScore != null ? data.refScore : null
   } catch (e) {
     uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
@@ -1259,6 +1271,25 @@ async function loadBatch(opts = {}) {
   }
 }
 
+/** 手动刷新: 保留排序/筛选与列表, 仅重拉数据 */
+async function refreshBatch() {
+  if (loading.value || refreshing.value) return
+  refreshing.value = true
+  try {
+    const data = await fetchBatch(status.value)
+    const list = data?.items || []
+    items.value = list
+    summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
+    if (status.value === 'finished') applySimSettlement()
+    await loadNotesForItems(list)
+    uni.showToast({ title: '已刷新', icon: 'none' })
+  } catch (e) {
+    uni.showToast({ title: '刷新失败', icon: 'none' })
+  } finally {
+    refreshing.value = false
+  }
+}
+
 onLoad(async (options) => {
   const today = new Date().toISOString().slice(0, 10)
   date.value = options?.date || today
@@ -1309,7 +1340,34 @@ onLoad(async (options) => {
       border-bottom: 1rpx dashed rgba(255,255,255,0.45);
     }
   }
-  .sum-right { display: flex; align-items: center; gap: 16rpx; flex-shrink: 0; }
+  .sum-right { display: flex; align-items: center; gap: 12rpx; flex-shrink: 0; }
+  .refresh-btn {
+    width: 48rpx; height: 48rpx;
+    border-radius: 6rpx;
+    border: 1rpx solid rgba(255,255,255,0.35);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    &.spinning .refresh-ring {
+      animation: refresh-spin 0.7s linear infinite;
+    }
+  }
+  .refresh-ring {
+    width: 22rpx; height: 22rpx;
+    border: 3rpx solid rgba(255,255,255,0.85);
+    border-top-color: transparent;
+    border-radius: 50%;
+    position: relative;
+    &::after {
+      content: '';
+      position: absolute;
+      top: -5rpx; right: -1rpx;
+      width: 0; height: 0;
+      border-left: 5rpx solid transparent;
+      border-right: 5rpx solid transparent;
+      border-bottom: 8rpx solid rgba(255,255,255,0.85);
+      transform: rotate(45deg);
+    }
+  }
   .status-row {
     display: flex; gap: 12rpx; margin-bottom: 10rpx;
   }
@@ -1874,5 +1932,9 @@ onLoad(async (options) => {
   &.cal-today { color: #0d9488; font-weight: 600; }
   &.cal-has:not(.cal-selected) { color: #0f766e; font-weight: 600; }
   &.cal-selected { background: #0d9488; color: #fff; font-weight: 600; }
+}
+
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

@@ -1,6 +1,8 @@
 /**
  * 历史同赔弹窗统计: 胜平负 + 亚盘盘路
- * 口径与后端 _calc_stats 一致: 半上归上盘、半下归下盘(各计1), 走水单列
+ * 口径与后端 _calc_stats / _ah_outcome 一致:
+ * 半上归上盘、半下归下盘(各计1), 走水单列
+ * 缺亚盘场由后端剔除; 前端再滤一层防旧缓存
  */
 
 function pct(n, total) {
@@ -8,8 +10,22 @@ function pct(n, total) {
   return Math.round((n / total) * 1000) / 10
 }
 
-export function calcSimilarStats(matches) {
+function hasAhLine(v) {
+  return v != null && v !== '' && v !== '-'
+}
+
+/** 剔除缺亚盘终盘/盘路的同赔场(与后端 _find_similar 一致) */
+export function filterSimilarWithAh(matches) {
   const list = Array.isArray(matches) ? matches : []
+  return list.filter((m) => {
+    const hasClose = hasAhLine(m?.handicapClose) || hasAhLine(m?.handicap)
+    const hasAh = m?.ahResult && m.ahResult !== '-'
+    return hasClose && hasAh
+  })
+}
+
+export function calcSimilarStats(matches) {
+  const list = filterSimilarWithAh(matches)
   const total = list.length
 
   let win = 0
