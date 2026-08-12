@@ -941,6 +941,23 @@ function getDetail(f6, name) {
   return d ? d.desc : ''
 }
 function ahStats(f6) {
+  // 优先从盘路统计解析（新格式），兜底旧格式
+  const statDesc = getDetail(f6, '盘路统计')
+  if (statDesc) {
+    const s = String(statDesc)
+    const upM = s.match(/上盘(\d+)/)
+    const loM = s.match(/下盘(\d+)/)
+    const pushM = s.match(/走水(\d+)/)
+    const pctM = s.match(/(\d+(?:\.\d+)?)%\s*\((\d+)\/(\d+)\)/)
+    const upper = upM ? Number(upM[1]) : 0
+    const lower = loM ? Number(loM[1]) : 0
+    const push = pushM ? Number(pushM[1]) : 0
+    const total = pctM ? Number(pctM[3]) : (upper + lower + push)
+    const upperPct = total ? Math.round((upper / total) * 100) : 0
+    const lowerPct = total ? Math.round((lower / total) * 100) : 0
+    return { total, upper, lower, push, upperPct, lowerPct }
+  }
+  // 旧格式兼容
   const up = parseHit(getDetail(f6, '上盘命中'))
   const lo = parseHit(getDetail(f6, '下盘命中'))
   const pushDesc = getDetail(f6, '走水')
@@ -979,7 +996,7 @@ function focusHitLabel(f6) {
 }
 function shortReason(reason) {
   if (!reason) return ''
-  let s = reason.replace(/^历史同赔\d+场盘路/, '')
+  let s = reason.replace(/^(?:历史)?同赔\d+场[，,]\s*/, '')
   s = s.replace(/^[上下]盘命中\d+(?:\.\d+)?%\(\d+\/\d+\)[,，]\s*/, '')
   return s.trim() || reason
 }
