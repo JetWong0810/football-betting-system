@@ -435,6 +435,8 @@ import { isSameLeagueEligible } from '@/utils/sameLeague'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
 
 const matchStatus = ref('not_started')
+// 标记页面是否由外部参数(如批量分析跳转)初始化，避免 watch(matchStatus) 重置 filterDate
+const _initialParams = ref(false)
 const selectedMatch = ref(null)
 const showPicker = ref(false)
 const searchKey = ref('')
@@ -670,6 +672,11 @@ onLoad((query) => {
   }
   if (query?.auto === '1' || query?.auto === 'true') {
     pendingAutoStart.value = true
+  }
+  // 从批量分析跳转时，按传入状态切换标签页，使已结束比赛能被正确加载
+  if (query?.status === 'finished' || query?.status === 'not_started') {
+    matchStatus.value = query.status
+    _initialParams.value = true
   }
   // 带售卖日时先锁日期, 保证列表里能命中该场
   if (query?.date && /^\d{4}-\d{2}-\d{2}$/.test(query.date)) {
@@ -1134,11 +1141,18 @@ watch(matchStatus, async () => {
   searchKey.value = ''
   filterLeague.value = 'all'
   if (matchStatus.value === 'finished') {
-    filterDate.value = ''
+    // 外部参数初始化(如批量分析跳转)时保留已传入的日期，不重置
+    if (!_initialParams.value) {
+      filterDate.value = ''
+    }
+    _initialParams.value = false
     await fetchDates()
     await fetchMatches()
   } else {
-    filterDate.value = 'all'
+    if (!_initialParams.value) {
+      filterDate.value = 'all'
+    }
+    _initialParams.value = false
     await fetchDates()
     await fetchMatches()
   }

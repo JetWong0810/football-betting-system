@@ -1588,6 +1588,8 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
         handicap_val = odds_data["hhad"].get("handicap")
         if handicap_val is not None:
             match_info["handicap"] = float(handicap_val)
+            # 保存竞彩让球原值作为所有因子上下盘确定的统一基准
+            match_info["hhad"] = float(handicap_val)
 
     # 如果用户提供了市场热度描述
     if req and req.market_heat:
@@ -1798,6 +1800,8 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
         handicap_val = odds_data["hhad"].get("handicap")
         if handicap_val is not None:
             match_info["handicap"] = float(handicap_val)
+            # 保存竞彩让球原值作为所有因子上下盘确定的统一基准
+            match_info["hhad"] = float(handicap_val)
 
     if req and req.market_heat:
         match_info["market_heat_desc"] = req.market_heat
@@ -2207,6 +2211,76 @@ def list_match_results(
         items.append(item)
 
     return {"items": items, "date": date}
+
+
+@app.get("/api/match-results/live")
+def get_live_scores():
+    """获取正在进行中的比赛实时比分（轮询用，30秒缓存）
+
+    返回开赛3h内但无比分的比赛，从500.com列表页拉取实时比分。
+    """
+    import time as _time
+    from collections import defaultdict
+    from database import get_db as _get_db
+    from odds500_service import _load_jczq_list, _score_cache as _live_cache
+    from repository import derive_sale_date
+
+    now = int(_time.time())
+
+    with _get_db() as conn:
+        cur = conn.cursor()
+        # 开赛3h内且无比分 → 进行中
+        cur.execute(
+            """SELECT * FROM matches
+               WHERE match_timestamp IS NOT NULL
+                 AND match_timestamp <= %s
+                 AND match_timestamp >= %s - 10800
+                 AND home_score IS NULL
+               ORDER BY match_timestamp ASC""",
+            (now, now),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return {"items": []}
+
+    # 按售卖日期分组，减少500.com请求次数
+    by_date: Dict[str, list] = defaultdict(list)
+    for r in rows:
+        sd = derive_sale_date(r) or r.get("match_date")
+        if sd:
+            by_date[sd].append(r)
+
+    items = []
+    for sale_date, matches in by_date.items():
+        # 清缓存，强制拉取最新比分
+        _live_cache.clear()
+        try:
+            _load_jczq_list(sale_date)
+        except Exception as e:
+            logger.warning(f"[live] 获取{sale_date}实时比分失败: {e}")
+            continue
+
+        for m in matches:
+            code = m.get("match_code", "").strip()
+            if not code:
+                continue
+            key = f"{sale_date}:{code}"
+            score = _live_cache.get(key)
+            if score:
+                ts = m.get("match_timestamp")
+                minute = (now - ts) // 60 if ts else 0
+                items.append({
+                    "matchId": m["match_id"],
+                    "league": m.get("league_name"),
+                    "homeTeam": m.get("home_team_name"),
+                    "awayTeam": m.get("away_team_name"),
+                    "homeScore": score[0],
+                    "awayScore": score[1],
+                    "minute": min(max(minute, 0), 120),
+                })
+
+    return {"items": items}
 
 
 @app.get("/api/match-results/dates")

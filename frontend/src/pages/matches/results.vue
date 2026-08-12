@@ -28,6 +28,26 @@
       <text class="stats-text">{{ selectedDateLabel }} 共<text class="stats-num">{{ matches.length }}</text>场已完赛</text>
     </view>
 
+    <!-- 直播中（进行中比赛实时比分） -->
+    <view class="live-section" v-if="liveMatches.length > 0">
+      <view class="live-header">
+        <text class="live-dot">●</text>
+        <text class="live-title">直播中</text>
+        <text class="live-count">{{ liveMatches.length }}场</text>
+      </view>
+      <view class="live-list">
+        <view class="live-item" v-for="m in liveMatches" :key="m.matchId">
+          <text class="live-league">{{ m.league }}</text>
+          <text class="live-team home">{{ m.homeTeam }}</text>
+          <view class="live-score-wrap">
+            <text class="live-score">{{ m.homeScore }}:{{ m.awayScore }}</text>
+            <text class="live-minute">{{ m.minute }}'</text>
+          </view>
+          <text class="live-team away">{{ m.awayTeam }}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- 比赛列表 -->
     <view class="match-list">
       <view
@@ -147,7 +167,7 @@
 
 <script setup>
 import { ref, computed, watch } from "vue";
-import { onLoad } from "@dcloudio/uni-app";
+import { onLoad, onShow, onHide } from "@dcloudio/uni-app";
 import { request } from "@/utils/http";
 
 const WEEK_MAP = ["日", "一", "二", "三", "四", "五", "六"];
@@ -187,6 +207,31 @@ const selectedDate = ref(dateList.value[0]?.value || "");
 const expandedId = ref(null);
 const loading = ref(false);
 const matches = ref([]);
+const liveMatches = ref([]);
+let liveTimer = null;
+
+async function fetchLiveScores() {
+  try {
+    const data = await request({ url: "/api/match-results/live", method: "GET" });
+    liveMatches.value = data?.items || [];
+    if (!liveMatches.value.length) stopLivePolling();
+  } catch (_e) {
+    // 静默失败，保留上次数据
+  }
+}
+
+function startLivePolling() {
+  stopLivePolling();
+  fetchLiveScores();
+  liveTimer = setInterval(fetchLiveScores, 30000);
+}
+
+function stopLivePolling() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+
+onShow(() => { startLivePolling(); });
+onHide(() => { stopLivePolling(); });
 
 const selectedDateLabel = computed(() => {
   const d = dateList.value.find((i) => i.value === selectedDate.value);
@@ -893,4 +938,106 @@ function onReview(match) {
     font-weight: 600;
   }
 }
+
+/* ===== 直播中 ===== */
+.live-section {
+  margin: 16rpx 16rpx 0;
+  background: #fff;
+  border-radius: 12rpx;
+  overflow: hidden;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+}
+
+.live-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 16rpx 20rpx 8rpx;
+}
+
+.live-dot {
+  font-size: 20rpx;
+  color: #dc2626;
+  animation: live-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes live-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.live-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.live-count {
+  font-size: 22rpx;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+.live-list {
+  padding: 8rpx 20rpx 16rpx;
+}
+
+.live-item {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f1f5f9;
+}
+
+.live-item:last-child {
+  border-bottom: none;
+}
+
+.live-league {
+  font-size: 18rpx;
+  color: #94a3b8;
+  width: 72rpx;
+  flex-shrink: 0;
+}
+
+.live-team {
+  font-size: 24rpx;
+  color: #334155;
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-team.home {
+  text-align: right;
+}
+
+.live-team.away {
+  text-align: left;
+}
+
+.live-score-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+}
+
+.live-score {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #dc2626;
+  min-width: 60rpx;
+  text-align: center;
+}
+
+.live-minute {
+  font-size: 18rpx;
+  color: #94a3b8;
+  min-width: 36rpx;
+}
+
 </style>

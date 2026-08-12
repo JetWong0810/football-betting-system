@@ -1134,6 +1134,8 @@ function goPredict(it) {
   const isWorldCup = it.league && it.league.includes('世界杯')
   const qs = [`matchId=${encodeURIComponent(it.matchId)}`, 'auto=1']
   if (date.value) qs.push(`date=${encodeURIComponent(date.value)}`)
+  // 传入当前状态，使 predict 页能正确加载已结束/未开始的比赛
+  qs.push(`status=${encodeURIComponent(status.value)}`)
   const url = isWorldCup
     ? `/pages/worldcup/predict?${qs.join('&')}`
     : `/pages/predict/predict?${qs.join('&')}`
