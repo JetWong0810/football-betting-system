@@ -293,8 +293,7 @@ def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
 @app.on_event("startup")
 async def startup_event():
     """
-    启动时只初始化数据库连接
-    不启动定时爬虫任务（数据同步由 mysql-backup 服务器负责）
+    启动时初始化数据库连接，并启动定时比分回填任务
     """
     init_db()
     try:
@@ -307,6 +306,45 @@ async def startup_event():
     if OCR_AVAILABLE:
         import threading
         threading.Thread(target=get_ocr_instance, daemon=True).start()
+
+    # 后台定时比分回填（每10分钟）：已开赛但缺比分的比赛从500.com拉取
+    import threading as _th
+    _th.Thread(target=_score_backfill_loop, daemon=True).start()
+
+
+def _score_backfill_loop():
+    """后台线程：定期检查并回填已结束比赛的比分（从500.com拉取）"""
+    import time as _t
+    from repository import derive_sale_date as _derive_sale
+    from odds500_service import fetch_match_score as _fetch_score, clear_score_cache as _clear_score_cache
+
+    interval = 600  # 10分钟
+    logger.info("[比分回填] 后台线程启动")
+    while True:
+        try:
+            pending = repo.get_finished_without_score(days=3)
+            if pending:
+                _clear_score_cache()  # 清空缓存，确保拿到最新结果
+                updated = 0
+                for m in pending:
+                    sale_date = _derive_sale(m) or m.get("match_date")
+                    match_code = m.get("match_code")
+                    if not sale_date or not match_code:
+                        continue
+                    try:
+                        score = _fetch_score(sale_date, match_code)
+                    except Exception as e:
+                        logger.warning(f"[比分回填] 抓取异常 {m.get('match_id')}: {e}")
+                        continue
+                    if score:
+                        repo.update_match_score(m["match_id"], score[0], score[1])
+                        logger.info(f"[比分回填] {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
+                        updated += 1
+                if updated:
+                    logger.info(f"[比分回填] 本轮回填 {updated} 场")
+        except Exception as e:
+            logger.warning(f"[比分回填] 循环异常: {e}")
+        _t.sleep(interval)
 
 
 @app.on_event("shutdown")
@@ -2217,12 +2255,13 @@ def list_match_results(
 def get_live_scores():
     """获取正在进行中的比赛实时比分（轮询用，30秒缓存）
 
-    返回开赛3h内但无比分的比赛，从500.com列表页拉取实时比分。
+    先从500.com列表页取比分（已完赛的直接返回）；
+    列表页显示"VS"（进行中）的，通过详情页抓取实时比分。
     """
     import time as _time
     from collections import defaultdict
     from database import get_db as _get_db
-    from odds500_service import _load_jczq_list, _score_cache as _live_cache
+    from odds500_service import _load_jczq_list, _score_cache as _live_cache, _fid_cache, fetch_live_score_from_fid
     from repository import derive_sale_date
 
     now = int(_time.time())
@@ -2253,12 +2292,12 @@ def get_live_scores():
 
     items = []
     for sale_date, matches in by_date.items():
-        # 清缓存，强制拉取最新比分
+        # 清缓存，强制拉取最新列表页
         _live_cache.clear()
         try:
             _load_jczq_list(sale_date)
         except Exception as e:
-            logger.warning(f"[live] 获取{sale_date}实时比分失败: {e}")
+            logger.warning(f"[live] 获取{sale_date}列表页失败: {e}")
             continue
 
         for m in matches:
@@ -2268,6 +2307,7 @@ def get_live_scores():
             key = f"{sale_date}:{code}"
             score = _live_cache.get(key)
             if score:
+                # 列表页已有比分（已完赛）
                 ts = m.get("match_timestamp")
                 minute = (now - ts) // 60 if ts else 0
                 items.append({
@@ -2279,6 +2319,31 @@ def get_live_scores():
                     "awayScore": score[1],
                     "minute": min(max(minute, 0), 120),
                 })
+            else:
+                # 列表页无比分（进行中），从详情页拉取实时比分
+                fid = _fid_cache.get(key)
+                if not fid:
+                    # 尝试从DB获取
+                    fid = m.get("fid_500")
+                if not fid:
+                    continue
+                try:
+                    live_score = fetch_live_score_from_fid(fid)
+                except Exception as e:
+                    logger.warning(f"[live] 获取详情页比分失败 fid={fid}: {e}")
+                    continue
+                if live_score:
+                    ts = m.get("match_timestamp")
+                    minute = (now - ts) // 60 if ts else 0
+                    items.append({
+                        "matchId": m["match_id"],
+                        "league": m.get("league_name"),
+                        "homeTeam": m.get("home_team_name"),
+                        "awayTeam": m.get("away_team_name"),
+                        "homeScore": live_score[0],
+                        "awayScore": live_score[1],
+                        "minute": min(max(minute, 0), 120),
+                    })
 
     return {"items": items}
 

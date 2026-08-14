@@ -239,6 +239,52 @@ class OddsRepository:
             row = cur.fetchone()
             return row["max_match_number"] if row else None
 
+    def get_finished_without_score(
+        self,
+        days: Optional[int] = None,
+        *,
+        prefer_after_seconds: int = 2 * 3600,
+    ) -> List[Dict[str, Any]]:
+        """查询已开赛但缺比分的比赛，供比分回填线程使用。
+
+        开赛满 prefer_after_seconds(默认2h)的优先回填——此时大概率已完赛可出分；
+        不满2h的仍尝试(早结束/腰斩)，但不盲标 finished。
+        """
+        now_ts = int(datetime.now().timestamp())
+        prefer_before = now_ts - prefer_after_seconds
+        ph = PLACEHOLDER
+        sql = (
+            "SELECT match_id, match_code, match_number, match_date, match_timestamp, "
+            "home_team_name, away_team_name FROM matches "
+            f"WHERE match_timestamp IS NOT NULL AND match_timestamp < {ph} "
+            "AND home_score IS NULL "
+            "AND (match_status IS NULL OR match_status != 'cancelled')"
+        )
+        params: List[Any] = [now_ts]
+        if days:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            sql += f" AND match_date >= {ph}"
+            params.append(cutoff)
+        # 开赛≥2h 优先，同档按开赛时间升序(先踢完的先抓)
+        sql += (
+            f" ORDER BY CASE WHEN match_timestamp <= {ph} THEN 0 ELSE 1 END, "
+            "match_timestamp ASC"
+        )
+        params.append(prefer_before)
+        with get_db() as conn:
+            cur = _execute(conn, sql, params)
+            return list(cur.fetchall())
+
+    def update_match_score(self, match_id: str, home_score: int, away_score: int) -> None:
+        """回填比赛最终比分并标记完赛"""
+        ph = PLACEHOLDER
+        sql = (
+            "UPDATE matches SET home_score=%s, away_score=%s, match_status='finished', "
+            "updated_at=CURRENT_TIMESTAMP WHERE match_id=%s"
+        )
+        with get_db() as conn:
+            _execute(conn, sql, (home_score, away_score, match_id))
+
     # Query helpers for API
     def list_matches(
         self,

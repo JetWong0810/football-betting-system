@@ -140,6 +140,11 @@ def _clean_handicap(text: str) -> str:
 _score_cache: Dict[str, Optional[tuple]] = {}
 
 
+def clear_score_cache() -> None:
+    """清空比分缓存，确保下次 fetch_match_score 重新从 500.com 拉取最新数据"""
+    _score_cache.clear()
+
+
 def _load_jczq_list(match_date: str) -> None:
     """抓取竞彩亚盘列表页，缓存该日所有比赛的 fid 和比分"""
     url = f"{BASE_URL}/yazhi_jczq_{match_date}.shtml"
@@ -177,6 +182,45 @@ def _parse_score(text: str) -> Optional[tuple]:
     try:
         return (int(parts[0].strip()), int(parts[1].strip()))
     except (ValueError, TypeError):
+        return None
+
+
+def fetch_live_score_from_fid(fid: str) -> Optional[tuple]:
+    """从500.com比赛详情页抓取实时比分。
+
+    比赛详情页(yazhi-{fid}.shtml)顶部有 <p class="odds_hd_bf">比分</p>，
+    比分格式为 "1:2"。该页面比分在比赛进行中就会更新，不同于列表页只显示赛后比分。
+    """
+    url = f"{BASE_URL}/fenxi/yazhi-{fid}.shtml"
+    try:
+        with httpx.Client(timeout=15, headers=HEADERS) as client:
+            resp = client.get(url)
+        if resp.status_code != 200:
+            logger.warning(f"获取比赛详情页失败 fid={fid}: HTTP {resp.status_code}")
+            return None
+        content = resp.content.decode("gbk", errors="replace")
+        soup = BeautifulSoup(content, "html.parser")
+        p = soup.find("p", class_="odds_hd_bf")
+        if p:
+            score_text = p.get_text(strip=True)
+            score = _parse_score(score_text)
+            if score:
+                return score
+        # 兜底：从 odds_hd_cont 中提取比分
+        div = soup.find("div", class_="odds_hd_cont")
+        if div:
+            text = div.get_text(strip=True)
+            # 格式: "主队名...比赛时间...比分...客队名"
+            import re
+            m = re.search(r'(\d+):(\d+)', text)
+            if m:
+                try:
+                    return (int(m.group(1)), int(m.group(2)))
+                except (ValueError, TypeError):
+                    pass
+        return None
+    except Exception as e:
+        logger.warning(f"获取实时比分失败 fid={fid}: {e}")
         return None
 
 

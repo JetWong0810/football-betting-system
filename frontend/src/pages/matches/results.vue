@@ -214,7 +214,6 @@ async function fetchLiveScores() {
   try {
     const data = await request({ url: "/api/match-results/live", method: "GET" });
     liveMatches.value = data?.items || [];
-    if (!liveMatches.value.length) stopLivePolling();
   } catch (_e) {
     // 静默失败，保留上次数据
   }
