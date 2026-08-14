@@ -27,13 +27,21 @@ _score_cache: Dict[str, Dict[str, Tuple[int, int]]] = {}
 
 
 def _parse_score(text: str) -> Optional[Tuple[int, int]]:
+    """解析比分文本 '1:2' -> (1, 2)，无效返回 None。
+
+    时间格式如"18:00"会被误解析为(18,0)，过滤掉任一侧>15的不合理比分。
+    """
     if not text or ":" not in text:
         return None
     parts = text.split(":")
     if len(parts) != 2:
         return None
     try:
-        return (int(parts[0].strip()), int(parts[1].strip()))
+        h = int(parts[0].strip())
+        a = int(parts[1].strip())
+        if h > 15 or a > 15:
+            return None
+        return (h, a)
     except (ValueError, TypeError):
         return None
 

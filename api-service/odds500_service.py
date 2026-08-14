@@ -173,14 +173,22 @@ def _load_jczq_list(match_date: str) -> None:
 
 
 def _parse_score(text: str) -> Optional[tuple]:
-    """解析比分文本 '1:2' -> (1, 2)，无效返回 None"""
+    """解析比分文本 '1:2' -> (1, 2)，无效返回 None。
+
+    时间格式如"18:00"会被误解析为(18,0)，过滤掉任一侧>15的不合理比分。
+    """
     if not text or ":" not in text:
         return None
     parts = text.split(":")
     if len(parts) != 2:
         return None
     try:
-        return (int(parts[0].strip()), int(parts[1].strip()))
+        h = int(parts[0].strip())
+        a = int(parts[1].strip())
+        # 过滤时间格式（如"18:00"）等非比分数据
+        if h > 15 or a > 15:
+            return None
+        return (h, a)
     except (ValueError, TypeError):
         return None
 
@@ -212,12 +220,10 @@ def fetch_live_score_from_fid(fid: str) -> Optional[tuple]:
             text = div.get_text(strip=True)
             # 格式: "主队名...比赛时间...比分...客队名"
             import re
-            m = re.search(r'(\d+):(\d+)', text)
-            if m:
-                try:
-                    return (int(m.group(1)), int(m.group(2)))
-                except (ValueError, TypeError):
-                    pass
+            for m in re.finditer(r'(\d+):(\d+)', text):
+                score = _parse_score(m.group(0))
+                if score:
+                    return score
         return None
     except Exception as e:
         logger.warning(f"获取实时比分失败 fid={fid}: {e}")

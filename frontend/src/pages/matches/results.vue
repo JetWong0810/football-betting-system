@@ -38,12 +38,16 @@
       <view class="live-list">
         <view class="live-item" v-for="m in liveMatches" :key="m.matchId">
           <text class="live-league">{{ m.league }}</text>
-          <text class="live-team home">{{ m.homeTeam }}</text>
-          <view class="live-score-wrap">
-            <text class="live-score">{{ m.homeScore }}:{{ m.awayScore }}</text>
-            <text class="live-minute">{{ m.minute }}'</text>
+          <view class="live-body">
+            <text class="live-team home">{{ m.homeTeam }}</text>
+            <view class="live-score-box">
+              <text class="live-score home">{{ m.homeScore }}</text>
+              <text class="live-score-divider">:</text>
+              <text class="live-score away">{{ m.awayScore }}</text>
+              <text class="live-minute">{{ m.minute }}'</text>
+            </view>
+            <text class="live-team away">{{ m.awayTeam }}</text>
           </view>
-          <text class="live-team away">{{ m.awayTeam }}</text>
         </view>
       </view>
     </view>
@@ -616,19 +620,24 @@ function onReview(match) {
   justify-content: center;
   min-width: 100rpx;
   margin: 0 16rpx;
+  background: #fef2f2;
+  border: 1rpx solid #fecaca;
+  border-radius: 8rpx;
+  padding: 4rpx 16rpx;
 }
 
 .score-num {
   font-size: 32rpx;
   font-weight: 700;
-  color: #0d9488;
-  min-width: 32rpx;
+  color: #dc2626;
+  min-width: 36rpx;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .score-divider {
   font-size: 24rpx;
-  color: #ccc;
+  color: #dc2626;
   margin: 0 6rpx;
 }
 
@@ -982,10 +991,7 @@ function onReview(match) {
 }
 
 .live-item {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 12rpx 0;
+  padding: 14rpx 0;
   border-bottom: 1rpx solid #f1f5f9;
 }
 
@@ -996,15 +1002,22 @@ function onReview(match) {
 .live-league {
   font-size: 18rpx;
   color: #94a3b8;
-  width: 72rpx;
-  flex-shrink: 0;
+  margin-bottom: 8rpx;
+  display: block;
+}
+
+.live-body {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
 }
 
 .live-team {
-  font-size: 24rpx;
-  color: #334155;
+  font-size: 26rpx;
+  color: #1e293b;
   font-weight: 500;
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1018,25 +1031,37 @@ function onReview(match) {
   text-align: left;
 }
 
-.live-score-wrap {
+.live-score-box {
   display: flex;
   align-items: center;
   gap: 6rpx;
   flex-shrink: 0;
+  background: #fef2f2;
+  border: 1rpx solid #fecaca;
+  border-radius: 8rpx;
+  padding: 6rpx 16rpx;
 }
 
 .live-score {
-  font-size: 28rpx;
+  font-size: 32rpx;
   font-weight: 700;
   color: #dc2626;
-  min-width: 60rpx;
+  min-width: 36rpx;
   text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-score-divider {
+  font-size: 24rpx;
+  color: #dc2626;
+  font-weight: 400;
 }
 
 .live-minute {
-  font-size: 18rpx;
+  font-size: 20rpx;
   color: #94a3b8;
-  min-width: 36rpx;
+  margin-left: 4rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 </style>
