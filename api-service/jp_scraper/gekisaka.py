@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from .http_client import GEKI_BASE, JpHttp
 from .formation_util import resolve_formation, extract_formation_from_text
 
 

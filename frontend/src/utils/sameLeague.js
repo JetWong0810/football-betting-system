@@ -19,6 +19,13 @@ const SAME_LEAGUE_ELIGIBLE = new Set([
   '墨西联',
   '欧冠',
   '欧罗巴',
+  '亚冠杯', '亚冠', '亚冠联2', '亚冠精英',
+  '解放者杯',
+  '英足总杯',
+  '英联杯', '英联赛杯',
+  '欧协联',
+  '沙特联', '沙职',
+  '芬超',
 ])
 
 export function isSameLeagueEligible(league) {
