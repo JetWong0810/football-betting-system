@@ -106,6 +106,11 @@
           :class="{ active: dirFilters.includes('single') }"
           @tap="toggleFilter('single')"
         >单关</text>
+        <text
+          class="ctrl-btn note"
+          :class="{ active: dirFilters.includes('hasNote') }"
+          @tap="toggleFilter('hasNote')"
+        >有备注</text>
       </view>
       <view class="ctrl-row">
         <text class="ctrl-lab">变动</text>
@@ -791,12 +796,13 @@ const filteredItems = computed(() => {
   let list = sortedItems.value
   const dirs = dirFilters.value
   if (dirs.length) {
-    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample8' && k !== 'hitPct65' && k !== 'score60' && k !== 'single')
+    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample8' && k !== 'hitPct65' && k !== 'score60' && k !== 'single' && k !== 'hasNote')
     const needHit = dirs.includes('hit')
     const needSample8 = dirs.includes('sample8')
     const needHitPct65 = dirs.includes('hitPct65')
     const needScore60 = dirs.includes('score60')
     const needSingle = dirs.includes('single')
+    const needNote = dirs.includes('hasNote')
     list = list.filter(it => {
       const okDir = !dirSet.length || dirSet.includes(it.f6?.direction || 'neutral')
       const okHit = !needHit || it.hit === true
@@ -804,7 +810,8 @@ const filteredItems = computed(() => {
       const okHitPct = !needHitPct65 || itemHitPct(it) >= 65
       const okScore = !needScore60 || itemRefScore(it) >= 60
       const okSingle = !needSingle || !!it.isSingle
-      return okDir && okHit && okSample && okHitPct && okScore && okSingle
+      const okNote = !needNote || !!noteMap[it.matchId]
+      return okDir && okHit && okSample && okHitPct && okScore && okSingle && okNote
     })
   }
   const moves = moveFilters.value
@@ -1455,6 +1462,7 @@ onLoad(async (options) => {
     &.hitpct.active { color: #7c3aed; border-color: rgba(#7c3aed, 0.4); background: rgba(#7c3aed, 0.06); }
     &.score.active { color: #0f766e; border-color: rgba(#0f766e, 0.4); background: rgba(#0f766e, 0.06); }
     &.single.active { color: #dc2626; border-color: rgba(#dc2626, 0.4); background: rgba(#dc2626, 0.06); }
+    &.note.active { color: #0891b2; border-color: rgba(#0891b2, 0.4); background: rgba(#0891b2, 0.06); }
     &.move-up.active { color: #dc2626; border-color: rgba(#dc2626, 0.4); background: rgba(#dc2626, 0.06); }
     &.move-down.active { color: #059669; border-color: rgba(#059669, 0.4); background: rgba(#059669, 0.06); }
     &:active { opacity: 0.7; }
