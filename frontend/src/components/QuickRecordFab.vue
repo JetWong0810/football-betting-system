@@ -16,7 +16,7 @@ function goRecord() {
 <style lang="scss" scoped>
 .fab {
   position: fixed;
-  left: 32rpx;
+  left: calc(var(--app-gutter, 0px) + 32rpx);
   bottom: calc(env(safe-area-inset-bottom) + 180rpx);
   width: 96rpx;
   height: 96rpx;

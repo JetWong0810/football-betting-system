@@ -1,5 +1,5 @@
 <template>
-  <view class="fab-wrapper" :style="{ bottom: fabBottom + 'rpx', right: '32rpx' }" @touchmove.stop.prevent="onDrag" @touchend="onDragEnd">
+  <view class="fab-wrapper" :style="{ bottom: fabBottom + 'rpx' }" @touchmove.stop.prevent="onDrag" @touchend="onDragEnd">
     <view class="fab-btn" @tap="openPanel">
       <text class="fab-text">查询</text>
     </view>
@@ -37,6 +37,7 @@ function onDragEnd() {
 <style lang="scss" scoped>
 .fab-wrapper {
   position: fixed;
+  right: calc(var(--app-gutter, 0px) + 32rpx);
   z-index: 999;
 }
 
