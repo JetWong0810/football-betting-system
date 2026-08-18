@@ -180,6 +180,41 @@ page {
     max-width: none;
     transform: none;
   }
+
+  .similar-modal,
+  .japan-modal,
+  .note-modal,
+  .history-modal,
+  .panel-mask,
+  .dialog-overlay,
+  .overlay,
+  .picker-mask,
+  .picker-panel,
+  .picker-sheet,
+  .cal-mask,
+  .cal-panel,
+  .dp-mask,
+  .dp-panel,
+  .ap-overlay,
+  .cooldown-mask,
+  .slip-layer,
+  .slip-bar,
+  .sim-sheet-root,
+  .modal-mask,
+  .cart-modal,
+  .bottom-action {
+    left: var(--app-gutter) !important;
+    right: var(--app-gutter) !important;
+  }
+
+  .slip-bar {
+    left: calc(var(--app-gutter) + 24rpx) !important;
+    right: calc(var(--app-gutter) + 24rpx) !important;
+  }
+
+  .float-button {
+    right: calc(var(--app-gutter) + 28rpx) !important;
+  }
 }
 /* #endif */
 </style>
