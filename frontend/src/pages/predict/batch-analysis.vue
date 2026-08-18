@@ -948,9 +948,20 @@ function getDetail(f6, name) {
   return d ? d.desc : ''
 }
 function ahStats(f6) {
+  const chart = (f6?.details || []).find(x => x.name === '盘路统计')?.chart
+  if (chart?.items?.length) {
+    const pick = (side) => Number((chart.items.find(i => i.side === side) || {}).value) || 0
+    const upper = pick('upper')
+    const lower = pick('lower')
+    const push = pick('neutral')
+    const total = Number(chart.total) || (upper + lower + push)
+    const upperPct = total ? Math.round((upper / total) * 100) : 0
+    const lowerPct = total ? Math.round((lower / total) * 100) : 0
+    return { total, upper, lower, push, upperPct, lowerPct }
+  }
   // 优先从盘路统计解析（新格式），兜底旧格式
   const statDesc = getDetail(f6, '盘路统计')
-  if (statDesc) {
+  if (statDesc && /上盘\d+/.test(statDesc)) {
     const s = String(statDesc)
     const upM = s.match(/上盘(\d+)/)
     const loM = s.match(/下盘(\d+)/)

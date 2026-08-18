@@ -408,20 +408,25 @@ def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
     if total == 0:
         return {"direction": NEU, "score": 5, "desc": "欧赔整体稳定"}
 
+    n_books = len(selected)
     if upper_signals > lower_signals:
         direction = UP
-        ratio = upper_signals / len(selected)
-        desc = f"{upper_signals}/{len(selected)}家欧赔看好上盘"
+        ratio = upper_signals / n_books
+        desc = f"{upper_signals}/{n_books}家欧赔看好上盘"
     elif lower_signals > upper_signals:
         direction = DOWN
-        ratio = lower_signals / len(selected)
-        desc = f"{lower_signals}/{len(selected)}家欧赔看好下盘"
+        ratio = lower_signals / n_books
+        desc = f"{lower_signals}/{n_books}家欧赔看好下盘"
     else:
         direction = NEU
         ratio = 0
         desc = "欧赔方向分歧"
 
-    if ratio >= 0.6:
+    if n_books < 2 or total < 2:
+        score = 5
+        if direction != NEU:
+            desc += "(仅1家，弱信号)"
+    elif ratio >= 0.6:
         score = 7
     elif ratio >= 0.4:
         score = 6
@@ -432,7 +437,7 @@ def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
 
     if descs:
         desc += "，" + descs[0]
-    return {"direction": direction, "score": score, "desc": desc}
+    return {"direction": direction, "score": score, "desc": desc, "n_books": n_books}
 
 
 def calc_factor4(asian_data: List[Dict], is_home_let: bool,
@@ -465,7 +470,7 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
     consistency_bonus = 0
     consistency_desc = ""
 
-    # 欧赔权重: 与亚盘矛盾时归零(不参与方向投票)
+    # 欧赔只辅助: 与亚盘/初盘矛盾时不投票、不掺分
     euro_w = 1.0
     if asian_dir != NEU and euro_dir != NEU:
         if asian_dir == euro_dir:
@@ -475,6 +480,9 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
             euro_w = 0.0
             consistency_bonus = -1
             consistency_desc = "亚欧方向相反，以亚盘为准"
+    elif asian_dir == NEU and opening_dir != NEU and euro_dir != NEU and euro_dir != opening_dir:
+        euro_w = 0.0
+        consistency_desc = "亚盘无变动，欧赔与初盘相反，以初盘为准"
 
     # 综合投票: 初盘1.5 / 亚盘2.0 / 欧赔≤1.0
     dir_votes = {UP: 0.0, DOWN: 0.0, NEU: 0.0}
@@ -506,11 +514,9 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
     else:
         direction = NEU
 
-    active_scores = [s["score"] for s in subs if s["direction"] != NEU]
-    if active_scores:
-        base_score = sum(active_scores) / len(active_scores)
-    else:
-        base_score = 5.0
+    win_scores = [s["score"] for s, w in zip(subs, sub_weights)
+                  if w > 0 and s["direction"] == direction]
+    base_score = (sum(win_scores) / len(win_scores)) if win_scores else 5.0
     score = max(3, min(9, round(base_score + consistency_bonus)))
 
     if direction == NEU:
@@ -519,8 +525,8 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
     stability = sub_opening.get("consistency", "unknown")
 
     reason_parts = []
-    for sub in subs:
-        if sub["direction"] != NEU:
+    for sub, w in zip(subs, sub_weights):
+        if w > 0 and sub["direction"] == direction:
             reason_parts.append(sub["desc"])
     if consistency_desc:
         reason_parts.append(consistency_desc)
@@ -935,6 +941,47 @@ def _calc_trend(records: List[Dict], min_segment: int = 3) -> Tuple[Optional[flo
     return last_ppg, trend, None
 
 
+def _compare_chart(upper_name, lower_name, u_val, l_val, *, unit="", u_suffix="", l_suffix="", vmax=None):
+    """上盘/下盘对比条数据,前端用 CSS 画,不引图表库。"""
+    items = []
+    if u_val is not None:
+        items.append({"label": upper_name, "value": round(float(u_val), 2),
+                      "suffix": u_suffix or "", "side": "upper"})
+    if l_val is not None:
+        items.append({"label": lower_name, "value": round(float(l_val), 2),
+                      "suffix": l_suffix or "", "side": "lower"})
+    if not items:
+        return None
+    mx = float(vmax) if vmax else max(x["value"] for x in items)
+    return {"type": "compare", "unit": unit, "max": mx if mx > 0 else 1, "items": items}
+
+
+def _ah_part(full, half):
+    bits = []
+    if full:
+        bits.append(f"全{full}")
+    if half:
+        bits.append(f"半{half}")
+    return " ".join(bits)
+
+
+def _stack_chart(total, *parts):
+    """盘路堆叠条: parts=(label, value, side, suffix)。"""
+    items = []
+    for label, value, side, suffix in parts:
+        if not value:
+            continue
+        items.append({
+            "label": label,
+            "value": int(value),
+            "side": side,
+            "suffix": suffix or "",
+        })
+    if not items or not total:
+        return None
+    return {"type": "stack", "total": int(total), "items": items}
+
+
 def calc_factor1(match_data: Optional[Dict], match_info: Dict,
                  ai_f1_list: Optional[List[Dict]] = None) -> Dict[str, Any]:
     """F1 近期状态：3个量化子因素 + 1个AI子因素
@@ -1007,7 +1054,10 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
         sub1_desc = f"{lower_name}场均{l_ppg}分（近{l_total}场），{upper_name}数据不足"
     else:
         sub1_desc = "双方近期样本均不足"
-    details.append({"name": "近期战绩", "direction": sub1_dir, "desc": sub1_desc})
+    details.append({
+        "name": "近期战绩", "direction": sub1_dir, "desc": sub1_desc,
+        "chart": _compare_chart(upper_name, lower_name, u_ppg, l_ppg, unit="分", vmax=3),
+    })
 
     # --- 子因素2: 近期走势（近5场 vs 前5场趋势） ---
     u_last_ppg, u_trend, u_trend_err = _calc_trend(upper_recent)
@@ -1034,7 +1084,12 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
         sub2_desc = "双方近期样本不足，无法判断趋势"
     else:
         sub2_desc = f"{upper_name}近5场{u_ppg_s}分{u_trend_s} | {lower_name}近5场{l_ppg_s}分{l_trend_s}"
-    details.append({"name": "近期走势", "direction": sub2_dir, "desc": sub2_desc})
+    details.append({
+        "name": "近期走势", "direction": sub2_dir, "desc": sub2_desc,
+        "chart": _compare_chart(
+            upper_name, lower_name, u_last_ppg, l_last_ppg, unit="分", vmax=3,
+            u_suffix=u_trend or "", l_suffix=l_trend or ""),
+    })
 
     # --- 子因素3: 主客场对比 ---
     sub3_dir = "neutral"
@@ -1068,7 +1123,12 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
             f"{lower_name}{l_label}{l_n}场，样本不足"
         )
         sub3_dir = "neutral"
-    details.append({"name": "主客场", "direction": sub3_dir, "desc": sub3_desc})
+    details.append({
+        "name": "主客场", "direction": sub3_dir, "desc": sub3_desc,
+        "chart": _compare_chart(
+            f"{upper_name}{u_label}", f"{lower_name}{l_label}",
+            upper_matched.get("ppg"), lower_matched.get("ppg"), unit="分", vmax=3),
+    })
 
     # --- 子因素4: AI分析 ---
     sub4_dir = "neutral"
@@ -1660,7 +1720,23 @@ def calc_factor3(match_info: Dict, ai_f3_list: Optional[List[Dict]] = None) -> D
         rank_parts.append("无身价数据")
 
     sub2_desc = " · ".join(rank_parts)
-    details.append({"name": "排名/身价", "direction": "neutral", "desc": sub2_desc})
+    worth_chart = None
+    if hw is not None and aw is not None and hw > 0 and aw > 0:
+        home_side = "upper" if is_home_let else "lower"
+        away_side = "lower" if is_home_let else "upper"
+        mx = max(float(hw), float(aw))
+        worth_chart = {
+            "type": "compare",
+            "unit": "",
+            "max": mx,
+            "items": [
+                {"label": home, "value": float(hw), "suffix": ht, "side": home_side},
+                {"label": away, "value": float(aw), "suffix": at, "side": away_side},
+            ],
+        }
+    details.append({"name": "排名/身价", "direction": "neutral",
+                    "desc": rank_parts[0] if worth_chart else sub2_desc,
+                    "chart": worth_chart})
 
     # --- 综合结论（仅AI决定方向） ---
     if sub1_dir == "upper":
@@ -2427,12 +2503,6 @@ def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
     low_label, low_open, low_close = min(odds_list, key=lambda x: x[1])
     diff = low_close - low_open
 
-    details = [
-        {"name": "初盘", "desc": f"胜{open_win:.2f}/平{open_draw:.2f}/负{open_loss:.2f}"},
-        {"name": "终盘", "desc": f"胜{close_win:.2f}/平{close_draw:.2f}/负{close_loss:.2f}"},
-        {"name": "低赔位置", "desc": f"{low_label}赔 {low_open:.2f}→{low_close:.2f} ({diff:+.2f})"},
-    ]
-
     if diff < -0.02:
         direction = "upper"
         if diff < -0.10:
@@ -2459,6 +2529,29 @@ def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
         direction = "neutral"
         score = 5
         reason = f"竞彩{low_label}赔(低赔)变动极小({diff:+.2f})，方向不明"
+
+    odds_items = []
+    for label, o, c in odds_list:
+        d = round(float(c) - float(o), 2)
+        if d < -0.02:
+            side = "upper"
+        elif d > 0.02:
+            side = "lower"
+        else:
+            side = "neutral"
+        odds_items.append({
+            "label": label,
+            "open": round(float(o), 2),
+            "close": round(float(c), 2),
+            "diff": d,
+            "low": label == low_label,
+            "side": side,
+        })
+    details = [{
+        "name": "赔率变动",
+        "direction": direction,
+        "chart": {"type": "odds", "items": odds_items},
+    }]
 
     return {"name": "竞彩赔率", "score": score, "direction": direction,
             "reason": reason, "details": details}
@@ -2795,27 +2888,26 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
         direction, ref_rows, ah_handicap=ah_handicap,
         query_degraded=query_degraded, total=total)
 
+    half_up = stats.get("half_up", 0)
+    half_down = stats.get("half_down", 0)
     details = [
         {"name": "匹配条件", "desc": (
             f"{mode_tag}{query.get('low_position', '')}赔初{query.get('low_open', 0):.2f}→终{query.get('low_close', 0):.2f} "
             f"高赔初{query.get('high_open', 0):.2f}→终{query.get('high_close', 0):.2f} "
             f"方向{dir_label}{soft_high_tag}"
         )},
-        {"name": "盘路统计", "desc": (
-            f"上盘{ah_upper}(全{full_up}) 下盘{ah_lower}(全{full_down}) 走水{ah_push}  "
-            f"命中{ah_upper_pct:.0f}%({ah_upper}/{ah_total})  "
-            f"参考分{ref_score}"
-        )},
-        {"name": "匹配场次", "desc": f"{total}场历史比赛"},
+        {
+            "name": "盘路统计",
+            "direction": direction,
+            "desc": f"参考分 {ref_score}",
+            "chart": _stack_chart(
+                ah_total,
+                ("上盘", ah_upper, "upper", _ah_part(full_up, half_up)),
+                ("下盘", ah_lower, "lower", _ah_part(full_down, half_down)),
+                ("走水", ah_push, "neutral", ""),
+            ),
+        },
     ]
-
-    # 添加匹配比赛摘要(前5场)
-    for m in matches[:5]:
-        score_str = f"{m['home_score']}-{m['away_score']}"
-        details.append({
-            "name": f"{m.get('match_date', '')} {m.get('league_name', '')}",
-            "desc": f"{m.get('home_team_cn', '')} {score_str} {m.get('away_team_cn', '')}"
-        })
 
     return {"name": "历史同赔", "score": score, "direction": direction,
             "reason": reason, "details": details, "matches": similar_matches,

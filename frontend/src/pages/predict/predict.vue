@@ -77,10 +77,13 @@
             <text class="step-reason" v-if="step.status === 'done'">{{ step.reason }}</text>
             <!-- F1子因素详情 -->
             <view class="sub-factors" v-if="step.status === 'done' && step.details && step.details.length > 0">
-              <view class="sub-factor-item" v-for="(sub, si) in step.details" :key="si">
-                <text class="sub-dir-dot" :class="sub.direction">●</text>
-                <text class="sub-name">{{ sub.name }}</text>
-                <text class="sub-desc">{{ sub.desc }}</text>
+              <view class="sub-factor-block" v-for="(sub, si) in step.details" :key="si">
+                <view class="sub-factor-item">
+                  <text class="sub-dir-dot" :class="sub.direction">●</text>
+                  <text class="sub-name">{{ sub.name }}</text>
+                  <text class="sub-desc" v-if="!hasChart(sub) || sub.name === '排名/身价' || sub.name === '盘路统计'">{{ sub.desc }}</text>
+                </view>
+                <FactorCompareBars v-if="hasChart(sub)" :chart="sub.chart" />
               </view>
             </view>
             <!-- 历史同赔详情入口(日职0场也可进弹窗开「仅日本」) -->
@@ -433,6 +436,11 @@ import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import { isSameLeagueEligible } from '@/utils/sameLeague'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
+import FactorCompareBars from '@/components/FactorCompareBars.vue'
+
+function hasChart(sub) {
+  return !!(sub && sub.chart && sub.chart.items && sub.chart.items.length)
+}
 
 const matchStatus = ref('not_started')
 // 标记页面是否由外部参数(如批量分析跳转)初始化，避免 watch(matchStatus) 重置 filterDate
@@ -1304,11 +1312,18 @@ onShow(async () => {
   }
   .info-single {
     border: 1px solid rgba(239, 68, 68, 0.4);
-    border-radius: 4rpx;
+    border-radius: 6rpx;
     padding: 0 10rpx;
     height: 36rpx;
-    line-height: 36rpx;
-    text { font-size: 20rpx; color: #ef4444; line-height: 36rpx; }
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text {
+      font-size: 20rpx;
+      color: #ef4444;
+      line-height: 1;
+    }
   }
 }
 
@@ -1346,23 +1361,19 @@ onShow(async () => {
   display: flex;
   gap: 16rpx;
   position: relative;
-  padding-bottom: 24rpx;
   transition: opacity 0.3s;
-  overflow: hidden;
 
   &.pending { opacity: 0.35; }
   &.active { opacity: 1; }
   &.done { opacity: 1; }
-
-  &:last-child { padding-bottom: 0; }
 }
 
 .track {
   position: relative;
   width: 40rpx;
   flex-shrink: 0;
+  align-self: stretch;
   display: flex;
-  align-items: flex-start;
   justify-content: center;
 
   .track-line {
@@ -1374,8 +1385,8 @@ onShow(async () => {
     transition: background 0.3s;
 
     &.filled { background: $frbt-primary; }
-    &.top { top: 0; height: 20rpx; }
-    &.bottom { top: 56rpx; bottom: -24rpx; }
+    &.top { top: 0; height: 18rpx; }
+    &.bottom { top: 18rpx; bottom: 0; }
   }
 
   .track-dot {
@@ -1388,7 +1399,6 @@ onShow(async () => {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    margin-top: 4rpx;
     position: relative;
     z-index: 1;
     transition: all 0.3s;
@@ -1407,6 +1417,10 @@ onShow(async () => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  padding-bottom: 24rpx;
+}
+.timeline-item:last-child .step-content {
+  padding-bottom: 0;
 }
 
 .step-header {
@@ -1487,6 +1501,10 @@ onShow(async () => {
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+
+  .sub-factor-block + .sub-factor-block {
+    margin-top: 4rpx;
+  }
 
   .sub-factor-item {
     display: flex;
