@@ -193,7 +193,9 @@
     "navigationBarTextStyle": "white",
     "navigationBarTitleText": "理性玩球小助手",
     "navigationBarBackgroundColor": "#0d9488",
-    "backgroundColor": "#ecfaf8"
+    "backgroundColor": "#ecfaf8",
+    "rpxCalcMaxDeviceWidth": 430,
+    "rpxCalcBaseDeviceWidth": 430
   },
   "tabBar": {
     "color": "#9ca3af",

@@ -130,4 +130,21 @@ page {
   color: $frbt-text;
   padding-bottom: 0;
 }
+
+/* #ifdef H5 */
+@media (min-width: 431px) {
+  html,
+  body {
+    background: #d5e6e2;
+  }
+
+  uni-app {
+    max-width: 430px;
+    margin: 0 auto;
+    overflow-x: hidden;
+    transform: translateZ(0);
+    box-shadow: 0 0 48px rgba(13, 148, 136, 0.16);
+  }
+}
+/* #endif */
 </style>
