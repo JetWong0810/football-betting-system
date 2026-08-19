@@ -177,7 +177,7 @@
           <view class="row-hit" v-if="ahStats(it.f6).total > 0">
             <view class="hit-top">
               <text class="pct" :class="focusSide(it.f6)">{{ focusPct(it.f6) }}%</text>
-              <text class="pct-lab" :class="focusSide(it.f6)">{{ focusHitLabel(it.f6) }}</text>
+              <text class="pct-lab" :class="focusSide(it.f6)">{{ focusHitLabel(it.f6, it) }}</text>
               <text class="sample">{{ ahStats(it.f6).upper }}/{{ ahStats(it.f6).lower }}/{{ ahStats(it.f6).push }} · {{ ahStats(it.f6).total }}场</text>
             </view>
             <view class="bar">
@@ -458,7 +458,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 import { requireAuth, isLoggedIn } from '@/utils/auth'
 import { useSimBetStore } from '@/stores/simBetStore'
-import { lowKeyFromSpf } from '@/utils/simBet'
+import { lowKeyFromSpf, upperSideForHc } from '@/utils/simBet'
 import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import { isSameLeagueEligible } from '@/utils/sameLeague'
@@ -848,6 +848,17 @@ function clearFilter() {
 }
 
 function dirLabel(dir) { return dir === 'upper' ? '上盘' : dir === 'lower' ? '下盘' : '中性' }
+/** 同赔盘路口径: 终盘<0主上、>0客上、平手用 spf 低赔方 */
+function sideTeamsOf(it) {
+  const home = it?.homeTeam?.name || '主队'
+  const away = it?.awayTeam?.name || '客队'
+  const side = upperSideForHc(ahCloseOf(it), lowKeyFromSpf(it?.spf))
+  const homeUpper = side !== 'away'
+  return {
+    upper: homeUpper ? home : away,
+    lower: homeUpper ? away : home,
+  }
+}
 /** 参考分档: weak <40 / mid 40–64 / strong ≥65 */
 function refTier(f6) {
   const s = f6?.refScore
@@ -1006,10 +1017,11 @@ function focusPct(f6) {
   if (side === 'lower') return s.lowerPct
   return Math.max(s.upperPct, s.lowerPct)
 }
-function focusHitLabel(f6) {
+function focusHitLabel(f6, it) {
   const side = focusSide(f6)
-  if (side === 'upper') return '上盘命中'
-  if (side === 'lower') return '下盘命中'
+  const t = it ? sideTeamsOf(it) : null
+  if (side === 'upper') return t ? `上盘命中(${t.upper})` : '上盘命中'
+  if (side === 'lower') return t ? `下盘命中(${t.lower})` : '下盘命中'
   return '两侧持平'
 }
 function shortReason(reason) {
@@ -1599,6 +1611,8 @@ onLoad(async (options) => {
   }
   .pct-lab {
     font-size: 24rpx; font-weight: 500;
+    min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
     &.upper { color: #dc2626; }
     &.lower { color: #059669; }
     &.neutral { color: #64748b; }
