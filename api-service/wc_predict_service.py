@@ -191,7 +191,8 @@ def predict_wc_match(match_info: Dict[str, Any],
     # F3 市场信号 & F4 市场热度: 纯量化，不需要AI
     f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
     f3["name"] = "市场信号"
-    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"))
+    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
+                     match_info.get("handicap"))
     f4["name"] = "市场热度"
 
     # F5 竞彩赔率 & F6 历史同赔: 从euro_data中提取竞彩官方数据

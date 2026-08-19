@@ -91,12 +91,16 @@ _fid_cache: Dict[str, str] = {}
 def _identify_company(raw_name: str) -> str:
     if raw_name in COMPANY_MAP:
         return COMPANY_MAP[raw_name]
+    if raw_name in EURO_COMPANY_MAP:
+        return EURO_COMPANY_MAP[raw_name]
     if len(raw_name) > 4:
         half = len(raw_name) // 2
         if raw_name[:half] == raw_name[half:]:
             short = raw_name[:half]
             if short in COMPANY_MAP:
                 return COMPANY_MAP[short]
+            if short in EURO_COMPANY_MAP:
+                return EURO_COMPANY_MAP[short]
             return short
     return raw_name
 
@@ -315,9 +319,10 @@ def _parse_european_page(html: str) -> Dict[str, Any]:
         return {"companies": [], "summary": {}}
 
     companies = []
-    company_rows = table.find_all("tr", class_="tr1")
-
-    for tr in company_rows:
+    for tr in table.find_all("tr"):
+        classes = tr.get("class") or []
+        if not any(c in ("tr1", "tr2") for c in classes):
+            continue
         cid = tr.get("id", "")
         tds = tr.find_all("td")
         if len(tds) < 9:
@@ -327,6 +332,10 @@ def _parse_european_page(html: str) -> Dict[str, Any]:
         company_td = tds[1]
         raw_name = company_td.get("title", "") or company_td.get_text(strip=True)
         company_name = _identify_company(raw_name)
+        if cid and str(cid).isdigit():
+            mapped = EURO_COMPANIES.get(int(cid))
+            if mapped:
+                company_name = mapped
 
         # td[3-5] = 初盘(胜/平/负), td[6-8] = 即时(胜/平/负)
         init_w = _parse_odds(tds[3].get_text(strip=True))
@@ -336,6 +345,8 @@ def _parse_european_page(html: str) -> Dict[str, Any]:
         curr_d = _parse_odds(tds[7].get_text(strip=True))
         curr_l = _parse_odds(tds[8].get_text(strip=True))
 
+        if not company_name or company_name in ("最大值", "最小值", "平均值"):
+            continue
         if not all([init_w, init_d, init_l, curr_w, curr_d, curr_l]):
             continue
 

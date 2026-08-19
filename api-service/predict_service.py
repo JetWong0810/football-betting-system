@@ -144,7 +144,9 @@ def _get_asian_companies(asian_data: List[Dict], priority_books: List[str] = Non
     for book in priority_books:
         c = next((x for x in asian_data if _match_bookmaker(x.get("bookmaker", ""), book)), None)
         if c:
-            result.append(c)
+            row = dict(c)
+            row["bookmaker"] = book
+            result.append(row)
     if not result and asian_data:
         result.append(asian_data[0])
     return result
@@ -222,8 +224,27 @@ def _calc_sub_opening(asian_data: List[Dict], is_home_let: bool) -> Dict[str, An
         score = max(5, score - 1)
 
     desc = "，".join(desc_parts) if desc_parts else "初盘数据不足"
+    books = []
+    for c in companies:
+        book = c.get("bookmaker", "")
+        ini = c.get("initial", {})
+        w = ini.get("home") if is_home_let else ini.get("away")
+        if w is None:
+            continue
+        wv = round(float(w), 2)
+        if wv <= 0.88:
+            bside = UP
+        elif wv >= 0.95:
+            bside = DOWN
+        else:
+            bside = NEU
+        books.append({
+            "label": book,
+            "openW": wv,
+            "side": bside,
+        })
     return {"direction": direction, "score": score, "desc": desc, "consistency": consistency,
-            "avg_water": avg_water}
+            "avg_water": avg_water, "books": books}
 
 
 def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str, Any]:
@@ -236,7 +257,7 @@ def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str,
     """
     companies = _get_asian_companies(asian_data)
     if not companies:
-        return {"direction": NEU, "score": 5, "desc": "无亚盘变动数据", "pinnacle_dir": None}
+        return {"direction": NEU, "score": 5, "desc": "无亚盘变动数据", "pinnacle_dir": None, "books": []}
 
     # per-book: hcap_dir / water_change / trap
     upgrade_w = 0.0
@@ -248,6 +269,9 @@ def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str,
     pinnacle_dir = None
     pinnacle_trap = None
     desc_bits = []
+    books = []
+    trap_lower_names = []
+    trap_upper_names = []
 
     for c in companies:
         ini = c.get("initial", {})
@@ -283,8 +307,10 @@ def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str,
 
         if is_trap_upper:
             trap_upper_w += bw
+            trap_upper_names.append(book)
         elif is_trap_lower:
             trap_lower_w += bw
+            trap_lower_names.append(book)
         elif hcap_dir == UP:
             true_up_w += bw
         elif hcap_dir == DOWN:
@@ -306,16 +332,42 @@ def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str,
                 elif water_change >= 0.08:
                     pinnacle_dir = DOWN
 
+        tag, bside = "", NEU
+        if is_trap_lower:
+            tag, bside = "诱下", UP
+        elif is_trap_upper:
+            tag, bside = "诱上", DOWN
+        elif hcap_dir == UP:
+            tag, bside = "升盘", UP
+        elif hcap_dir == DOWN:
+            tag, bside = "降盘", DOWN
+        elif water_change is not None and water_change <= -0.03:
+            tag, bside = "降水", UP
+        elif water_change is not None and water_change >= 0.03:
+            tag, bside = "升水", DOWN
+        books.append({
+            "label": book,
+            "openH": _fmt_ah_line(-float(init_h)),
+            "closeH": _fmt_ah_line(-float(curr_h)),
+            "openW": round(float(init_w), 2) if init_w is not None else None,
+            "closeW": round(float(curr_w), 2) if curr_w is not None else None,
+            "diff": round(water_change, 2) if water_change is not None else 0,
+            "tag": tag,
+            "side": bside,
+        })
+
     direction = NEU
     score = 5
 
     # 1) 诱盘优先(庄家调盘与水位背离)
     if trap_upper_w >= 1.5 and trap_upper_w > trap_lower_w:
         direction, score = DOWN, 8 if trap_upper_w >= 2.5 else 7
-        desc_bits.append(f"诱上盘(升盘+升水)→偏下盘")
+        who = "、".join(trap_upper_names) or "多家"
+        desc_bits.append(f"{who}诱上盘(升盘+升水)→偏下盘")
     elif trap_lower_w >= 1.5 and trap_lower_w > trap_upper_w:
         direction, score = UP, 8 if trap_lower_w >= 2.5 else 7
-        desc_bits.append(f"诱下盘(降盘+降水)→偏上盘")
+        who = "、".join(trap_lower_names) or "多家"
+        desc_bits.append(f"{who}诱下盘(降盘+降水)→偏上盘")
     # 2) 真升/降盘(无诱盘特征)
     elif true_up_w >= 2.0 and true_up_w > true_down_w + 0.5:
         direction, score = UP, 8 if true_up_w >= 3.0 else 7
@@ -345,7 +397,7 @@ def _calc_sub_asian_move(asian_data: List[Dict], is_home_let: bool) -> Dict[str,
 
     desc = "，".join(desc_bits)
     return {"direction": direction, "score": score, "desc": desc,
-            "pinnacle_dir": pinnacle_dir}
+            "pinnacle_dir": pinnacle_dir, "books": books}
 
 
 def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
@@ -354,19 +406,22 @@ def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
     if not companies:
         return {"direction": NEU, "score": 5, "desc": "无欧赔数据"}
 
-    # 选取主流公司
+    # 选取主流公司(模糊匹配,与亚盘一致)
     priority = _SHARP_BOOKS + _MAINSTREAM_BOOKS
     selected = []
     for book in priority:
-        c = next((x for x in companies if x.get("bookmaker") == book), None)
+        c = next((x for x in companies if _match_bookmaker(x.get("bookmaker", ""), book)), None)
         if c:
-            selected.append(c)
+            row = dict(c)
+            row["bookmaker"] = book
+            selected.append(row)
     if not selected:
         selected = companies[:5]
 
     upper_signals = 0
     lower_signals = 0
     descs = []
+    books = []
 
     for c in selected:
         ini = c.get("initial", {})
@@ -396,17 +451,37 @@ def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
 
         init_draw = ini.get("draw")
         curr_draw = cur.get("draw")
+        draw_tag = ""
         if init_draw and curr_draw:
             draw_change = curr_draw - init_draw
             if draw_change >= 0.10:
                 descs.append(f"{book}平赔升{draw_change:+.2f}(不看好平)")
+                draw_tag = f"平{draw_change:+.2f}"
+            elif draw_change <= -0.10:
+                draw_tag = f"平{draw_change:+.2f}"
+
+        if upper_change <= -0.05:
+            bside = UP
+        elif upper_change >= 0.05:
+            bside = DOWN
+        else:
+            bside = NEU
+        books.append({
+            "label": book,
+            "open": round(float(init_upper_odds), 2),
+            "close": round(float(curr_upper_odds), 2),
+            "diff": round(float(upper_change), 2),
+            "draw": draw_tag,
+            "tag": "降赔" if bside == UP else ("升赔" if bside == DOWN else ""),
+            "side": bside,
+        })
 
     if not selected:
-        return {"direction": NEU, "score": 5, "desc": "无有效欧赔公司"}
+        return {"direction": NEU, "score": 5, "desc": "无有效欧赔公司", "books": books}
 
     total = upper_signals + lower_signals
     if total == 0:
-        return {"direction": NEU, "score": 5, "desc": "欧赔整体稳定"}
+        return {"direction": NEU, "score": 5, "desc": "欧赔整体稳定", "books": books}
 
     n_books = len(selected)
     if upper_signals > lower_signals:
@@ -437,7 +512,7 @@ def _calc_sub_euro_move(euro_data: Dict, is_home_let: bool) -> Dict[str, Any]:
 
     if descs:
         desc += "，" + descs[0]
-    return {"direction": direction, "score": score, "desc": desc, "n_books": n_books}
+    return {"direction": direction, "score": score, "desc": desc, "n_books": n_books, "books": books}
 
 
 def calc_factor4(asian_data: List[Dict], is_home_let: bool,
@@ -459,9 +534,13 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
         {"name": "初盘信号", "direction": sub_opening["direction"],
          "score": sub_opening["score"], "desc": sub_opening["desc"]},
         {"name": "亚盘变动", "direction": sub_asian["direction"],
-         "score": sub_asian["score"], "desc": sub_asian["desc"]},
+         "score": sub_asian["score"], "desc": sub_asian["desc"],
+         "chart": {"type": "books", "kind": "asian", "items": sub_asian.get("books") or []}
+         if sub_asian.get("books") else None},
         {"name": "欧赔变动", "direction": sub_euro["direction"],
-         "score": sub_euro["score"], "desc": sub_euro["desc"]},
+         "score": sub_euro["score"], "desc": sub_euro["desc"],
+         "chart": {"type": "books", "kind": "euro", "items": sub_euro.get("books") or []}
+         if sub_euro.get("books") else None},
     ]
 
     asian_dir = sub_asian["direction"]
@@ -544,6 +623,32 @@ def calc_factor4(asian_data: List[Dict], is_home_let: bool,
 # F5 市场热度 - 多公司水位一致性(量化) + 用户手动输入(可选)
 # ============================================================
 
+_HEAT_SKIP_BOOKS = {"最大值", "最小值", "平均值"}
+_HEAT_PRIORITY = _SHARP_BOOKS + _MAINSTREAM_BOOKS
+
+
+def _heat_book_name(raw: str) -> str:
+    for target in _HEAT_PRIORITY:
+        if _match_bookmaker(raw, target):
+            return target
+    return raw or "unknown"
+
+
+def _pack_heat(score: int, direction: str, reason: str,
+               books: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    details = []
+    if books:
+        details.append({
+            "name": "公司变动",
+            "direction": direction,
+            "score": score,
+            "desc": reason,
+            "chart": {"type": "books", "kind": "asian", "items": books},
+        })
+    return {"name": "市场热度", "score": score, "direction": direction,
+            "reason": reason, "details": details}
+
+
 def _parse_manual_heat(desc: str, is_home_let: bool) -> Optional[Dict[str, Any]]:
     """解析用户手动输入的市场热度描述
 
@@ -570,45 +675,78 @@ def _parse_manual_heat(desc: str, is_home_let: bool) -> Optional[Dict[str, Any]]
             upper_hot = True
 
     if upper_hot and not lower_hot:
-        return {"name": "市场热度", "score": 7, "direction": "upper",
-                "reason": "手动输入：上盘热"}
+        return _pack_heat(7, "upper", "手动输入：上盘热")
     if lower_hot and not upper_hot:
-        return {"name": "市场热度", "score": 7, "direction": "lower",
-                "reason": "手动输入：下盘热"}
+        return _pack_heat(7, "lower", "手动输入：下盘热")
     return None
 
 
+_MATCH_AH_BOOKS = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
+
+
+def _std_ah(h) -> Optional[float]:
+    """500.com 正=主让 → 系统负=主让。"""
+    if h is None:
+        return None
+    try:
+        return -float(h)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_match_ah(asian_data: List[Dict], match_hc: Optional[float]) -> Optional[float]:
+    if match_hc is not None:
+        try:
+            return float(match_hc)
+        except (TypeError, ValueError):
+            pass
+    vals = []
+    for book in _MATCH_AH_BOOKS:
+        c = next((x for x in asian_data if _match_bookmaker(x.get("bookmaker", ""), book)), None)
+        h = _std_ah((c or {}).get("current", {}).get("handicap"))
+        if h is not None:
+            vals.append(h)
+    if not vals:
+        return None
+    vals.sort()
+    return vals[len(vals) // 2]
+
+
 def calc_factor5(asian_data: List[Dict], is_home_let: bool,
-                 market_heat_desc: Optional[str] = None) -> Dict[str, Any]:
-    """F5 市场热度: 盘口变动 + 同盘口水位一致性(资金流向) + 用户手动输入
+                 market_heat_desc: Optional[str] = None,
+                 match_hc: Optional[float] = None) -> Dict[str, Any]:
+    """F4 市场热度: 本场亚盘同盘口水位共识(资金流向) + 用户手动输入
 
-    与市场信号划界: 本因子看资金追捧(水位共识), calc_prediction 中逆向解读;
-    市场信号看庄家调盘/诱盘/Sharp, 正向跟庄家意图。
-
-    核心逻辑:
-    1. 先看盘口变动: 升盘=庄家看好上盘(热), 降盘=庄家看淡上盘(冷)
-    2. 再看同盘口下的水位变动: 降水=资金追上盘(热), 升水=上盘遇冷
-    3. 盘口变深后的水位升高是自然补偿，不算遇冷
+    与市场信号划界: 本因子只看「终盘=本场亚盘 且 自己没调盘」的水位;
+    诱盘/升盘/降盘归市场信号。calc_prediction 中逆向解读。
 
     逆向解读: 上盘热→偏下盘, 上盘冷→偏上盘
     """
-    # 1. 用户手动输入优先
     manual = _parse_manual_heat(market_heat_desc, is_home_let)
     if manual:
         return manual
 
-    # 2. 需要亚盘数据
     if not asian_data:
-        return {"name": "市场热度", "score": 5, "direction": "neutral", "reason": "无亚盘数据，热度不明"}
+        return _pack_heat(5, "neutral", "无亚盘数据，热度不明")
 
-    # 3. 统计盘口变动和同盘口水位变动
-    upgrade = 0   # 升盘(盘口变深)公司数
-    downgrade = 0  # 降盘(盘口变浅)公司数
-    same_drops = 0  # 同盘口下上盘降水
-    same_rises = 0  # 同盘口下上盘升水
+    match_ah = _resolve_match_ah(asian_data, match_hc)
+    same_drops = 0
+    same_rises = 0
+    on_match_n = 0
+    off_match_n = 0
+    traps = 0
+    line_moves = 0
     total = 0
+    books = []
+    seen = set()
 
     for c in asian_data:
+        raw = c.get("bookmaker") or ""
+        if raw in _HEAT_SKIP_BOOKS:
+            continue
+        book = _heat_book_name(raw)
+        if book in seen:
+            continue
         i = c.get("initial", {})
         cur = c.get("current", {})
         ih = i.get("handicap")
@@ -620,70 +758,105 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
         if iv is None or cv is None or ih is None or ch is None:
             continue
 
+        seen.add(book)
         total += 1
-        handicap_diff = float(ch) - float(ih)
+        open_std = -float(ih)
+        close_std = -float(ch)
+        init_depth = abs(float(ih))
+        curr_depth = abs(float(ch))
+        water_change = float(cv) - float(iv)
+        on_match = (
+            match_ah is not None
+            and abs(open_std - match_ah) <= 0.01
+            and abs(close_std - match_ah) <= 0.01
+        )
 
-        if handicap_diff > 0.01:
-            upgrade += 1
-        elif handicap_diff < -0.01:
-            downgrade += 1
+        hcap_dir = NEU
+        if curr_depth > init_depth + 0.01:
+            hcap_dir = UP
+        elif curr_depth < init_depth - 0.01:
+            hcap_dir = DOWN
+
+        is_trap_upper = hcap_dir == UP and water_change >= 0.03
+        is_trap_lower = hcap_dir == DOWN and water_change <= -0.03
+
+        tag, bside = "", NEU
+        if is_trap_upper:
+            traps += 1
+            tag, bside = "诱上", DOWN
+        elif is_trap_lower:
+            traps += 1
+            tag, bside = "诱下", UP
+        elif hcap_dir == UP:
+            line_moves += 1
+            tag, bside = "升盘", UP
+        elif hcap_dir == DOWN:
+            line_moves += 1
+            tag, bside = "降盘", DOWN
+        elif on_match and water_change <= -0.03:
+            same_drops += 1
+            tag, bside = "降水", UP
+        elif on_match and water_change >= 0.03:
+            same_rises += 1
+            tag, bside = "升水", DOWN
+        elif not on_match:
+            tag, bside = "异盘", NEU
+
+        if on_match:
+            on_match_n += 1
         else:
-            # 同盘口，水位变动才反映资金流向
-            wc = cv - iv
-            if wc <= -0.03:
-                same_drops += 1
-            elif wc >= 0.03:
-                same_rises += 1
+            off_match_n += 1
 
+        books.append({
+            "label": book,
+            "openH": _fmt_ah_line(open_std),
+            "closeH": _fmt_ah_line(close_std),
+            "openW": round(float(iv), 2),
+            "closeW": round(float(cv), 2),
+            "diff": round(water_change, 2),
+            "tag": tag,
+            "side": bside,
+        })
+
+    books.sort(key=lambda b: (
+        0 if b["tag"] in ("升水", "降水") else 1 if b["tag"] != "异盘" else 2,
+        _HEAT_PRIORITY.index(b["label"]) if b["label"] in _HEAT_PRIORITY else 100,
+        b["label"],
+    ))
+
+    line_txt = _fmt_ah_line(match_ah) if match_ah is not None else "?"
     if total < 4:
-        return {"name": "市场热度", "score": 5, "direction": "neutral", "reason": "公司样本不足，热度不明"}
+        return _pack_heat(5, "neutral", f"本场盘{line_txt}，公司样本不足，热度不明", books)
 
-    # 4. 综合判断
-    # 升盘占多数 = 庄家主动加深盘口 = 看好上盘 = 上盘热 = 逆向偏下盘
-    upgrade_ratio = upgrade / total if total else 0
-    downgrade_ratio = downgrade / total if total else 0
-
-    if upgrade_ratio >= 0.6:
-        score = 7 if upgrade_ratio >= 0.75 else 6
-        return {"name": "市场热度", "score": score, "direction": "upper",
-                "reason": f"{upgrade}/{total}家升盘(盘口加深)，庄家看好上盘，上盘热"}
-
-    if downgrade_ratio >= 0.6:
-        score = 7 if downgrade_ratio >= 0.75 else 6
-        return {"name": "市场热度", "score": score, "direction": "lower",
-                "reason": f"{downgrade}/{total}家降盘(盘口变浅)，庄家看淡上盘，下盘热"}
-
-    # 盘口无明显方向时，看同盘口下的水位变动
     same_moved = same_drops + same_rises
+    prefix = f"本场盘{line_txt}，"
     if same_moved >= 3:
         drop_ratio = same_drops / same_moved
         rise_ratio = same_rises / same_moved
+        tail = f"（同盘变动{same_moved}家，同盘{on_match_n}家，共{total}家）"
 
         if drop_ratio >= 0.75:
-            return {"name": "市场热度", "score": 7, "direction": "upper",
-                    "reason": f"同盘口{same_drops}/{same_moved}家上盘降水，资金追上盘，上盘热"}
-        elif drop_ratio >= 0.6:
-            return {"name": "市场热度", "score": 6, "direction": "upper",
-                    "reason": f"同盘口{same_drops}/{same_moved}家上盘降水，上盘略热"}
-        elif rise_ratio >= 0.75:
-            return {"name": "市场热度", "score": 7, "direction": "lower",
-                    "reason": f"同盘口{same_rises}/{same_moved}家上盘升水，下盘热"}
-        elif rise_ratio >= 0.6:
-            return {"name": "市场热度", "score": 6, "direction": "lower",
-                    "reason": f"同盘口{same_rises}/{same_moved}家上盘升水，下盘略热"}
+            return _pack_heat(7, "upper", f"{prefix}同盘降水{same_drops}家{tail}，上盘热", books)
+        if drop_ratio >= 0.6:
+            return _pack_heat(6, "upper", f"{prefix}同盘降水{same_drops}家{tail}，上盘略热", books)
+        if rise_ratio >= 0.75:
+            return _pack_heat(7, "lower", f"{prefix}同盘升水{same_rises}家{tail}，下盘热", books)
+        if rise_ratio >= 0.6:
+            return _pack_heat(6, "lower", f"{prefix}同盘升水{same_rises}家{tail}，下盘略热", books)
 
-    # 混合信号
     parts = []
-    if upgrade:
-        parts.append(f"{upgrade}家升盘")
-    if downgrade:
-        parts.append(f"{downgrade}家降盘")
     if same_drops:
         parts.append(f"{same_drops}家同盘降水")
     if same_rises:
         parts.append(f"{same_rises}家同盘升水")
-    return {"name": "市场热度", "score": 5, "direction": "neutral",
-            "reason": f"信号分歧({'，'.join(parts)})，热度不明"}
+    if traps:
+        parts.append(f"{traps}家诱盘不计")
+    if line_moves:
+        parts.append(f"{line_moves}家调盘不计")
+    if off_match_n:
+        parts.append(f"{off_match_n}家异盘不计")
+    return _pack_heat(5, "neutral",
+                      f"{prefix}信号分歧({'，'.join(parts) or '无明显变动'})，热度不明", books)
 
 
 # ============================================================
@@ -2938,7 +3111,8 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
     f3["name"] = "市场信号"
     # F4 市场热度：纯量化（多公司水位一致性）+ 用户手动输入优先
-    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"))
+    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
+                     match_info.get("handicap"))
     f4["name"] = "市场热度"
 
     # F5 竞彩赔率 & F6 历史同赔: 从 jczq_odds_history 取本场 nspf 初/终盘

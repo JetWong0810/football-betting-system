@@ -171,7 +171,7 @@ def run_backtest(years: List[int], verbose: bool = False):
         f3["name"] = "市场信号"
 
         # F4 市场热度 (= predict_service.calc_factor5)
-        f4 = calc_factor5(asian_data, is_home_let)
+        f4 = calc_factor5(asian_data, is_home_let, match_hc=handicap_val)
         f4["name"] = "市场热度"
 
         # F5 竞彩赔率
@@ -372,7 +372,7 @@ def run_backtest_no_f6(years: List[int]):
 
         f3 = calc_factor4(asian_data, is_home_let, euro_data)
         f3["name"] = "市场信号"
-        f4 = calc_factor5(asian_data, is_home_let)
+        f4 = calc_factor5(asian_data, is_home_let, match_hc=handicap_val)
         f4["name"] = "市场热度"
 
         jczq_company = None

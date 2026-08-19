@@ -74,14 +74,23 @@
             <view class="step-bar" v-if="step.status === 'done'">
               <view class="bar-fill" :style="{ width: step.score * 10 + '%' }"></view>
             </view>
-            <text class="step-reason" v-if="step.status === 'done'">{{ step.reason }}</text>
+            <view class="step-reason-row" v-if="step.status === 'done'">
+              <text class="step-reason">{{ factorReason(step.reason) }}</text>
+              <view
+                v-if="factorHelpMap[step.name]"
+                class="factor-help-btn"
+                @tap.stop="openFactorHelp(step.name)"
+              >
+                <text class="factor-help-q">?</text>
+              </view>
+            </view>
             <!-- F1子因素详情 -->
             <view class="sub-factors" v-if="step.status === 'done' && step.details && step.details.length > 0">
               <view class="sub-factor-block" v-for="(sub, si) in step.details" :key="si">
                 <view class="sub-factor-item">
                   <text class="sub-dir-dot" :class="sub.direction">●</text>
                   <text class="sub-name">{{ sub.name }}</text>
-                  <text class="sub-desc" v-if="!hasChart(sub) || sub.name === '排名/身价' || sub.name === '盘路统计'">{{ sub.desc }}</text>
+                  <text class="sub-desc" v-if="!hasChart(sub) || keepDesc(sub)">{{ sub.desc }}</text>
                 </view>
                 <FactorCompareBars v-if="hasChart(sub)" :chart="sub.chart" />
               </view>
@@ -297,6 +306,27 @@
       </view>
     </view>
 
+    <!-- 因子说明 -->
+    <view class="similar-mask" v-if="showFactorHelp" @tap="closeFactorHelp"></view>
+    <view class="factor-help-modal" :class="{ show: showFactorHelp }" @tap.stop>
+      <view class="fh-head">
+        <view class="fh-badge">
+          <text class="fh-badge-q">?</text>
+        </view>
+        <text class="fh-title">{{ factorHelpTitle }}</text>
+        <text class="fh-close" @tap="closeFactorHelp">关闭</text>
+      </view>
+      <scroll-view class="factor-help-body" scroll-y>
+        <view class="fh-block" v-for="(b, bi) in factorHelpBlocks" :key="bi">
+          <text class="fh-idx">{{ bi + 1 }}</text>
+          <view class="fh-main">
+            <text class="fh-h">{{ b.title }}</text>
+            <text class="fh-p" v-for="(p, pi) in b.paras" :key="pi">{{ p }}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
     <!-- 历史同赔详情弹窗 -->
     <view class="similar-mask" v-if="showSimilarModal" @tap="closeSimilarModal"></view>
     <view class="similar-modal" :class="{ show: showSimilarModal }">
@@ -440,6 +470,120 @@ import FactorCompareBars from '@/components/FactorCompareBars.vue'
 
 function hasChart(sub) {
   return !!(sub && sub.chart && sub.chart.items && sub.chart.items.length)
+}
+function keepDesc(sub) {
+  return ['排名/身价', '盘路统计', '初盘信号', '亚盘变动', '欧赔变动', '公司变动'].includes(sub?.name)
+}
+
+function sideTeams() {
+  const m = selectedMatch.value
+  const home = m?.homeTeam?.name || '主队'
+  const away = m?.awayTeam?.name || '客队'
+  const hc = Number(m?.handicap)
+  const homeUpper = Number.isNaN(hc) || hc <= 0
+  return {
+    upper: homeUpper ? home : away,
+    lower: homeUpper ? away : home,
+  }
+}
+function factorReason(reason) {
+  if (!reason) return ''
+  const { upper, lower } = sideTeams()
+  return String(reason)
+    .replace(/偏上盘/g, `偏上盘(${upper})`)
+    .replace(/偏下盘/g, `偏下盘(${lower})`)
+    .replace(/上盘热/g, `上盘热(${upper})`)
+    .replace(/下盘热/g, `下盘热(${lower})`)
+}
+
+const factorHelpMap = {
+  市场信号: {
+    title: '市场信号说明',
+    blocks: [
+      {
+        title: '看哪一侧',
+        paras: [
+          '水位、盘口、欧赔都对着上盘（让球方），不是主队。竞彩让球为负则主队上盘，否则客队上盘。',
+        ],
+      },
+      {
+        title: '亚盘为何有时反向',
+        paras: [
+          '亚盘有两根杆：盘口和水位。两者对着干才叫诱盘，要反着读。',
+          '降盘+上盘降水 = 诱下，真意偏上；升盘+上盘升水 = 诱上，真意偏下。',
+          '真升盘、真降盘（盘口与水位没有拆开演戏）按字面，不反向。',
+        ],
+      },
+      {
+        title: '欧赔为何不反向',
+        paras: [
+          '欧赔只有上盘胜赔一个数，没有盘口+水位，做不了诱盘。升赔就是看淡上盘，按字面读。',
+        ],
+      },
+      {
+        title: '亚欧相反为何信亚盘',
+        paras: [
+          '这个因子判的是亚盘上下盘，欧赔只是旁证。相反时欧赔不投票、不翻方向，只扣1分，表示证据有冲突。',
+        ],
+      },
+      {
+        title: '为何只看这几家',
+        paras: [
+          '500网有几十家公司，杂牌容易跟盘、滞后。这里只取 Pinnacle、Bet365、皇冠、威廉希尔、伟德。',
+          'Pinnacle 是 Sharp（权重最高），用来校验诱盘是否靠谱；Bet365/皇冠是华语亚盘主市场；威廉、伟德作补充。不是这五家才「权威」，是用它们代表市场、减少噪音。',
+        ],
+      },
+    ],
+  },
+  市场热度: {
+    title: '市场热度说明',
+    blocks: [
+      {
+        title: '看哪一侧',
+        paras: [
+          '水位对着上盘（让球方），不是主队。卡片「上盘热 / 下盘热」表示哪边被资金追，计票时再反过来。',
+        ],
+      },
+      {
+        title: '同盘口指什么',
+        paras: [
+          '必须跟本场亚盘同一根盘，并且这家自己初盘=终盘。水位只能在同一根盘上比。',
+          '立博挂着 -0.50、本场是 0，标「异盘」，升水也不进热度。',
+        ],
+      },
+      {
+        title: '诱下、降盘为何不算',
+        paras: [
+          '盘口动了，水位已经不是同一根盘，不能拿来比热度。诱盘、升盘、降盘记在市场信号里，这里再算会重复。',
+          '水位变动不到 0.03 当噪声，两边都不计。',
+        ],
+      },
+      {
+        title: '为何要反向',
+        paras: [
+          '热度是大众资金在追哪边。上盘热 → 预测偏下盘；下盘热 → 预测偏上盘。',
+        ],
+      },
+      {
+        title: '为何列出这么多家',
+        paras: [
+          '热度看的是资金共识，公司越多越能看出有没有一边被追。和市场上信号只看五家主流不同。',
+          '列表都会展示，真正投票的只有标了「升水 / 降水」的同盘公司。',
+        ],
+      },
+    ],
+  },
+}
+const showFactorHelp = ref(false)
+const factorHelpKey = ref('')
+const factorHelpTitle = computed(() => factorHelpMap[factorHelpKey.value]?.title || '因子说明')
+const factorHelpBlocks = computed(() => factorHelpMap[factorHelpKey.value]?.blocks || [])
+function openFactorHelp(name) {
+  factorHelpKey.value = name
+  showFactorHelp.value = true
+}
+function closeFactorHelp() {
+  showFactorHelp.value = false
 }
 
 const matchStatus = ref('not_started')
@@ -1028,7 +1172,12 @@ async function startAnalysis() {
       analysisSteps.value[i].score = factor.score || 5
       analysisSteps.value[i].direction = factor.direction || 'neutral'
       analysisSteps.value[i].reason = factor.reason || ''
-      analysisSteps.value[i].dirLabel = factor.direction === 'upper' ? '上盘' : factor.direction === 'lower' ? '下盘' : '中性'
+      const hotLabel = factor.name === '市场热度' || factor.name === '单关修正'
+      analysisSteps.value[i].dirLabel = factor.direction === 'upper'
+        ? (hotLabel ? '上盘热' : '上盘')
+        : factor.direction === 'lower'
+          ? (hotLabel ? '下盘热' : '下盘')
+          : '中性'
       analysisSteps.value[i].dirClass = factor.direction || 'neutral'
       analysisSteps.value[i].details = factor.details || []
       analysisSteps.value[i].matches = factor.matches || []
@@ -1486,11 +1635,36 @@ onShow(async () => {
   }
 }
 
+.step-reason-row {
+  display: block;
+  font-size: 22rpx;
+  line-height: 1.5;
+}
 .step-reason {
+  display: inline;
   font-size: 22rpx;
   color: #64748b;
   line-height: 1.5;
   word-break: break-all;
+}
+.factor-help-btn {
+  display: inline-flex;
+  width: 28rpx;
+  height: 28rpx;
+  margin-left: 8rpx;
+  vertical-align: text-bottom;
+  background: #f0fdf9;
+  border: 1rpx solid #99f6e4;
+  border-radius: 6rpx;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.factor-help-q {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #0d9488;
+  line-height: 1;
 }
 
 .sub-factors {
@@ -1591,6 +1765,106 @@ onShow(async () => {
   flex-wrap: wrap;
 }
 .similar-title { font-size: 28rpx; font-weight: 600; color: #1e293b; }
+
+.factor-help-modal {
+  position: fixed;
+  top: 50%;
+  left: 40rpx;
+  right: 40rpx;
+  max-height: 72vh;
+  background: #fff;
+  border-radius: 12rpx;
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16rpx 48rpx rgba(15, 23, 42, 0.16);
+  transform: translateY(-50%) scale(0.96);
+  opacity: 0;
+  transition: transform 0.22s, opacity 0.22s;
+  pointer-events: none;
+  overflow: hidden;
+  &.show { transform: translateY(-50%) scale(1); opacity: 1; pointer-events: auto; }
+}
+.fh-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 22rpx 24rpx 18rpx;
+  background: #f0fdf9;
+  border-bottom: 1rpx solid #ccfbf1;
+}
+.fh-badge {
+  width: 36rpx;
+  height: 36rpx;
+  flex-shrink: 0;
+  background: #0d9488;
+  border-radius: 6rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fh-badge-q {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+}
+.fh-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #134e4a;
+}
+.fh-close {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  color: #0d9488;
+  font-weight: 600;
+  padding: 4rpx 0 4rpx 8rpx;
+}
+.factor-help-body {
+  max-height: 56vh;
+  padding: 12rpx 20rpx 24rpx;
+}
+.fh-block {
+  display: flex;
+  gap: 12rpx;
+  padding: 16rpx 14rpx;
+  background: #f8fafb;
+  border-radius: 6rpx;
+  & + & { margin-top: 12rpx; }
+}
+.fh-idx {
+  width: 32rpx;
+  height: 32rpx;
+  flex-shrink: 0;
+  text-align: center;
+  line-height: 32rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #0d9488;
+  background: #ccfbf1;
+  border-radius: 6rpx;
+}
+.fh-main {
+  flex: 1;
+  min-width: 0;
+}
+.fh-h {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #134e4a;
+  margin-bottom: 8rpx;
+}
+.fh-p {
+  display: block;
+  font-size: 22rpx;
+  color: #475569;
+  line-height: 1.55;
+  & + & { margin-top: 6rpx; }
+}
 .jp-toggle {
   font-size: 22rpx;
   color: #64748b;

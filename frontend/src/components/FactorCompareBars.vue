@@ -1,6 +1,20 @@
 <template>
   <view>
-  <view v-if="isOdds && oddsRows.length" class="odds">
+  <view v-if="isBooks && bookRows.length" class="books" :class="bookKind">
+    <view class="bk-row" v-for="row in bookRows" :key="row.label">
+      <text class="bk-lab">{{ row.label }}</text>
+      <view class="bk-line">
+        <text class="bk-h open">{{ row.openH }}</text>
+        <text class="bk-h-ar" v-if="row.openH || row.closeH">→</text>
+        <text class="bk-h close">{{ row.closeH }}</text>
+      </view>
+      <text class="bk-w" :class="row.side">{{ row.water }}</text>
+      <text class="bk-d" :class="row.side">{{ row.diffLabel }}</text>
+      <text class="bk-extra">{{ row.draw }}</text>
+      <text class="bk-tag" :class="[row.side, { empty: !row.tag }]">{{ row.tag }}</text>
+    </view>
+  </view>
+  <view v-else-if="isOdds && oddsRows.length" class="odds">
     <view class="od-row" v-for="row in oddsRows" :key="row.label" :class="{ hi: row.low }">
       <text class="od-lab">{{ row.label }}</text>
       <text class="od-n">{{ row.open }}</text>
@@ -55,6 +69,41 @@ const props = defineProps({
 
 const isStack = computed(() => props.chart?.type === 'stack')
 const isOdds = computed(() => props.chart?.type === 'odds')
+const isBooks = computed(() => props.chart?.type === 'books')
+const bookKind = computed(() => props.chart?.kind === 'euro' ? 'euro' : 'asian')
+
+const bookRows = computed(() => {
+  const items = props.chart?.items || []
+  const kind = props.chart?.kind || 'asian'
+  return items.map((it) => {
+    const side = it.side === 'lower' ? 'lower' : it.side === 'neutral' ? 'neutral' : 'upper'
+    const diff = Number(it.diff)
+    let openH = it.openH || ''
+    let closeH = it.closeH || ''
+    let water = ''
+    if (kind === 'open' && it.openW != null) {
+      water = Number(it.openW).toFixed(2)
+    } else if (it.open != null && it.close != null) {
+      water = `${Number(it.open).toFixed(2)}→${Number(it.close).toFixed(2)}`
+    } else if (it.openW != null && it.closeW != null) {
+      water = `${Number(it.openW).toFixed(2)}→${Number(it.closeW).toFixed(2)}`
+    }
+    let diffLabel = ''
+    if (kind !== 'open' && Number.isFinite(diff) && Math.abs(diff) >= 0.01) {
+      diffLabel = `${diff > 0 ? '+' : ''}${diff.toFixed(2)}`
+    }
+    return {
+      label: it.label,
+      openH,
+      closeH,
+      water,
+      tag: it.tag || '',
+      draw: it.draw || '',
+      side,
+      diffLabel,
+    }
+  })
+})
 
 const oddsRows = computed(() => {
   const items = props.chart?.items || []
@@ -108,7 +157,7 @@ const stackSegs = computed(() => {
 
 const rows = computed(() => {
   const t = props.chart?.type
-  if (t === 'stack' || t === 'odds') return []
+  if (t === 'stack' || t === 'odds' || t === 'books') return []
   const items = props.chart?.items || []
   const max = Number(props.chart?.max) || Math.max(...items.map(i => Number(i.value) || 0), 1)
   const unit = props.chart?.unit || ''
@@ -316,5 +365,96 @@ const rows = computed(() => {
 }
 .od-tag-sp {
   background: transparent;
+}
+
+.books {
+  margin: 8rpx 0 6rpx 28rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.bk-row {
+  display: grid;
+  align-items: center;
+  column-gap: 8rpx;
+  min-width: 0;
+}
+.books.asian .bk-row {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.4fr) minmax(0, 1.35fr) 72rpx 52rpx;
+}
+.books.asian .bk-extra {
+  display: none;
+}
+.books.euro .bk-row {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.55fr) 72rpx minmax(0, 0.9fr) 52rpx;
+}
+.books.euro .bk-line {
+  display: none;
+}
+.bk-lab,
+.bk-w,
+.bk-d,
+.bk-extra,
+.bk-tag {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-lab {
+  font-size: 20rpx;
+  color: #475569;
+}
+.bk-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24rpx minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  font-size: 20rpx;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+.bk-h {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  &.open { text-align: right; }
+  &.close { text-align: left; }
+}
+.bk-h-ar {
+  text-align: center;
+  color: #94a3b8;
+}
+.bk-w {
+  font-size: 20rpx;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  &.upper { color: #dc2626; }
+  &.lower { color: #059669; }
+}
+.bk-d {
+  font-size: 20rpx;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  &.upper { color: #dc2626; }
+  &.lower { color: #059669; }
+  &.neutral { color: #94a3b8; }
+}
+.bk-extra {
+  font-size: 18rpx;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.bk-tag {
+  font-size: 18rpx;
+  line-height: 1.4;
+  text-align: center;
+  border-radius: 6rpx;
+  &.upper { color: #dc2626; background: #fef2f2; }
+  &.lower { color: #059669; background: #ecfdf5; }
+  &.neutral { color: #64748b; background: #f1f5f9; }
+  &.empty { background: transparent; }
 }
 </style>

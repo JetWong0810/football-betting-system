@@ -182,6 +182,7 @@ page {
   }
 
   .similar-modal,
+  .factor-help-modal,
   .japan-modal,
   .note-modal,
   .history-modal,
@@ -210,6 +211,11 @@ page {
   .slip-bar {
     left: calc(var(--app-gutter) + 24rpx) !important;
     right: calc(var(--app-gutter) + 24rpx) !important;
+  }
+
+  .factor-help-modal {
+    left: calc(var(--app-gutter) + 20px) !important;
+    right: calc(var(--app-gutter) + 20px) !important;
   }
 
   .float-button {
