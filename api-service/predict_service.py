@@ -124,6 +124,27 @@ _ASIAN_BOOK_WEIGHTS = {
 UP, DOWN, NEU = "upper", "lower", "neutral"
 
 
+def _home_is_upper(match_info: Optional[Dict] = None, handicap=None, hhad=None) -> bool:
+    """全因子统一：上盘=亚盘让球方；平手(0)主队为上盘。无亚盘才退回竞彩hhad。"""
+    if match_info:
+        if handicap is None:
+            handicap = match_info.get("handicap")
+        if hhad is None:
+            hhad = match_info.get("hhad")
+    if handicap is not None:
+        try:
+            return float(handicap) <= 0
+        except (TypeError, ValueError):
+            pass
+    if hhad is not None:
+        try:
+            return float(hhad) < 0
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
+
 def _match_bookmaker(api_name: str, target: str) -> bool:
     """模糊匹配公司名，处理500.com API脱敏（如'P*********'匹配'Pinnacle'）。"""
     if not api_name or not target:
@@ -1168,8 +1189,7 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
     方向由多数决定，score由一致性程度决定。
     所有子因素 desc 用实际队名，方向沿用上盘/下盘口径。
     """
-    hhad = match_info.get("hhad")
-    is_home_let = hhad is not None and float(hhad) < 0
+    is_home_let = _home_is_upper(match_info)
     home = match_info.get("home_team", "主队")
     away = match_info.get("away_team", "客队")
     upper_name = home if is_home_let else away
@@ -1528,7 +1548,7 @@ def calc_factor2(match_data: Optional[Dict], match_info: Dict,
                 "reason": "无盘口数据", "details": []}
 
     current_handicap = float(handicap)
-    is_home_let = current_handicap < 0
+    is_home_let = current_handicap <= 0
     home = match_info.get("home_team", "主队")
     away = match_info.get("away_team", "客队")
 
@@ -1789,8 +1809,7 @@ def calc_factor3(match_info: Dict, ai_f3_list: Optional[List[Dict]] = None) -> D
     """
     home = match_info.get("home_team", "主队")
     away = match_info.get("away_team", "客队")
-    hhad = match_info.get("hhad")
-    is_home_let = hhad is not None and float(hhad) < 0
+    is_home_let = _home_is_upper(match_info)
     upper_name = home if is_home_let else away
     lower_name = away if is_home_let else home
 
@@ -2214,9 +2233,7 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
     away = match_info.get("away_team", "客队")
     league = match_info.get("league", "未知联赛")
     handicap = match_info.get("handicap")
-    hhad = match_info.get("hhad")
-
-    is_home_let = hhad is not None and float(hhad) < 0
+    is_home_let = _home_is_upper(match_info)
     upper_team = home if is_home_let else away
     lower_team = away if is_home_let else home
 
@@ -2595,9 +2612,7 @@ def generate_analysis(factors: List[Dict], prediction: Dict, match_info: Dict) -
     """生成综合分析文本"""
     home = match_info.get("home_team", "主队")
     away = match_info.get("away_team", "客队")
-    handicap = match_info.get("handicap")
-    hhad = match_info.get("hhad")
-    is_home_let = hhad is not None and float(hhad) < 0
+    is_home_let = _home_is_upper(match_info)
     upper_team = home if is_home_let else away
     lower_team = away if is_home_let else home
 
@@ -2641,14 +2656,23 @@ def _fmt_handicap(v):
     return f"+{v}" if v > 0 else str(v)
 
 
-def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
-    """F5 竞彩赔率: 竞彩nspf初盘→终盘的低赔变动方向
+def _spf_hot_side(low_label: str, home_is_upper: bool) -> Optional[str]:
+    """竞彩胜/负热门映射到本场亚盘上下盘；平局不映射。"""
+    if low_label == "胜":
+        return UP if home_is_upper else DOWN
+    if low_label == "负":
+        return UP if not home_is_upper else DOWN
+    return None
 
-    逻辑(与世界杯一致):
-    - 找初盘中最低的赔率（低赔 = 热门方向）
-    - 低赔↓(降): 市场持续看好热门 → upper, 按幅度分档 score 6/7/8
-    - 低赔↑(升): 市场对热门信心减弱 → lower, 按幅度分档 score 6/7/8
-    - 不变(±0.02): neutral, score=5
+
+def calc_factor_jczq_odds(jczq_company: Optional[Dict],
+                          home_is_upper: bool = True) -> Dict[str, Any]:
+    """F5 竞彩赔率: 低赔变动映射到本场亚盘上下盘
+
+    - 低赔=初盘最低项(胜/平/负)
+    - 胜=看好主、负=看好客，再按亚盘上盘方落成 upper/lower
+    - 低赔↓: 持续看好该侧；低赔↑: 看淡该侧(反向)
+    - 平赔做热门不映射上下盘
     """
     if not jczq_company:
         return {"name": "竞彩赔率", "score": 5, "direction": "neutral",
@@ -2675,43 +2699,57 @@ def calc_factor_jczq_odds(jczq_company: Optional[Dict]) -> Dict[str, Any]:
     ]
     low_label, low_open, low_close = min(odds_list, key=lambda x: x[1])
     diff = low_close - low_open
+    hot = _spf_hot_side(low_label, home_is_upper)
 
-    if diff < -0.02:
-        direction = "upper"
+    def _dir_word(d):
+        return "上盘" if d == UP else "下盘"
+
+    if hot is None:
+        direction, score = NEU, 5
+        if abs(diff) <= 0.02:
+            reason = f"竞彩平赔(低赔)变动极小({diff:+.2f})，不映射上下盘"
+        else:
+            reason = f"竞彩平赔(低赔)变动{diff:+.2f}，热门是平局，不映射上下盘"
+    elif diff < -0.02:
+        direction = hot
+        dw = _dir_word(direction)
         if diff < -0.10:
             score = 8
-            reason = f"竞彩{low_label}赔(低赔)大幅下降{diff:.2f}，市场持续看好→偏上盘"
+            reason = f"竞彩{low_label}赔(低赔)大幅下降{diff:.2f}，市场持续看好→偏{dw}"
         elif diff < -0.05:
             score = 7
-            reason = f"竞彩{low_label}赔(低赔)明显下降{diff:.2f}，市场看好→偏上盘"
+            reason = f"竞彩{low_label}赔(低赔)明显下降{diff:.2f}，市场看好→偏{dw}"
         else:
             score = 6
-            reason = f"竞彩{low_label}赔(低赔)小幅下降{diff:.2f}，略看好→偏上盘"
+            reason = f"竞彩{low_label}赔(低赔)小幅下降{diff:.2f}，略看好→偏{dw}"
     elif diff > 0.02:
-        direction = "lower"
+        direction = DOWN if hot == UP else UP
+        dw = _dir_word(direction)
         if diff > 0.10:
             score = 8
-            reason = f"竞彩{low_label}赔(低赔)大幅上升{diff:+.2f}，市场信心明显减弱→偏下盘"
+            reason = f"竞彩{low_label}赔(低赔)大幅上升{diff:+.2f}，市场信心明显减弱→偏{dw}"
         elif diff > 0.05:
             score = 7
-            reason = f"竞彩{low_label}赔(低赔)明显上升{diff:+.2f}，市场信心减弱→偏下盘"
+            reason = f"竞彩{low_label}赔(低赔)明显上升{diff:+.2f}，市场信心减弱→偏{dw}"
         else:
             score = 6
-            reason = f"竞彩{low_label}赔(低赔)小幅上升{diff:+.2f}，略看淡→偏下盘"
+            reason = f"竞彩{low_label}赔(低赔)小幅上升{diff:+.2f}，略看淡→偏{dw}"
     else:
-        direction = "neutral"
-        score = 5
+        direction, score = NEU, 5
         reason = f"竞彩{low_label}赔(低赔)变动极小({diff:+.2f})，方向不明"
 
     odds_items = []
     for label, o, c in odds_list:
         d = round(float(c) - float(o), 2)
-        if d < -0.02:
-            side = "upper"
+        row_hot = _spf_hot_side(label, home_is_upper)
+        if row_hot is None:
+            side = NEU
+        elif d < -0.02:
+            side = row_hot
         elif d > 0.02:
-            side = "lower"
+            side = DOWN if row_hot == UP else UP
         else:
-            side = "neutral"
+            side = NEU
         odds_items.append({
             "label": label,
             "open": round(float(o), 2),
@@ -3102,9 +3140,8 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
         {"factors": [...], "prediction": {...}}
     """
     handicap = match_info.get("handicap")
-    # 用竞彩让球(hhad)确定上下盘，所有因子统一基准；竞彩让球不存在0
-    hhad = match_info.get("hhad")
-    is_home_let = hhad is not None and float(hhad) < 0
+    # 上盘=亚盘让球方(平手主队上盘)，全因子同一基准；竞彩hhad不定上下盘
+    is_home_let = _home_is_upper(match_info)
     is_single = bool(match_info.get("is_single"))
 
     # F3 市场信号：初盘+亚盘变动+欧赔变动+亚欧一致性
@@ -3119,7 +3156,7 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     # F5竞彩赔率 & F6历史同赔 均用 spf(胜平负)口径(与世界杯一致, 用户预期)
     _mid = match_info.get("match_id")
     jczq_company_spf = get_match_spf_odds(_mid) if _mid else None
-    f5 = calc_factor_jczq_odds(jczq_company_spf)
+    f5 = calc_factor_jczq_odds(jczq_company_spf, home_is_upper=is_home_let)
     f6 = calc_factor_jczq_similar_odds(
         jczq_company_spf, league=match_info.get("league"),
         exclude_match_id=_mid,

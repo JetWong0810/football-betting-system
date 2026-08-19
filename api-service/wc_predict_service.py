@@ -24,6 +24,7 @@ from predict_service import (
     build_ai_prompt,
     call_deepseek_factors,
     calc_factor_jczq_odds,
+    _home_is_upper,
 )
 from wc_similar_odds import find_similar
 
@@ -186,7 +187,7 @@ def predict_wc_match(match_info: Dict[str, Any],
                      euro_data: Optional[Dict] = None) -> Dict[str, Any]:
     """世界杯预测主流程"""
     handicap = match_info.get("handicap")
-    is_home_let = handicap is not None and float(handicap) < 0
+    is_home_let = _home_is_upper(match_info)
 
     # F3 市场信号 & F4 市场热度: 纯量化，不需要AI
     f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
@@ -202,7 +203,7 @@ def predict_wc_match(match_info: Dict[str, Any],
             (c for c in euro_data["companies"] if "竞彩" in c.get("bookmaker", "")),
             None
         )
-    f5 = calc_factor_jczq_odds(jczq_company)
+    f5 = calc_factor_jczq_odds(jczq_company, home_is_upper=is_home_let)
     f6 = calc_factor_similar_odds(jczq_company)
 
     # F1 近期状态 & F2 实力定位: 需要AI辅助

@@ -158,7 +158,7 @@ def run_backtest(years: List[int], verbose: bool = False):
             continue
 
         # 判定上下盘: handicap_value 负值=主队让球
-        is_home_let = handicap_val < 0
+        is_home_let = handicap_val <= 0
 
         # --- 计算各因子 ---
         # F1 近期状态: 无法回测，设neutral
@@ -181,7 +181,7 @@ def run_backtest(years: List[int], verbose: bool = False):
                 (c for c in euro_data["companies"] if "竞彩" in c.get("bookmaker", "")),
                 None
             )
-        f5 = calc_factor_jczq_odds(jczq_company)
+        f5 = calc_factor_jczq_odds(jczq_company, home_is_upper=is_home_let)
 
         # F6 历史同赔 (用当场之前的历史数据匹配)
         f6 = calc_factor_similar_odds(jczq_company)
@@ -365,7 +365,7 @@ def run_backtest_no_f6(years: List[int]):
             skipped += 1
             continue
 
-        is_home_let = handicap_val < 0
+        is_home_let = handicap_val <= 0
 
         f1 = {"name": "近期状态", "score": 5, "direction": "neutral", "reason": "回测跳过"}
         f2 = {"name": "实力定位", "score": 5, "direction": "neutral", "reason": "回测跳过"}
@@ -381,7 +381,7 @@ def run_backtest_no_f6(years: List[int]):
                 (c for c in euro_data["companies"] if "竞彩" in c.get("bookmaker", "")),
                 None
             )
-        f5 = calc_factor_jczq_odds(jczq_company)
+        f5 = calc_factor_jczq_odds(jczq_company, home_is_upper=is_home_let)
 
         # 不使用F6
         f6 = {"name": "历史同赔", "score": 5, "direction": "neutral", "reason": "回测排除"}

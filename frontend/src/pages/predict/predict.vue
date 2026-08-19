@@ -24,10 +24,16 @@
 
     <!-- 已选赛事信息 -->
     <view class="match-info-bar" v-if="selectedMatch">
-      <text class="info-league" :style="{ backgroundColor: pickLeagueColor(selectedMatch.league) }">{{ selectedMatch.league }}</text>
-      <text class="info-time">{{ selectedMatch.matchDate.slice(5) }} {{ selectedMatch.matchTime.slice(0, 5) }}</text>
-      <text class="info-handicap" v-if="selectedMatch.handicap != null">{{ formatHandicap(selectedMatch.handicap) }}</text>
-      <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
+      <view class="info-row">
+        <text class="info-league" :style="{ backgroundColor: pickLeagueColor(selectedMatch.league) }">{{ selectedMatch.league }}</text>
+        <text class="info-time">{{ selectedMatch.matchDate.slice(5) }} {{ selectedMatch.matchTime.slice(0, 5) }}</text>
+        <text class="info-handicap" v-if="selectedMatch.handicap != null">{{ formatHandicap(selectedMatch.handicap) }}</text>
+        <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
+      </view>
+      <view class="info-sides" v-if="selectedMatch.handicap != null">
+        <text class="side-tag upper">上盘 {{ sideTeams().upper }}</text>
+        <text class="side-tag lower">下盘 {{ sideTeams().lower }}</text>
+      </view>
     </view>
 
     <!-- 日职辅助情报（仅展示，不参与因子） -->
@@ -503,7 +509,7 @@ const factorHelpMap = {
       {
         title: '看哪一侧',
         paras: [
-          '水位、盘口、欧赔都对着上盘（让球方），不是主队。竞彩让球为负则主队上盘，否则客队上盘。',
+          '水位、盘口、欧赔都对着上盘（亚盘让球方），不是主队。亚盘≤0（含平手）主队上盘，>0 客队上盘。竞彩整数让球不定上下盘。',
         ],
       },
       {
@@ -1431,12 +1437,17 @@ onShow(async () => {
 /* ===== 赛事信息条 ===== */
 .match-info-bar {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   padding: 14rpx 24rpx;
-  gap: 12rpx;
+  gap: 8rpx;
   background: #f0fdf9;
   border-bottom: 1px solid #e2f5f0;
 
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
   .info-league {
     font-size: 20rpx;
     color: #fff;
@@ -1473,6 +1484,24 @@ onShow(async () => {
       color: #ef4444;
       line-height: 1;
     }
+  }
+  .info-sides {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+    min-width: 0;
+  }
+  .side-tag {
+    font-size: 20rpx;
+    line-height: 32rpx;
+    padding: 0 10rpx;
+    border-radius: 6rpx;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+    &.upper { color: #dc2626; background: #fef2f2; }
+    &.lower { color: #059669; background: #ecfdf5; }
   }
 }
 
