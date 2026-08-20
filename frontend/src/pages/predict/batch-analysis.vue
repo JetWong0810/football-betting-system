@@ -184,7 +184,9 @@
               <view class="bar-u" :style="{ width: ahStats(it.f6).upperPct + '%' }"></view>
               <view class="bar-l" :style="{ width: ahStats(it.f6).lowerPct + '%' }"></view>
             </view>
-            <text class="reason" v-if="it.f6?.reason">{{ shortReason(it.f6.reason) }}</text>
+            <view class="reason-row" v-if="unbeatenLabel(it.f6)">
+              <text class="reason" :class="it.f6?.direction">{{ unbeatenLabel(it.f6) }}</text>
+            </view>
           </view>
           <view class="row-hit empty" v-else>
             <text class="reason">{{ it.f6?.reason || '暂无同赔样本' }}</text>
@@ -246,7 +248,12 @@
           </view>
 
           <view class="row-detail" @tap="openSimilar(it)">
-            <text>同赔详情 {{ it.f6?.matches?.length || 0 }} 场 ›</text>
+            <view class="spf-stat" v-if="spfStats(it.f6).total">
+              <text class="r-win">胜 {{ spfStats(it.f6).win }}</text>
+              <text class="r-draw">平 {{ spfStats(it.f6).draw }}</text>
+              <text class="r-loss">负 {{ spfStats(it.f6).loss }}</text>
+            </view>
+            <text class="detail-link">同赔详情 {{ it.f6?.matches?.length || 0 }} 场 ›</text>
           </view>
         </view>
       </view>
@@ -958,6 +965,9 @@ function getDetail(f6, name) {
   const d = (f6?.details || []).find(x => x.name === name)
   return d ? d.desc : ''
 }
+function spfStats(f6) {
+  return calcSimilarStats(f6?.matches)
+}
 function ahStats(f6) {
   const chart = (f6?.details || []).find(x => x.name === '盘路统计')?.chart
   if (chart?.items?.length) {
@@ -1024,11 +1034,14 @@ function focusHitLabel(f6, it) {
   if (side === 'lower') return t ? `下盘命中(${t.lower})` : '下盘命中'
   return '两侧持平'
 }
-function shortReason(reason) {
-  if (!reason) return ''
-  let s = reason.replace(/^(?:历史)?同赔\d+场[，,]\s*/, '')
-  s = s.replace(/^[上下]盘命中\d+(?:\.\d+)?%\(\d+\/\d+\)[,，]\s*/, '')
-  return s.trim() || reason
+function unbeatenLabel(f6) {
+  const dir = f6?.direction
+  if (dir !== 'upper' && dir !== 'lower') return ''
+  const s = ahStats(f6)
+  if (!s.total) return ''
+  const n = dir === 'upper' ? s.upper + s.push : s.lower + s.push
+  const pct = Math.round((n / s.total) * 100)
+  return dir === 'upper' ? `上盘不败 ${pct}%` : `下盘不败 ${pct}%`
 }
 function resultClass(r) {
   if (r === '主胜') return 'r-win'
@@ -1624,7 +1637,15 @@ onLoad(async (options) => {
     .bar-u { background: #f87171; height: 100%; }
     .bar-l { background: #34d399; height: 100%; }
   }
-  .reason { font-size: 24rpx; color: #64748b; line-height: 1.45; word-break: break-word; }
+  .reason-row {
+    display: flex; align-items: baseline;
+  }
+  .reason {
+    flex: 1; min-width: 0; font-size: 24rpx; color: #64748b; line-height: 1.45; word-break: break-word;
+    font-weight: 500;
+    &.upper { color: #dc2626; }
+    &.lower { color: #059669; }
+  }
 }
 
 .row-ah {
@@ -1666,9 +1687,15 @@ onLoad(async (options) => {
 }
 
 .row-detail {
-  padding: 10rpx 0 2rpx; text-align: right;
-  text { font-size: 22rpx; color: $frbt-primary; }
+  display: flex; align-items: center; padding: 10rpx 0 2rpx;
   &:active { opacity: 0.6; }
+}
+.spf-stat {
+  flex-shrink: 0; display: flex; align-items: baseline; gap: 10rpx;
+  font-size: 22rpx; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.detail-link {
+  margin-left: auto; font-size: 22rpx; color: $frbt-primary;
 }
 
 .row-note {
