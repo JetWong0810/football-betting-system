@@ -218,6 +218,21 @@ page {
     right: calc(var(--app-gutter) + 20px) !important;
   }
 
+  /* 居中弹窗: 不要用 left/right 拉伸,保持 430 栏内宽度 */
+  .app-modal,
+  .h2h-modal,
+  .rf-modal {
+    left: 50% !important;
+    right: auto !important;
+    width: min(398px, calc(100vw - 32px));
+    transform: translate(-50%, -50%);
+  }
+  .app-modal.show,
+  .h2h-modal.show,
+  .rf-modal.show {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
   .float-button {
     right: calc(var(--app-gutter) + 28rpx) !important;
   }

@@ -10,6 +10,7 @@
   F7 单关修正 (权重1.5) - 结合F4的单关逆向规则
 
 注: calc_factor2(交锋历史) 保留供 backtest_factors.py 回测，不进 live 因子集。
+     live 交锋只做评估参考(build_h2h_ref)，不参与 calc_prediction 加权。
 """
 import json
 import logging
@@ -1421,6 +1422,411 @@ _H2H_TIME_WEIGHTS = [
 ]
 _H2H_TIME_DEFAULT = 0.15
 
+_AR_FLIP = {"赢": "输", "赢半": "输半", "输": "赢", "输半": "赢半",
+            "走": "走", "走盘": "走", "走水": "走", "平": "平"}
+_SCORE_RE = re.compile(r"(\d+)\s*[:：]\s*(\d+)")
+
+
+def _exclude_current_h2h(h2h: List[Dict], match_date: str, today: str) -> List[Dict]:
+    """去掉本场(500.com h2h 常带本场,日期可能差1天)。"""
+    if not h2h:
+        return []
+    if match_date:
+        from datetime import datetime, timedelta
+        try:
+            md = datetime.strptime(match_date, "%Y-%m-%d")
+            exclude_start = (md - timedelta(days=1)).strftime("%Y-%m-%d")
+            exclude_end = (md + timedelta(days=1)).strftime("%Y-%m-%d")
+            return [r for r in h2h if not (exclude_start <= (r.get("date") or "") <= exclude_end)]
+        except (ValueError, TypeError):
+            return [r for r in h2h if (r.get("date") or "") != match_date]
+    first_date = h2h[0].get("date") or ""
+    if first_date >= today:
+        return h2h[1:]
+    return h2h
+
+
+def _upper_ar(raw_ar: str, home_is_upper: bool) -> str:
+    """asianResult 从页面主队(当前主队)视角 → 本场上盘方视角。"""
+    ar = (raw_ar or "").strip()
+    return ar if home_is_upper else _AR_FLIP.get(ar, ar)
+
+
+def _ah_from_upper_ar(ar: str) -> Tuple[Optional[str], str]:
+    """上盘视角 asianResult → (upper/lower/push, 展示文案)。半盘归入该侧。"""
+    a = (ar or "").strip()
+    if a == "赢":
+        return "upper", "上盘"
+    if a == "赢半":
+        return "upper", "半上"
+    if a == "输":
+        return "lower", "下盘"
+    if a == "输半":
+        return "lower", "半下"
+    if a in ("走", "走盘", "走水", "平"):
+        return "push", "走水"
+    return None, ""
+
+
+def _h2h_same_league(competition: str, league: Optional[str]) -> bool:
+    if not competition or not league:
+        return False
+    from jczq_similar_odds import same_league_name_set
+    names = same_league_name_set(league)
+    c = competition.strip()
+    if c in names:
+        return True
+    return any(n and (n in c or c in n) for n in names)
+
+
+def build_recent_ref(match_data: Optional[Dict]) -> Dict[str, Any]:
+    """近期战绩原样透出，供预测页弹窗按指数页样式展示。不进因子。"""
+    def _clean(rows):
+        out = []
+        for r in rows or []:
+            if (r.get("halfScore") or "").strip() == "VS":
+                continue
+            out.append({
+                "date": r.get("date") or "",
+                "competition": (r.get("competition") or "").strip(),
+                "match": r.get("match") or "",
+                "halfScore": (r.get("halfScore") or "").strip(),
+                "handicap": r.get("handicap") or "",
+                "asianResult": (r.get("asianResult") or "").strip(),
+                "ouResult": (r.get("ouResult") or "").strip(),
+            })
+        return out[:15]
+
+    if not match_data:
+        return {"home": [], "away": []}
+    return {
+        "home": _clean(match_data.get("homeRecent")),
+        "away": _clean(match_data.get("awayRecent")),
+    }
+
+
+def _empty_h2h_ref() -> Dict[str, Any]:
+    return {
+        "matches": [],
+        "summary": {
+            "total": 0, "sameLeague": 0, "sameVenue": 0,
+            "homeWins": 0, "draws": 0, "awayWins": 0,
+            "histUpper": 0, "histLower": 0, "histPush": 0,
+            "lineUpper": 0, "lineLower": 0, "linePush": 0,
+            "lineSettled": 0,
+        },
+    }
+
+
+def build_h2h_ref(match_data: Optional[Dict], match_info: Dict) -> Dict[str, Any]:
+    """交锋评估参考：不打分、不进 calc_prediction。
+
+    当时盘=历史场 asianResult(换算到本场上盘视角)；
+    本场盘=用当前亚盘重算历史比分(同样上盘视角)。
+    """
+    from datetime import date as date_type
+    from local_match_data import settle_ah
+
+    empty = _empty_h2h_ref()
+    if not match_data:
+        return empty
+    raw = match_data.get("h2h") or []
+    if not raw:
+        return empty
+
+    today = date_type.today().strftime("%Y-%m-%d")
+    h2h = _exclude_current_h2h(raw, match_info.get("match_date") or "", today)
+    if not h2h:
+        return empty
+
+    home = match_info.get("home_team", "主队")
+    away = match_info.get("away_team", "客队")
+    home_aliases = _resolve_side_aliases(
+        home, match_data.get("homeTeamName"), match_data.get("homeRecent") or [],
+        extra_aliases=match_data.get("homeTeamAliases"))
+    league = match_info.get("league")
+    home_is_upper = _home_is_upper(match_info)
+    current_hc = match_info.get("handicap")
+    try:
+        current_hc_f = float(current_hc) if current_hc is not None else None
+    except (TypeError, ValueError):
+        current_hc_f = None
+
+    matches: List[Dict[str, Any]] = []
+    sum_home = sum_draw = sum_away = 0
+    hist_u = hist_l = hist_p = 0
+    line_u = line_l = line_p = line_n = 0
+    n_league = n_venue = 0
+
+    for r in h2h:
+        match_text = re.sub(r"\[\d+\]", "", r.get("match") or "")
+        date = r.get("date") or ""
+        competition = (r.get("competition") or "").strip()
+        home_was_home = _team_in_match(home_aliases, match_text)
+        same_venue = home_was_home is True
+        same_league = _h2h_same_league(competition, league)
+        if same_league:
+            n_league += 1
+        if same_venue:
+            n_venue += 1
+
+        score_m = _SCORE_RE.search(match_text)
+        rec_home_goals = rec_away_goals = None
+        cur_home_goals = cur_away_goals = None
+        if score_m:
+            rec_home_goals = int(score_m.group(1))
+            rec_away_goals = int(score_m.group(2))
+            if home_was_home is True:
+                cur_home_goals, cur_away_goals = rec_home_goals, rec_away_goals
+            elif home_was_home is False:
+                cur_home_goals, cur_away_goals = rec_away_goals, rec_home_goals
+
+        res = (r.get("result") or "").strip()
+        if res in ("胜", "赢"):
+            wdl, wdl_label = "win", "胜"
+        elif res == "平":
+            wdl, wdl_label = "draw", "平"
+        elif res in ("负", "输"):
+            wdl, wdl_label = "lose", "负"
+        elif cur_home_goals is not None and cur_away_goals is not None:
+            if cur_home_goals > cur_away_goals:
+                wdl, wdl_label = "win", "胜"
+            elif cur_home_goals == cur_away_goals:
+                wdl, wdl_label = "draw", "平"
+            else:
+                wdl, wdl_label = "lose", "负"
+        else:
+            wdl, wdl_label = None, ""
+        if wdl == "win":
+            sum_home += 1
+        elif wdl == "draw":
+            sum_draw += 1
+        elif wdl == "lose":
+            sum_away += 1
+
+        hist_ar, hist_label = _ah_from_upper_ar(_upper_ar(r.get("asianResult") or "", home_is_upper))
+        if hist_ar == "upper":
+            hist_u += 1
+        elif hist_ar == "lower":
+            hist_l += 1
+        elif hist_ar == "push":
+            hist_p += 1
+
+        hist_hc_val = None
+        hist_hc_raw = r.get("handicap") or ""
+        try:
+            hist_hc_500 = float(hist_hc_raw)
+            hist_hc_val = -hist_hc_500  # 500 h2h 正=该场主让 → 标准负=主让
+        except (TypeError, ValueError):
+            hist_hc_500 = None
+
+        line_ar = line_label = None
+        if current_hc_f is not None and cur_home_goals is not None and cur_away_goals is not None:
+            settled = settle_ah(current_hc_f, cur_home_goals, cur_away_goals, True)
+            line_ar, line_label = _ah_from_upper_ar(_upper_ar(settled, home_is_upper))
+            line_n += 1
+            if line_ar == "upper":
+                line_u += 1
+            elif line_ar == "lower":
+                line_l += 1
+            elif line_ar == "push":
+                line_p += 1
+
+        venue = "home" if home_was_home is True else ("away" if home_was_home is False else None)
+        matches.append({
+            "date": date,
+            "competition": competition,
+            "match": match_text,
+            "sameLeague": same_league,
+            "sameVenue": same_venue,
+            "venue": venue,
+            "histHc": hist_hc_val,
+            "histHcText": _fmt_handicap(hist_hc_val) if hist_hc_val is not None else (hist_hc_raw or "-"),
+            "histAr": hist_ar,
+            "histLabel": hist_label,
+            "lineAr": line_ar,
+            "lineLabel": line_label,
+            "result": wdl,
+            "resultLabel": wdl_label,
+            "asian": hist_hc_raw,
+            "asianResult": (r.get("asianResult") or "").strip(),
+            "ouResult": (r.get("ouResult") or "").strip(),
+            "halfScore": (r.get("halfScore") or "").strip(),
+        })
+
+    return {
+        "matches": matches,
+        "summary": {
+            "total": len(matches),
+            "sameLeague": n_league,
+            "sameVenue": n_venue,
+            "homeWins": sum_home,
+            "draws": sum_draw,
+            "awayWins": sum_away,
+            "histUpper": hist_u,
+            "histLower": hist_l,
+            "histPush": hist_p,
+            "lineUpper": line_u,
+            "lineLower": line_l,
+            "linePush": line_p,
+            "lineSettled": line_n,
+        },
+    }
+
+
+def _h2h_count_dir(upper_n: int, lower_n: int) -> str:
+    if upper_n > lower_n:
+        return "upper"
+    if lower_n > upper_n:
+        return "lower"
+    return "neutral"
+
+
+def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any]:
+    """交锋历史展示因子：对齐 F1 对比条+子因素投票。refOnly，不进加权。"""
+    home = match_info.get("home_team", "主队")
+    away = match_info.get("away_team", "客队")
+    is_home_let = _home_is_upper(match_info)
+    upper_name = home if is_home_let else away
+    lower_name = away if is_home_let else home
+
+    empty = {
+        "name": "交锋历史", "score": 5, "direction": "neutral",
+        "reason": "无交锋记录", "details": [], "refOnly": True,
+    }
+    matches = [
+        m for m in ((h2h_ref or {}).get("matches") or [])
+        if (m.get("halfScore") or "") != "VS"
+    ]
+    if not matches:
+        return empty
+
+    league_rows = [m for m in matches if m.get("sameLeague")]
+    use_league = len(league_rows) >= 3
+    rows = league_rows if use_league else matches
+    sample_tag = f"同联赛{len(rows)}场" if use_league else f"{len(rows)}场"
+
+    details = []
+    votes = []
+
+    home_w = sum(1 for m in rows if m.get("result") == "win")
+    away_w = sum(1 for m in rows if m.get("result") == "lose")
+    draws = sum(1 for m in rows if m.get("result") == "draw")
+    upper_w, lower_w = (home_w, away_w) if is_home_let else (away_w, home_w)
+    sub1_dir = _h2h_count_dir(upper_w, lower_w)
+    votes.append(sub1_dir)
+    if sub1_dir == "upper":
+        sub1_desc = f"{upper_name}{upper_w}胜多于{lower_name}的{lower_w}胜（{sample_tag}，平{draws}）"
+    elif sub1_dir == "lower":
+        sub1_desc = f"{lower_name}{lower_w}胜多于{upper_name}的{upper_w}胜（{sample_tag}，平{draws}）"
+    else:
+        sub1_desc = f"交锋胜场持平{upper_w}-{lower_w}，平{draws}（{sample_tag}）"
+    details.append({
+        "name": "交锋胜负", "direction": sub1_dir, "desc": sub1_desc,
+        "chart": _compare_chart(
+            upper_name, lower_name, upper_w, lower_w, unit="胜", vmax=max(upper_w, lower_w, 1)),
+    })
+
+    home_rows = [m for m in rows if m.get("venue") == "home"]
+    if len(home_rows) >= 2:
+        hw = sum(1 for m in home_rows if m.get("result") == "win")
+        hl = sum(1 for m in home_rows if m.get("result") == "lose")
+        if is_home_let:
+            sub2_dir = _h2h_count_dir(hw, hl)
+            u_lab, l_lab, u_n, l_n = f"{upper_name}主场", f"{lower_name}客场", hw, hl
+        else:
+            sub2_dir = _h2h_count_dir(hl, hw)
+            u_lab, l_lab, u_n, l_n = f"{upper_name}客场", f"{lower_name}主场", hl, hw
+        if len(home_rows) >= 3:
+            votes.append(sub2_dir)
+        details.append({
+            "name": "主场交锋", "direction": sub2_dir,
+            "desc": f"{home}主场{hw}胜{hl}负（{len(home_rows)}场）",
+            "chart": _compare_chart(u_lab, l_lab, u_n, l_n, unit="胜", vmax=max(u_n, l_n, 1)),
+        })
+
+    hist_u = sum(1 for m in rows if m.get("histAr") == "upper")
+    hist_l = sum(1 for m in rows if m.get("histAr") == "lower")
+    if hist_u + hist_l >= 1:
+        sub3_dir = _h2h_count_dir(hist_u, hist_l)
+        if hist_u + hist_l >= 3:
+            votes.append(sub3_dir)
+        if sub3_dir == "upper":
+            sub3_desc = f"当时盘{upper_name}赢盘更多（{hist_u}-{hist_l}）"
+        elif sub3_dir == "lower":
+            sub3_desc = f"当时盘{lower_name}赢盘更多（{hist_l}-{hist_u}）"
+        else:
+            sub3_desc = f"当时盘赢盘持平（{hist_u}-{hist_l}）"
+        details.append({
+            "name": "当时赢盘", "direction": sub3_dir, "desc": sub3_desc,
+            "chart": _compare_chart(
+                upper_name, lower_name, hist_u, hist_l, unit="场", vmax=max(hist_u, hist_l, 1)),
+        })
+
+    line_u = sum(1 for m in rows if m.get("lineAr") == "upper")
+    line_l = sum(1 for m in rows if m.get("lineAr") == "lower")
+    if line_u + line_l >= 1:
+        sub4_dir = _h2h_count_dir(line_u, line_l)
+        if line_u + line_l >= 3:
+            votes.append(sub4_dir)
+        hc = match_info.get("handicap")
+        try:
+            hc_txt = _fmt_handicap(float(hc)) if hc is not None else ""
+        except (TypeError, ValueError):
+            hc_txt = ""
+        line_tag = f"按本场盘{hc_txt}" if hc_txt else "按本场盘重算"
+        if sub4_dir == "upper":
+            sub4_desc = f"{line_tag}，{upper_name}能赢盘更多（{line_u}-{line_l}）"
+        elif sub4_dir == "lower":
+            sub4_desc = f"{line_tag}，{lower_name}能赢盘更多（{line_l}-{line_u}）"
+        else:
+            sub4_desc = f"{line_tag}，上下盘持平（{line_u}-{line_l}）"
+        details.append({
+            "name": "本场盘重算", "direction": sub4_dir, "desc": sub4_desc,
+            "chart": _compare_chart(
+                upper_name, lower_name, line_u, line_l, unit="场", vmax=max(line_u, line_l, 1)),
+        })
+
+    upper_votes = votes.count("upper")
+    lower_votes = votes.count("lower")
+    if upper_votes > lower_votes:
+        direction, majority = "upper", upper_votes
+    elif lower_votes > upper_votes:
+        direction, majority = "lower", lower_votes
+    else:
+        direction, majority = "neutral", 0
+
+    if majority >= 3:
+        score = 8
+    elif majority == 2:
+        score = 7
+    else:
+        score = 5
+
+    labels = [(d["name"].replace("交锋", ""), d["direction"]) for d in details]
+    if direction == "neutral":
+        u_parts = [n for n, d in labels if d == "upper"]
+        l_parts = [n for n, d in labels if d == "lower"]
+        if u_parts and l_parts:
+            reason = (
+                f"方向分歧：{', '.join(u_parts)}指向{upper_name}，"
+                f"{', '.join(l_parts)}指向{lower_name}"
+            )
+        else:
+            reason = f"{sample_tag}交锋无明确优劣"
+    else:
+        win_team = upper_name if direction == "upper" else lower_name
+        parts = [n for n, d in labels if d == direction]
+        reason = (
+            f"{win_team}交锋占优（{sample_tag}，{'，'.join(parts[:3])}）"
+            if parts else f"{win_team}交锋略占优（{sample_tag}）"
+        )
+
+    return {
+        "name": "交锋历史", "score": score, "direction": direction,
+        "reason": reason, "details": details, "refOnly": True,
+    }
+
 
 def _h2h_time_weight(date_str: str, today: str) -> float:
     """根据交锋日期距今天数返回时间衰减权重"""
@@ -1571,22 +1977,7 @@ def calc_factor2(match_data: Optional[Dict], match_info: Dict,
     lower_team = away_aliases if is_home_let else home_aliases
 
     today = date_type.today().strftime("%Y-%m-%d")
-    match_date = match_info.get("match_date", "")
-
-    # 过滤掉当前比赛本身(500.com h2h会包含本场,日期可能差1天)
-    if match_date:
-        from datetime import datetime, timedelta
-        try:
-            md = datetime.strptime(match_date, "%Y-%m-%d")
-            exclude_start = (md - timedelta(days=1)).strftime("%Y-%m-%d")
-            exclude_end = (md + timedelta(days=1)).strftime("%Y-%m-%d")
-            h2h = [r for r in h2h if not (exclude_start <= r.get("date", "") <= exclude_end)]
-        except (ValueError, TypeError):
-            h2h = [r for r in h2h if r.get("date", "") != match_date]
-    elif h2h:
-        first_date = h2h[0].get("date", "")
-        if first_date >= today:
-            h2h = h2h[1:]
+    h2h = _exclude_current_h2h(h2h, match_info.get("match_date") or "", today)
 
     if not h2h:
         return {"name": "交锋历史", "score": 5, "direction": "neutral",
@@ -2181,7 +2572,7 @@ def calc_factor6(is_single: bool, f5_direction: str, f5_score: int) -> Dict[str,
 # (F4市场信号、F5市场热度、F6单关 已纯量化计算)
 # ============================================================
 
-AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据提供的比赛数据，从以下3个维度分析让球盘方向（上盘=让球方赢盘，下盘=受让方赢盘）。
+AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据提供的比赛数据，从以下2个维度分析让球盘方向（上盘=让球方赢盘，下盘=受让方赢盘）。
 
 **核心原则（必须牢记）：**
 亚盘分析的是"赢盘"而非"赢球"。判断方向时，一切都要围绕**盘口深度**这个标尺：
@@ -2189,6 +2580,7 @@ AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据
 - "球队强、状态好、名气大" 不等于 "能赢盘"。强队让深盘时，即使赢球也常常输盘。
 - 受让方(下盘)只要不输超过盘口(甚至小负/平局)就赢盘，盘口越深对下盘越有利。
 - 冷门往往出现在：市场一边倒看好强队赢深盘，但强队赢球不赢盘 → 下盘爆冷。
+- 不要根据交锋历史判断方向（交锋仅作页面参考，不在本任务内）。
 
 **分析维度：**
 
@@ -2197,21 +2589,17 @@ AI_FACTORS_PROMPT = """你是一个专业的足球亚洲盘口分析师。根据
    - **赢盘率样本不足(少于5场)时不要当作强信号**，以场均积分等完整样本指标为主。
    - 关注主客场：主队看主场场均分，客队看客场场均分。
 
-2. **交锋历史**：分析双方近期交锋，**重点看亚盘赢盘记录(asianResult)而非单纯胜负**，并关注类似盘口下的表现。
-   - 上盘方历史多次赢盘 → 偏上盘；上盘方历史常赢球但输盘，或交锋胶着 → 偏下盘。
-
-3. **实力定位**：从大众第一印象判断哪支球队整体实力更强（不考虑盘口深浅，盘口由其他因子分析）。
+2. **实力定位**：从大众第一印象判断哪支球队整体实力更强（不考虑盘口深浅，盘口由其他因子分析）。
    - 评估维度：历史底蕴(豪门/劲旅/中游/保级队/升班马)、联赛地位、欧战经历、阵容配置档次、教练水平。
    - 若提供了联赛排名/球队身价，可作参考，但杯赛常无联赛排名；身价接近时勿过度解读。
    - 上盘方(让球方)综合实力底蕴明显强于下盘方 → upper；下盘方底蕴反而更强或双方接近 → lower或neutral。
    - 这是纯粹的"大众认为谁更强"，不需要考虑盘口是否合理。
 
-请严格按以下JSON格式输出(必须包含全部3个因子)：
+请严格按以下JSON格式输出(必须包含全部2个因子)：
 
 {
   "factors": [
     {"name": "近期状态", "score": 1到10的整数, "direction": "upper或lower或neutral", "reason": "简短原因，25字以内"},
-    {"name": "交锋历史", "score": 1到10的整数, "direction": "upper或lower或neutral", "reason": "简短原因，25字以内"},
     {"name": "实力定位", "score": 1到10的整数, "direction": "upper或lower或neutral", "reason": "简短原因，25字以内"}
   ]
 }
@@ -2273,7 +2661,6 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
     if match_data:
         home_recent = match_data.get("homeRecent", [])[:10]
         away_recent = match_data.get("awayRecent", [])[:10]
-        h2h = match_data.get("h2h", [])[:10]
 
         # 代码算好的客观指标(供F1近期状态推理)
         # 匹配战绩明细用500队名别名(竞彩名可能不同,如阿拉木图≠凯拉特)
@@ -2313,35 +2700,6 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
             for r in away_recent[:6]:
                 parts.append(f"  {r.get('date','')} {r.get('match','')} {r.get('result','')} 盘口:{r.get('handicap','-')} 亚盘:{r.get('asianResult','-')}")
 
-        if h2h:
-            import re
-            from datetime import datetime, timedelta
-            # 过滤当前比赛(日期±1天)
-            match_date = match_info.get("match_date", "")
-            filtered_h2h = h2h
-            if match_date:
-                try:
-                    md = datetime.strptime(match_date, "%Y-%m-%d")
-                    ex_start = (md - timedelta(days=1)).strftime("%Y-%m-%d")
-                    ex_end = (md + timedelta(days=1)).strftime("%Y-%m-%d")
-                    filtered_h2h = [r for r in h2h if not (ex_start <= r.get("date", "") <= ex_end)]
-                except (ValueError, TypeError):
-                    pass
-
-            if filtered_h2h:
-                parts.append(f"\n{upper_team}与{lower_team}近{len(filtered_h2h)}次交锋(亚盘结果从{upper_team}上盘视角):")
-                for r in filtered_h2h[:6]:
-                    match_text = re.sub(r'\[\d+\]', '', r.get('match', ''))
-                    # 转换asianResult为上盘方视角
-                    raw_ar = (r.get('asianResult') or '').strip()
-                    if is_home_let:
-                        upper_ar = raw_ar  # 页面主队=上盘方，视角一致
-                    else:
-                        # 页面主队=下盘方，需要翻转
-                        flip = {"赢": "输", "赢半": "输半", "输": "赢", "输半": "赢半", "走": "走"}
-                        upper_ar = flip.get(raw_ar, raw_ar)
-                    parts.append(f"  {r.get('date','')} {match_text} {r.get('result','')} 盘口:{r.get('handicap','?')} {upper_team}{'赢盘' if upper_ar in ('赢','赢半') else '输盘' if upper_ar in ('输','输半') else '走盘'}")
-
     # 市场热度相关补充
     if match_info.get("market_heat_desc"):
         parts.append(f"\n用户提供的市场热度信息: {match_info['market_heat_desc']}")
@@ -2350,7 +2708,7 @@ def build_ai_prompt(match_info: Dict, match_data: Optional[Dict] = None) -> str:
 
 
 def call_deepseek_factors(prompt: str) -> List[Dict[str, Any]]:
-    """调用 DeepSeek 获取 F1近期状态/F2交锋历史/F3实力定位 分析（含重试）"""
+    """调用 DeepSeek 获取 F1近期状态/实力定位 分析（含重试）"""
     client = _get_client()
 
     logger.info(f"[predict] DeepSeek prompt (前200字): {prompt[:200]}...")
@@ -2387,7 +2745,6 @@ def call_deepseek_factors(prompt: str) -> List[Dict[str, Any]]:
 
     default_factors = [
         {"name": "近期状态", "score": 5, "direction": "neutral", "reason": "AI分析无结果"},
-        {"name": "交锋历史", "score": 5, "direction": "neutral", "reason": "AI分析无结果"},
         {"name": "实力定位", "score": 5, "direction": "neutral", "reason": "AI分析无结果"},
     ]
 
@@ -2458,6 +2815,7 @@ def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict
         custom_weights: 自定义权重字典(可选，默认用全局FACTOR_WEIGHTS)
     """
     weights = custom_weights or FACTOR_WEIGHTS
+    factors = [f for f in factors if not f.get("refOnly") and f.get("name") in weights]
     upper_w = 0.0               # 上盘方向加权强度和
     lower_w = 0.0               # 下盘方向加权强度和
     upper_weight = 0.0          # 上盘因子权重和(不乘强度)
@@ -3164,7 +3522,7 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
         ah_open=match_info.get("handicap_open"))
 
     # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
-    # 与世界杯一致: 不再投交锋历史票
+    # 交锋历史不进因子加权，只做 h2hRef 评估参考
     prompt = build_ai_prompt(match_info, match_data)
 
     ai_f1_list = []
@@ -3207,4 +3565,13 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     analysis = generate_analysis(all_factors, prediction, match_info)
     prediction["analysis"] = analysis
 
-    return {"factors": all_factors, "prediction": prediction}
+    h2h_ref = build_h2h_ref(match_data, match_info)
+    recent_ref = build_recent_ref(match_data)
+    h2h_factor = build_h2h_factor(h2h_ref, match_info)
+
+    return {
+        "factors": all_factors + [h2h_factor],
+        "prediction": prediction,
+        "h2hRef": h2h_ref,
+        "recentRef": recent_ref,
+    }

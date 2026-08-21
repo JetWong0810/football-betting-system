@@ -71,6 +71,20 @@
           <view class="step-content">
             <view class="step-header">
               <text class="step-name">{{ step.name }}</text>
+              <text
+                v-if="step.name === '近期状态' && step.status === 'done'"
+                class="step-form-btn"
+                @tap.stop="showRecentModal = true"
+              >战绩</text>
+              <text
+                v-if="step.name === '交锋历史' && step.status === 'done'"
+                class="step-ref-tag"
+              >参考</text>
+              <text
+                v-if="step.name === '交锋历史' && step.status === 'done'"
+                class="step-form-btn"
+                @tap.stop="showH2hModal = true"
+              >明细</text>
               <text class="step-analyzing" v-if="step.status === 'analyzing'">分析中</text>
               <view class="step-score-inline" v-if="step.status === 'done'">
                 <text class="dir-tag" :class="step.dirClass">{{ step.dirLabel }}</text>
@@ -113,6 +127,15 @@
         </view>
       </view>
 
+      <H2hRefCard
+        :open="showH2hModal"
+        :data="h2hRef"
+        :home-name="selectedMatch?.homeTeam?.name || '主队'"
+        :away-name="selectedMatch?.awayTeam?.name || '客队'"
+        :current-hc="selectedMatch?.handicap"
+        @close="showH2hModal = false"
+      />
+
       <!-- 分析结果 -->
       <view class="analysis-result" v-if="analysisComplete">
         <view class="result-divider">
@@ -126,7 +149,7 @@
             <text class="dir-arrow">{{ prediction.direction === 'upper' ? '↑' : prediction.direction === 'lower' ? '↓' : '−' }}</text>
             <view class="dir-info">
               <text class="dir-text">{{ directionLabel(prediction.direction) }}</text>
-              <text class="dir-sub">综合{{ analysisSteps.length }}项因子</text>
+              <text class="dir-sub">综合{{ scoredFactorCount }}项因子</text>
             </view>
           </view>
           <view class="result-right">
@@ -312,6 +335,15 @@
       </view>
     </view>
 
+    <RecentFormModal
+      :open="showRecentModal"
+      :home-name="selectedMatch?.homeTeam?.name || '主队'"
+      :away-name="selectedMatch?.awayTeam?.name || '客队'"
+      :home-recent="recentRef?.home || []"
+      :away-recent="recentRef?.away || []"
+      @close="showRecentModal = false"
+    />
+
     <!-- 因子说明 -->
     <view class="similar-mask" v-if="showFactorHelp" @tap="closeFactorHelp"></view>
     <view class="factor-help-modal" :class="{ show: showFactorHelp }" @tap.stop>
@@ -473,6 +505,8 @@ import { isJapanLeague } from '@/utils/japanLeague'
 import { isSameLeagueEligible } from '@/utils/sameLeague'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
+import H2hRefCard from '@/components/H2hRefCard.vue'
+import RecentFormModal from '@/components/RecentFormModal.vue'
 
 function hasChart(sub) {
   return !!(sub && sub.chart && sub.chart.items && sub.chart.items.length)
@@ -603,6 +637,10 @@ const filterLeague = ref('all')
 const analyzing = ref(false)
 const analysisComplete = ref(false)
 const analysisSteps = ref([])
+const h2hRef = ref(null)
+const recentRef = ref({ home: [], away: [] })
+const showRecentModal = ref(false)
+const showH2hModal = ref(false)
 const prediction = ref({ direction: '', confidence: 0, overallReverse: false, consensusDir: null })
 const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
@@ -824,6 +862,10 @@ onLoad((query) => {
   prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
   aiAnalysis.value = ''
   selectedMatch.value = null
+  h2hRef.value = null
+  recentRef.value = { home: [], away: [] }
+  showRecentModal.value = false
+  showH2hModal.value = false
 
   if (query?.matchId) {
     pendingMatchId.value = query.matchId
@@ -900,6 +942,10 @@ async function fetchMatches() {
           analysisComplete.value = false
           prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
           aiAnalysis.value = ''
+          h2hRef.value = null
+          recentRef.value = { home: [], away: [] }
+          showRecentModal.value = false
+          showH2hModal.value = false
           // 等 onShow 跳过缓存恢复后再开跑; 标志在回调里清
           setTimeout(() => {
             if (pendingAutoStart.value) {
@@ -1080,7 +1126,10 @@ const predictionHit = computed(() => {
   return actualDirection.value === prediction.value.direction
 })
 
-const factorNames = ['近期状态', '实力定位', '市场信号', '市场热度', '竞彩赔率', '历史同赔', '单关修正']
+const factorNames = ['近期状态', '实力定位', '市场信号', '市场热度', '竞彩赔率', '历史同赔', '单关修正', '交锋历史']
+const scoredFactorCount = computed(() =>
+  analysisSteps.value.filter((s) => s.name !== '交锋历史').length || 7
+)
 
 async function loadJapanContext(matchId) {
   japanContext.value = null
@@ -1117,6 +1166,10 @@ function selectMatch(match) {
   analysisComplete.value = false
   prediction.value = { direction: '', confidence: 0, overallReverse: false, consensusDir: null }
   aiAnalysis.value = ''
+  h2hRef.value = null
+  recentRef.value = { home: [], away: [] }
+  showRecentModal.value = false
+  showH2hModal.value = false
   uni.removeStorageSync('predict-last-result')
   loadJapanContext(match?.matchId)
 }
@@ -1136,6 +1189,10 @@ async function startAnalysis() {
   analysisComplete.value = false
   prediction.value = { direction: '', confidence: 0 }
   aiAnalysis.value = ''
+  h2hRef.value = null
+  recentRef.value = { home: [], away: [] }
+  showRecentModal.value = false
+  showH2hModal.value = false
 
   // 初始化步骤为 pending 状态
   analysisSteps.value = factorNames.map(name => ({
@@ -1218,6 +1275,8 @@ async function startAnalysis() {
       consensusDir: pred.consensus_dir || null,
     }
     aiAnalysis.value = pred.analysis || '分析完成'
+    h2hRef.value = data.h2hRef || { matches: [], summary: { total: 0 } }
+    recentRef.value = data.recentRef || { home: [], away: [] }
     analysisComplete.value = true
 
     // 缓存本次预测结果
@@ -1228,6 +1287,8 @@ async function startAnalysis() {
         steps: analysisSteps.value,
         prediction: prediction.value,
         aiAnalysis: aiAnalysis.value,
+        h2hRef: h2hRef.value,
+        recentRef: recentRef.value,
         matchStatus: matchStatus.value,
         timestamp: Date.now()
       })
@@ -1236,6 +1297,10 @@ async function startAnalysis() {
     clearInterval(animateInterval)
     console.error('预测请求失败:', e)
     analysisSteps.value = []
+    h2hRef.value = null
+    recentRef.value = { home: [], away: [] }
+    showRecentModal.value = false
+    showH2hModal.value = false
     uni.showToast({ title: e.message || '预测失败', icon: 'none' })
   } finally {
     analyzing.value = false
@@ -1301,6 +1366,10 @@ watch(matchStatus, async () => {
   japanContext.value = null
   analysisSteps.value = []
   analysisComplete.value = false
+  h2hRef.value = null
+  recentRef.value = { home: [], away: [] }
+  showRecentModal.value = false
+  showH2hModal.value = false
   searchKey.value = ''
   filterLeague.value = 'all'
   if (matchStatus.value === 'finished') {
@@ -1613,6 +1682,27 @@ onShow(async () => {
     color: #1e293b;
     flex-shrink: 1;
     min-width: 0;
+  }
+
+  .step-form-btn {
+    flex-shrink: 0;
+    font-size: 20rpx;
+    color: #0d9488;
+    background: #f0fdf9;
+    border: 1rpx solid #99f6e4;
+    border-radius: 6rpx;
+    padding: 2rpx 8rpx;
+    line-height: 1.3;
+  }
+
+  .step-ref-tag {
+    flex-shrink: 0;
+    font-size: 18rpx;
+    color: #64748b;
+    background: #e2e8f0;
+    border-radius: 6rpx;
+    padding: 2rpx 8rpx;
+    line-height: 1.3;
   }
 
   .step-analyzing {

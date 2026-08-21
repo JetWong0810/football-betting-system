@@ -1782,6 +1782,8 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
             "match": match_formatted,
             "factors": result["factors"],
             "prediction": result["prediction"],
+            "h2hRef": result.get("h2hRef") or {"matches": [], "summary": {"total": 0}},
+            "recentRef": result.get("recentRef") or {"home": [], "away": []},
         }
     except Exception as e:
         logger.error(f"预测失败: {e}", exc_info=True)

@@ -20,3 +20,13 @@ globs: frontend/**
 - 所有筛选标签、按钮、badge、tag 用 6rpx 圆角。
 - 装饰用 CSS(色块、边框、渐变)而非 emoji。
 - 方向色:上盘 upper=红(#dc2626)、下盘 lower=绿(#059669)、中性 neutral=灰(#64748b),与 predict 页一致。
+
+## PC 端弹窗(必做)
+H5 在 `≥431px` 把应用栏收成居中 **430px**(`App.vue` `--app-gutter`)。`position:fixed` 默认相对**整屏**,不处理就会在 PC 上拉满、列间距被撑开。
+
+新弹窗二选一:
+
+1. **居中对话框(推荐)**:加 class `app-modal`,用 `left:50%; width: min(398px, calc(100vw - 32px)); transform: translate(-50%,-50%)`。遮罩用 `app-mask`(可铺满整屏)。`App.vue` 已覆盖 `.app-modal` / `.h2h-modal`。
+2. **左右拉伸贴边**:`left`+`right` 写法必须把弹窗 class 加进 `App.vue` 的 PC 白名单(与 `.similar-modal` 一样用 `--app-gutter`),否则 PC 会撑满视口。
+
+不要用 `left: 3vw; right: 3vw` 当唯一约束。
