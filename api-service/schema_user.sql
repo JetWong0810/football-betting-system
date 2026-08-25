@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS match_personal_notes (
     user_id INT NOT NULL,
     match_id VARCHAR(64) NOT NULL COMMENT 'matches.match_id',
     content TEXT NOT NULL COMMENT '个人分析正文',
+    rating TINYINT UNSIGNED NULL COMMENT '半星=1,满星=10',
+    structure JSON NULL COMMENT '分类点选结构',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_match (user_id, match_id),

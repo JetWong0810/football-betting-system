@@ -211,7 +211,9 @@ class UpdateBetRequest(BaseModel):
 
 
 class UpsertMatchNoteRequest(BaseModel):
-    content: str = Field(default="", description="个人分析正文; 空字符串表示删除")
+    content: str = Field(default="", description="个人分析正文; 与 rating/structure 都空则删除")
+    rating: Optional[float] = Field(default=None, description="星级 0.5–5, 半星步进; 空表示不评分")
+    structure: Optional[Dict[str, Any]] = Field(default=None, description="分类点选结构")
 
 
 class OcrParseImageRequest(BaseModel):
@@ -1130,7 +1132,7 @@ def list_match_notes(
 def get_match_note(match_id: str, user_id: int = Depends(require_auth)):
     note = match_note_repo.get_note(user_id, match_id)
     if not note:
-        return {"matchId": match_id, "content": "", "updatedAt": None, "createdAt": None}
+        return {"matchId": match_id, "content": "", "rating": None, "structure": None, "updatedAt": None, "createdAt": None}
     return note
 
 
@@ -1140,9 +1142,9 @@ def upsert_match_note(
     req: UpsertMatchNoteRequest,
     user_id: int = Depends(require_auth),
 ):
-    """创建或更新个人分析; content 为空则删除。"""
+    """创建或更新个人分析; content / rating / structure 都空则删除。"""
     try:
-        note = match_note_repo.upsert_note(user_id, match_id, req.content)
+        note = match_note_repo.upsert_note(user_id, match_id, req.content, req.rating, req.structure)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return note
@@ -1599,7 +1601,11 @@ def list_predict_dates(
 
 
 @app.post("/api/predict/{match_id}")
-def predict_match_direction(match_id: str, req: PredictRequest = None):
+def predict_match_direction(
+    match_id: str,
+    req: PredictRequest = None,
+    user_id: Optional[int] = Depends(get_current_user_id),
+):
     """对指定比赛进行亚盘方向预测"""
     match = repo.get_match(match_id)
     if not match:
@@ -1777,6 +1783,12 @@ def predict_match_direction(match_id: str, req: PredictRequest = None):
                 ))
         except Exception as save_err:
             logger.warning(f"[predict] 保存预测记录失败: {save_err}")
+
+        if user_id:
+            try:
+                match_note_repo.merge_factor_summary(user_id, match_id, result.get("factors") or [])
+            except Exception as note_err:
+                logger.warning(f"[predict] 回写个人分析因子失败: {note_err}")
 
         return {
             "match": match_formatted,

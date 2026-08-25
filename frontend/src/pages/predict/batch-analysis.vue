@@ -73,6 +73,7 @@
         <text class="ctrl-btn" :class="{ active: sortMode === 'time' }" @tap="sortMode = 'time'">时间</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'hitPct' }" @tap="sortMode = 'hitPct'">命中率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'refScore' }" @tap="sortMode = 'refScore'">分数</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'rating' }" @tap="sortMode = 'rating'">星级</text>
       </view>
       <view class="ctrl-row">
         <text class="ctrl-lab">筛选</text>
@@ -241,11 +242,13 @@
             <text class="ol-move" :class="moveClass(it.spf)">{{ moveLabel(it.spf) }}</text>
           </view>
 
-          <view class="row-note" @tap.stop="openNoteEditor(it)">
-            <text class="note-lab">个人分析</text>
-            <text class="note-sum" :class="{ empty: !notePreview(it.matchId) }">{{ notePreview(it.matchId) || '写分析' }}</text>
-            <text class="note-go">{{ noteMap[it.matchId] ? '编辑' : '填写' }} ›</text>
-          </view>
+          <MatchNoteCard
+            :note="noteMap[it.matchId]"
+            :is-single="!!it.isSingle"
+            :jc-move="lowMoveDir(it.spf)"
+            @edit="openNoteEditor(it)"
+            @rate="(val) => quickRate(it, val)"
+          />
 
           <view class="row-detail" @tap="openSimilar(it)">
             <view class="spf-stat" v-if="spfStats(it.f6).total">
@@ -259,45 +262,21 @@
       </view>
     </scroll-view>
 
-    <!-- 个人分析编辑 -->
-    <view class="note-mask" v-if="showNoteEditor" @tap="closeNoteEditor"></view>
-    <view class="note-modal" :class="{ show: showNoteEditor }" @tap.stop>
-      <view class="note-header">
-        <view class="note-title-wrap">
-          <text class="note-title">个人分析</text>
-          <text v-if="noteTarget" class="note-teams">{{ noteTarget.homeTeam?.name }} vs {{ noteTarget.awayTeam?.name }}</text>
-        </view>
-        <text class="note-close" @tap="closeNoteEditor">关闭</text>
-      </view>
-      <view class="note-body">
-        <textarea
-          class="note-input"
-          v-model="noteDraft"
-          :maxlength="noteMaxLen"
-          placeholder="记录对本场的看法、关注点、计划等，可随时修改"
-          :disabled="noteSaving"
-          :show-confirm-bar="false"
-          :adjust-position="true"
-          :cursor-spacing="20"
-        />
-      </view>
-      <view class="note-footer">
-        <text class="note-count">{{ noteDraft.length }}/{{ noteMaxLen }}</text>
-        <view class="note-actions">
-          <text
-            v-if="noteMap[noteTarget?.matchId]"
-            class="note-btn danger"
-            :class="{ disabled: noteSaving }"
-            @tap="clearNote"
-          >清空</text>
-          <text
-            class="note-btn primary"
-            :class="{ disabled: noteSaving }"
-            @tap="saveNote"
-          >{{ noteSaving ? '保存中' : '保存' }}</text>
-        </view>
-      </view>
-    </view>
+    <MatchNoteEditor
+      :visible="showNoteEditor"
+      :home-name="noteTarget?.homeTeam?.name || ''"
+      :away-name="noteTarget?.awayTeam?.name || ''"
+      :content="noteMap[noteTarget?.matchId]?.content || ''"
+      :rating="noteMap[noteTarget?.matchId]?.rating || null"
+      :structure="noteMap[noteTarget?.matchId]?.structure || null"
+      :hints="noteHints"
+      :has-saved="!!noteMap[noteTarget?.matchId]"
+      :saving="noteSaving"
+      :max-len="noteMaxLen"
+      @close="closeNoteEditor"
+      @save="saveNote"
+      @clear="clearNote"
+    />
 
     <SimBetLineSheet
       :visible="showSimSheet"
@@ -461,7 +440,7 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 import { requireAuth, isLoggedIn } from '@/utils/auth'
 import { useSimBetStore } from '@/stores/simBetStore'
@@ -472,6 +451,9 @@ import { isSameLeagueEligible } from '@/utils/sameLeague'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
 import SimBetSlip from '@/components/SimBetSlip.vue'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
+import MatchNoteCard from '@/components/MatchNoteCard.vue'
+import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
+import { hasNote, ratingLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
 
 const simBet = useSimBetStore()
 const date = ref('')
@@ -510,18 +492,26 @@ const japanIntelLoading = ref(false)
 const japanIntelCache = ref({})
 const showSimSheet = ref(false)
 const simTarget = ref(null)
-/** matchId -> { content, updatedAt } */
+/** matchId -> { content, rating, updatedAt } */
 const noteMap = reactive({})
 const showNoteEditor = ref(false)
 const noteTarget = ref(null)
-const noteDraft = ref('')
 const noteSaving = ref(false)
 const noteMaxLen = 5000
+const noteHints = computed(() => {
+  const it = noteTarget.value
+  if (!it) return {}
+  return {
+    isSingle: !!it.isSingle,
+    hc: it.ahHandicap,
+    jcMove: lowMoveDir(it.spf),
+  }
+})
 /** 多选: upper/lower/neutral/hit */
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
 const moveFilters = ref([])
-/** default | time | hitPct | refScore */
+/** default | time | hitPct | refScore | rating */
 const sortMode = ref('default')
 
 const isFinished = computed(() => status.value === 'finished')
@@ -750,6 +740,11 @@ function itemRefScore(it) {
   const s = it?.f6?.refScore
   return s == null ? -1 : Number(s)
 }
+function itemRating(it) {
+  const r = noteMap[it?.matchId]?.rating
+  const n = Number(r)
+  return r == null || Number.isNaN(n) ? -1 : n
+}
 function itemTimeValue(it) {
   const rawTime = String(it?.matchTime || '')
   const fullInTime = rawTime.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/)
@@ -792,6 +787,13 @@ const sortedItems = computed(() => {
       return itemHitPct(b) - itemHitPct(a)
     })
   }
+  if (mode === 'rating') {
+    return list.sort((a, b) => {
+      const d = itemRating(b) - itemRating(a)
+      if (d !== 0) return d
+      return itemRefScore(b) - itemRefScore(a)
+    })
+  }
   return list.sort((a, b) => {
     const da = DIR_ORDER[a.f6?.direction] ?? 2
     const db = DIR_ORDER[b.f6?.direction] ?? 2
@@ -817,7 +819,7 @@ const filteredItems = computed(() => {
       const okHitPct = !needHitPct65 || itemHitPct(it) >= 65
       const okScore = !needScore60 || itemRefScore(it) >= 60
       const okSingle = !needSingle || !!it.isSingle
-      const okNote = !needNote || !!noteMap[it.matchId]
+      const okNote = !needNote || hasNote(noteMap[it.matchId])
       return okDir && okHit && okSample && okHitPct && okScore && okSingle && okNote
     })
   }
@@ -1068,6 +1070,7 @@ function openSimilar(it) {
   similarLeagueOnly.value = false
   similarModeLoading.value = false
   showSimilar.value = true
+  writeSimilarAndFit(it?.matchId, it?.f6?.matches, it?.ahHandicap, 'similar', 3, !!it?.isSingle)
 }
 function closeSimilar() {
   showSimilar.value = false
@@ -1134,6 +1137,8 @@ async function toggleLeagueOnly() {
     similarLeagueOnly.value = true
     similarMatches.value = applySimilarList(data?.matches || [])
     similarRefScore.value = data?.refScore != null ? data.refScore : null
+    const it = items.value.find((x) => x.matchId === similarMatchId.value)
+    writeSimilarAndFit(similarMatchId.value, data?.matches, it?.ahHandicap, 'sameEvent', 2, !!it?.isSingle)
   } catch (e) {
     uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
   } finally {
@@ -1202,10 +1207,184 @@ function goPredict(it) {
   uni.navigateTo({ url })
 }
 
-function notePreview(matchId) {
-  const raw = (noteMap[matchId]?.content || '').replace(/\s+/g, ' ').trim()
-  if (!raw) return ''
-  return raw.length > 36 ? raw.slice(0, 36) + '…' : raw
+function applyNote(matchId, data) {
+  const next = {
+    content: data?.content || '',
+    rating: data?.rating ?? null,
+    structure: data?.structure || null,
+    updatedAt: data?.updatedAt,
+    createdAt: data?.createdAt,
+  }
+  if (data?.deleted || !hasNote(next)) {
+    delete noteMap[matchId]
+    return false
+  }
+  noteMap[matchId] = next
+  return true
+}
+
+function openNoteEditor(it) {
+  if (!requireAuth()) return
+  noteTarget.value = it
+  showNoteEditor.value = true
+}
+
+function closeNoteEditor(force = false) {
+  if (noteSaving.value && !force) return
+  showNoteEditor.value = false
+  noteTarget.value = null
+}
+
+async function persistNote(matchId, payload) {
+  const data = await request({
+    url: `/api/match-notes/${encodeURIComponent(matchId)}`,
+    method: 'PUT',
+    data: {
+      content: payload.content || '',
+      rating: payload.rating ?? null,
+      structure: payload.structure || null,
+    },
+  })
+  return applyNote(matchId, data)
+}
+
+async function mergeNotePatch(matchId, patch) {
+  if (!matchId || !isLoggedIn()) return
+  const prev = noteMap[matchId] || {}
+  const structure = cloneStructure(prev.structure)
+  Object.assign(structure, patch)
+  delete structure.heat
+  try {
+    await persistNote(matchId, {
+      content: formatNoteContent(structure),
+      rating: prev.rating ?? null,
+      structure,
+    })
+  } catch {
+    // 回写失败不打断同赔弹窗
+  }
+}
+
+function writeSimilarField(matchId, matches, hc, field, minTotal, opts = {}) {
+  if (!matchId) return Promise.resolve()
+  const hit = pickSimilarVerdict(matches, hc, minTotal)
+  const pctField = field === 'sameEvent' ? 'sameEventPct' : 'similarPct'
+  const prev = noteMap[matchId]?.structure || {}
+  const prevId = prev[field] || null
+  const engaged = !!opts.clicked || !!prevId
+  const nextId = hit?.id || (engaged ? 'none' : null)
+  const nextPct = hit ? hit.pct : null
+  if ((prevId || null) === nextId && (prev[pctField] ?? null) === nextPct) {
+    return Promise.resolve()
+  }
+  if (!nextId && !prevId && prev[pctField] == null) {
+    return Promise.resolve()
+  }
+  return mergeNotePatch(matchId, { [field]: nextId, [pctField]: nextPct })
+}
+
+function writeSingleFitField(matchId, matches, hc, src, isSingle, opts = {}) {
+  if (!matchId) return Promise.resolve()
+  const hit = pickSingleFitVerdict(matches, hc, isSingle)
+  const sideField = src === 'sameEvent' ? 'sameEventSingle' : 'similarSingle'
+  const hitField = src === 'sameEvent' ? 'sameEventSingleHit' : 'similarSingleHit'
+  const totalField = src === 'sameEvent' ? 'sameEventSingleTotal' : 'similarSingleTotal'
+  const prev = noteMap[matchId]?.structure || {}
+  const prevSide = prev[sideField] || null
+  const engaged = !!opts.clicked || !!prevSide
+  let nextSide = null
+  let nextHit = null
+  let nextTotal = null
+  if (isSingle) {
+    nextSide = hit?.id || (engaged ? 'none' : null)
+    nextHit = hit ? hit.hit : null
+    nextTotal = hit ? hit.total : null
+  }
+  const same = prevSide === nextSide
+    && (prev[hitField] ?? null) === nextHit
+    && (prev[totalField] ?? null) === nextTotal
+  if (same) return Promise.resolve()
+  if (!nextSide && !prevSide && prev[hitField] == null && prev[totalField] == null) {
+    return Promise.resolve()
+  }
+  return mergeNotePatch(matchId, {
+    [sideField]: nextSide,
+    [hitField]: nextHit,
+    [totalField]: nextTotal,
+    singleFit: null,
+    singleFitSide: null,
+  })
+}
+
+function writeSimilarAndFit(matchId, matches, hc, field, minTotal, isSingle) {
+  const src = field === 'sameEvent' ? 'sameEvent' : 'similar'
+  return writeSimilarField(matchId, matches, hc, field, minTotal, { clicked: true })
+    .then(() => writeSingleFitField(matchId, matches, hc, src, isSingle, { clicked: true }))
+}
+
+async function syncSimilarNotes(list) {
+  if (!isLoggedIn()) return
+  for (const it of list || []) {
+    if (!it?.matchId || !hasNote(noteMap[it.matchId])) continue
+    await writeSimilarField(it.matchId, it.f6?.matches, it.ahHandicap, 'similar', 3)
+    await writeSingleFitField(it.matchId, it.f6?.matches, it.ahHandicap, 'similar', !!it.isSingle)
+    await writeObjectiveFields(it)
+  }
+}
+
+function writeObjectiveFields(it) {
+  if (!it?.matchId) return Promise.resolve()
+  const single = it.isSingle ? 'yes' : null
+  const jcMove = lowMoveDir(it.spf) || null
+  const prev = noteMap[it.matchId]?.structure || {}
+  if ((prev.single || null) === single && (prev.jcMove || null) === jcMove) {
+    return Promise.resolve()
+  }
+  return mergeNotePatch(it.matchId, { single, jcMove })
+}
+
+async function saveNote({ content, rating, structure }) {
+  const it = noteTarget.value
+  if (!it?.matchId || noteSaving.value) return
+  if (!requireAuth()) return
+  noteSaving.value = true
+  try {
+    const kept = await persistNote(it.matchId, { content, rating, structure })
+    uni.showToast({ title: kept ? '已保存' : '已清空', icon: 'none' })
+    noteSaving.value = false
+    closeNoteEditor(true)
+  } catch (e) {
+    uni.showToast({ title: e?.message || '保存失败', icon: 'none' })
+  } finally {
+    noteSaving.value = false
+  }
+}
+
+async function quickRate(it, rating) {
+  if (!it?.matchId || noteSaving.value) return
+  if (!requireAuth()) return
+  const prev = noteMap[it.matchId] || {}
+  noteMap[it.matchId] = { ...prev, rating }
+  try {
+    const kept = await persistNote(it.matchId, {
+      content: prev.content || '',
+      rating,
+      structure: prev.structure || null,
+    })
+    if (!kept && rating) {
+      noteMap[it.matchId] = { ...prev, rating }
+    }
+    uni.showToast({ title: ratingLabelToast(rating), icon: 'none' })
+  } catch (e) {
+    if (hasNote(prev)) noteMap[it.matchId] = prev
+    else delete noteMap[it.matchId]
+    uni.showToast({ title: e?.message || '打分失败', icon: 'none' })
+  }
+}
+
+function ratingLabelToast(rating) {
+  const lab = ratingLabel(rating)
+  return lab ? `已评 ${rating}  ${lab}` : '已评分'
 }
 
 async function loadNotesForItems(list) {
@@ -1225,53 +1404,9 @@ async function loadNotesForItems(list) {
     Object.keys(notes).forEach((mid) => {
       noteMap[mid] = notes[mid]
     })
+    await syncSimilarNotes(list)
   } catch {
     // 未登录/接口失败不阻断同赔列表
-  }
-}
-
-function openNoteEditor(it) {
-  if (!requireAuth()) return
-  noteTarget.value = it
-  noteDraft.value = noteMap[it.matchId]?.content || ''
-  showNoteEditor.value = true
-}
-
-function closeNoteEditor(force = false) {
-  if (noteSaving.value && !force) return
-  showNoteEditor.value = false
-  noteTarget.value = null
-  noteDraft.value = ''
-}
-
-async function saveNote() {
-  const it = noteTarget.value
-  if (!it?.matchId || noteSaving.value) return
-  if (!requireAuth()) return
-  noteSaving.value = true
-  try {
-    const data = await request({
-      url: `/api/match-notes/${encodeURIComponent(it.matchId)}`,
-      method: 'PUT',
-      data: { content: noteDraft.value },
-    })
-    if (data?.deleted || !(data?.content || '').trim()) {
-      delete noteMap[it.matchId]
-      uni.showToast({ title: '已清空', icon: 'none' })
-    } else {
-      noteMap[it.matchId] = {
-        content: data.content,
-        updatedAt: data.updatedAt,
-        createdAt: data.createdAt,
-      }
-      uni.showToast({ title: '已保存', icon: 'none' })
-    }
-    noteSaving.value = false
-    closeNoteEditor(true)
-  } catch (e) {
-    uni.showToast({ title: e?.message || '保存失败', icon: 'none' })
-  } finally {
-    noteSaving.value = false
   }
 }
 
@@ -1286,7 +1421,6 @@ async function clearNote() {
       method: 'DELETE',
     })
     delete noteMap[it.matchId]
-    noteDraft.value = ''
     uni.showToast({ title: '已清空', icon: 'none' })
     noteSaving.value = false
     closeNoteEditor(true)
@@ -1358,6 +1492,10 @@ onLoad(async (options) => {
   status.value = options?.status || 'not_started'
   await loadSaleDates()
   loadBatch()
+})
+onShow(() => {
+  if (!items.value.length) return
+  loadNotesForItems(items.value)
 })
 </script>
 
@@ -1698,109 +1836,6 @@ onLoad(async (options) => {
   margin-left: auto; font-size: 22rpx; color: $frbt-primary;
 }
 
-.row-note {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  margin-top: 10rpx;
-  padding: 10rpx 12rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 6rpx;
-  &:active { opacity: 0.75; }
-}
-.note-lab {
-  font-size: 20rpx;
-  font-weight: 600;
-  color: #475569;
-  flex-shrink: 0;
-}
-.note-sum {
-  flex: 1;
-  min-width: 0;
-  font-size: 20rpx;
-  color: #334155;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  &.empty { color: #94a3b8; }
-}
-.note-go {
-  font-size: 20rpx;
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.note-mask {
-  position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 220;
-}
-.note-modal {
-  position: fixed; left: 4vw; right: 4vw; top: 18vh;
-  background: #fff; border-radius: 12rpx; z-index: 221;
-  display: flex; flex-direction: column;
-  transform: translateY(12rpx) scale(0.98); opacity: 0;
-  transition: transform 0.2s ease, opacity 0.2s ease;
-  pointer-events: none;
-  max-height: 64vh;
-  overflow: hidden;
-  &.show { transform: translateY(0) scale(1); opacity: 1; pointer-events: auto; }
-}
-.note-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 16rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid #e2e8f0;
-  flex-shrink: 0;
-}
-.note-title-wrap { min-width: 0; flex: 1; }
-.note-title { display: block; font-size: 28rpx; font-weight: 600; color: #1e293b; }
-.note-teams {
-  display: block; margin-top: 6rpx; font-size: 22rpx; color: #64748b;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.note-close { font-size: 24rpx; color: $frbt-primary; padding: 4rpx; flex-shrink: 0; }
-.note-body {
-  flex: 1;
-  min-height: 0;
-  margin: 16rpx 24rpx 0;
-  overflow: hidden;
-}
-.note-input {
-  display: block;
-  width: 100%;
-  height: 36vh;
-  min-height: 240rpx;
-  max-height: 36vh;
-  padding: 16rpx;
-  font-size: 26rpx;
-  line-height: 1.55;
-  color: #1e293b;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 6rpx;
-  box-sizing: border-box;
-  overflow-x: hidden;
-  overflow-y: auto;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.note-footer {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 16rpx 24rpx 20rpx; gap: 16rpx;
-  flex-shrink: 0;
-}
-.note-count { font-size: 20rpx; color: #94a3b8; }
-.note-actions { display: flex; gap: 12rpx; }
-.note-btn {
-  font-size: 24rpx;
-  border-radius: 6rpx;
-  padding: 10rpx 22rpx;
-  line-height: 1.3;
-  &.primary { color: #fff; background: #2563eb; }
-  &.danger { color: #dc2626; background: #fef2f2; border: 1rpx solid #fecaca; }
-  &.disabled { opacity: 0.5; }
-}
-
-/* 弹窗 */
 .similar-mask {
   position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 200;
 }

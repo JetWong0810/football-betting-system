@@ -184,7 +184,6 @@ page {
   .similar-modal,
   .factor-help-modal,
   .japan-modal,
-  .note-modal,
   .history-modal,
   .panel-mask,
   .dialog-overlay,
@@ -221,7 +220,8 @@ page {
   /* 居中弹窗: 不要用 left/right 拉伸,保持 430 栏内宽度 */
   .app-modal,
   .h2h-modal,
-  .rf-modal {
+  .rf-modal,
+  .note-modal {
     left: 50% !important;
     right: auto !important;
     width: min(398px, calc(100vw - 32px));
@@ -229,7 +229,8 @@ page {
   }
   .app-modal.show,
   .h2h-modal.show,
-  .rf-modal.show {
+  .rf-modal.show,
+  .note-modal.show {
     transform: translate(-50%, -50%) scale(1);
   }
 
