@@ -43,7 +43,8 @@ function onRate(val) {
       <StarRating
         size="sm"
         :model-value="note?.rating || null"
-        :show-label="!!note?.rating"
+        :side="note?.structure?.ratingSide || null"
+        :show-label="!!(note?.rating || note?.structure?.ratingSide)"
         @change="onRate"
       />
       <text class="note-go" @tap.stop="$emit('edit')">{{ filled ? '编辑' : '填写' }} ›</text>
@@ -65,7 +66,7 @@ function onRate(val) {
       v-else-if="!chips.length"
       class="note-ph"
       @tap.stop="$emit('edit')"
-    >点选分析，或先打分</text>
+    >先选倾向再打分</text>
     <text
       v-if="overflow"
       class="note-more"

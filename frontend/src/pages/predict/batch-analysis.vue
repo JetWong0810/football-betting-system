@@ -453,7 +453,7 @@ import SimBetSlip from '@/components/SimBetSlip.vue'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
 import MatchNoteCard from '@/components/MatchNoteCard.vue'
 import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
-import { hasNote, ratingLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
+import { hasNote, ratingFullLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
 
 const simBet = useSimBetStore()
 const date = ref('')
@@ -1374,7 +1374,7 @@ async function quickRate(it, rating) {
     if (!kept && rating) {
       noteMap[it.matchId] = { ...prev, rating }
     }
-    uni.showToast({ title: ratingLabelToast(rating), icon: 'none' })
+    uni.showToast({ title: ratingLabelToast(rating, prev.structure?.ratingSide), icon: 'none' })
   } catch (e) {
     if (hasNote(prev)) noteMap[it.matchId] = prev
     else delete noteMap[it.matchId]
@@ -1382,8 +1382,8 @@ async function quickRate(it, rating) {
   }
 }
 
-function ratingLabelToast(rating) {
-  const lab = ratingLabel(rating)
+function ratingLabelToast(rating, side) {
+  const lab = ratingFullLabel(rating, side)
   return lab ? `已评 ${rating}  ${lab}` : '已评分'
 }
 

@@ -10,6 +10,20 @@ export const RATING_LABELS = {
   5: '重点',
 }
 
+/** 星级绑定的个人倾向: 主/客看球队, 上/下看盘路 */
+export const RATING_SIDE = {
+  home: '主队',
+  away: '客队',
+  upper: '上盘',
+  lower: '下盘',
+}
+export const RATING_SIDE_OPTS = [
+  { id: 'home', text: '主队', tone: 'upper' },
+  { id: 'away', text: '客队', tone: 'lower' },
+  { id: 'upper', text: '上盘', tone: 'upper' },
+  { id: 'lower', text: '下盘', tone: 'lower' },
+]
+
 const FIT_SRC = { similar: '同赔单关同向', sameEvent: '同赛事单关同向', both: '两边单关同向' }
 const FIT_SIDE = {
   home: '主胜',
@@ -80,8 +94,27 @@ export function ratingLabel(value) {
   return RATING_LABELS[key] || ''
 }
 
+export function ratingSideLabel(side) {
+  return (side && RATING_SIDE[side]) || ''
+}
+
+export function ratingSideTone(side) {
+  if (side === 'away' || side === 'lower') return 'lower'
+  if (side === 'home' || side === 'upper') return 'upper'
+  return ''
+}
+
+/** 看好下盘 / 重点主队; 只有星或只有倾向也可 */
+export function ratingFullLabel(value, side) {
+  const r = ratingLabel(value)
+  const s = ratingSideLabel(side)
+  if (r && s) return `${r}${s}`
+  return r || s || ''
+}
+
 export function emptyStructure() {
   return {
+    ratingSide: null,
     single: null,
     heat: null,
     factorDir: null,
@@ -167,7 +200,8 @@ export function factorVerdict(s) {
 export function structureHasValue(s) {
   if (!s) return false
   return !!(
-    s.single || s.heat || s.factorDir || s.factorAlign || hasFactorCounts(s)
+    s.ratingSide
+    || s.single || s.heat || s.factorDir || s.factorAlign || hasFactorCounts(s)
     || s.similar || s.sameEvent || s.similarSingle || s.sameEventSingle
     || s.singleFit || s.singleFitSide
     || s.jcMove || s.otherHeat || String(s.extra || '').trim()
@@ -353,6 +387,9 @@ function factorLine(s) {
 export function formatNoteContent(s) {
   if (!structureHasValue(s)) return ''
   const lines = []
+  if (s.ratingSide && RATING_SIDE[s.ratingSide]) {
+    lines.push(`倾向${RATING_SIDE[s.ratingSide]}`)
+  }
   const head = []
   if (s.single === 'yes') head.push('单关')
   if (head.length) lines.push(head.join('，'))

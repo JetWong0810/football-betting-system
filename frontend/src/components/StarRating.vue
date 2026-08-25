@@ -1,9 +1,10 @@
 <script setup>
 import { computed } from 'vue'
-import { ratingLabel } from '@/utils/matchNote'
+import { ratingFullLabel, ratingSideTone } from '@/utils/matchNote'
 
 const props = defineProps({
   modelValue: { type: Number, default: null },
+  side: { type: String, default: null },
   readonly: { type: Boolean, default: false },
   showLabel: { type: Boolean, default: true },
   size: { type: String, default: 'md' },
@@ -11,7 +12,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'change'])
 
-const label = computed(() => ratingLabel(props.modelValue))
+const label = computed(() => ratingFullLabel(props.modelValue, props.side))
+const tone = computed(() => ratingSideTone(props.side))
 
 function starClass(n) {
   const v = Number(props.modelValue) || 0
@@ -46,7 +48,7 @@ function pick(val) {
         @tap.stop="pick(n)"
       />
     </view>
-    <text v-if="showLabel && label" class="sr-lab">{{ label }}</text>
+    <text v-if="showLabel && label" class="sr-lab" :class="tone">{{ label }}</text>
     <text v-else-if="showLabel && !readonly" class="sr-lab muted">未评分</text>
   </view>
 </template>
@@ -94,6 +96,8 @@ function pick(val) {
   color: #b45309;
   white-space: nowrap;
   &.muted { color: #94a3b8; font-weight: 500; }
+  &.upper { color: #dc2626; }
+  &.lower { color: #059669; }
 }
 .sr.sm .sr-star { width: 26rpx; height: 26rpx; }
 .sr.sm .sr-lab { font-size: 20rpx; }

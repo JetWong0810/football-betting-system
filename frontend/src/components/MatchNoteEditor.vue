@@ -20,6 +20,7 @@ import {
   factorDirTone,
   factorDirLabel,
   OTHER_HEAT_OPTS,
+  RATING_SIDE_OPTS,
   structureHasValue,
 } from '@/utils/matchNote'
 
@@ -77,6 +78,20 @@ const bothFit = computed(() => bothSingleFitAligned(draft))
 const liveSingle = computed(() => !!props.hints?.isSingle)
 const liveJcMove = computed(() => props.hints?.jcMove || null)
 const liveJcText = computed(() => jcMoveLabel(liveJcMove.value))
+const sideHint = computed(() => {
+  if (shallow.value === false) return '深盘可看上/下，也可看主/客'
+  if (shallow.value === true) return '浅盘可看主/客，也可看上/下'
+  return '点选你看好的一边'
+})
+
+function pickSide(id) {
+  draft.ratingSide = draft.ratingSide === id ? null : id
+}
+
+function clearConclusion() {
+  draftRating.value = null
+  draft.ratingSide = null
+}
 
 watch(
   () => props.visible,
@@ -120,10 +135,29 @@ function save() {
       </view>
       <text class="note-close" @tap="close">关闭</text>
     </view>
-    <view class="note-rate">
-      <text class="note-rate-lab">把握</text>
-      <StarRating v-model="draftRating" size="lg" />
-      <text v-if="draftRating" class="note-rate-clear" @tap="draftRating = null">清除</text>
+    <view class="note-conclude">
+      <view class="note-side">
+        <text class="note-rate-lab">倾向</text>
+        <view class="note-side-ops">
+          <text
+            v-for="op in RATING_SIDE_OPTS"
+            :key="op.id"
+            class="note-side-chip"
+            :class="[op.tone, { on: draft.ratingSide === op.id }]"
+            @tap.stop="pickSide(op.id)"
+          >{{ op.text }}</text>
+        </view>
+      </view>
+      <text class="note-side-hint">{{ sideHint }}</text>
+      <view class="note-rate">
+        <text class="note-rate-lab">把握</text>
+        <StarRating v-model="draftRating" :side="draft.ratingSide" size="lg" />
+        <text
+          v-if="draftRating || draft.ratingSide"
+          class="note-rate-clear"
+          @tap="clearConclusion"
+        >清除</text>
+      </view>
     </view>
     <view class="note-scroll">
       <view v-if="liveSingle" class="factor-sum">
@@ -209,7 +243,7 @@ function save() {
       </view>
     </view>
     <view class="note-footer">
-      <text class="note-count">点选即可，再点取消</text>
+      <text class="note-count">先选倾向，再打把握</text>
       <view class="note-actions">
         <text
           v-if="hasSaved"
@@ -270,19 +304,48 @@ function save() {
   white-space: nowrap;
 }
 .note-close { font-size: 24rpx; color: #0d9488; padding: 4rpx; flex-shrink: 0; }
+.note-conclude {
+  padding: 4rpx 24rpx 12rpx;
+  border-bottom: 1rpx solid #f1f5f9;
+  flex-shrink: 0;
+}
+.note-side {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.note-side-ops { display: flex; flex-wrap: wrap; gap: 8rpx; min-width: 0; }
+.note-side-chip {
+  font-size: 22rpx;
+  line-height: 1.3;
+  padding: 8rpx 14rpx;
+  border-radius: 6rpx;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1rpx solid #e2e8f0;
+  &.on {
+    font-weight: 600;
+    &.upper { color: #fff; background: #dc2626; border-color: #dc2626; }
+    &.lower { color: #fff; background: #059669; border-color: #059669; }
+  }
+}
+.note-side-hint {
+  display: block;
+  margin: 6rpx 0 8rpx 60rpx;
+  font-size: 20rpx;
+  color: #94a3b8;
+}
 .note-rate {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  padding: 4rpx 24rpx 12rpx;
-  border-bottom: 1rpx solid #f1f5f9;
-  flex-shrink: 0;
 }
 .note-rate-lab {
   font-size: 22rpx;
   font-weight: 600;
   color: #475569;
   flex-shrink: 0;
+  min-width: 48rpx;
 }
 .note-rate-clear {
   margin-left: auto;
