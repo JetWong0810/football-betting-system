@@ -309,16 +309,15 @@ async def startup_event():
         import threading
         threading.Thread(target=get_ocr_instance, daemon=True).start()
 
-    # 后台定时比分回填（每10分钟）：已开赛但缺比分的比赛从500.com拉取
+    # 后台定时比分回填（每10分钟）：已开赛但缺比分的比赛从体彩赛果拉取
     import threading as _th
     _th.Thread(target=_score_backfill_loop, daemon=True).start()
 
 
 def _score_backfill_loop():
-    """后台线程：定期检查并回填已结束比赛的比分（从500.com拉取）"""
+    """后台线程：定期检查并回填已结束比赛的比分（体彩赛果 API）"""
     import time as _t
-    from repository import derive_sale_date as _derive_sale
-    from odds500_service import fetch_match_score as _fetch_score, clear_score_cache as _clear_score_cache
+    from score_sporttery import fetch_ft_scores, clear_score_cache as _clear_score_cache
 
     interval = 600  # 10分钟
     logger.info("[比分回填] 后台线程启动")
@@ -326,19 +325,15 @@ def _score_backfill_loop():
         try:
             pending = repo.get_finished_without_score(days=3)
             if pending:
-                _clear_score_cache()  # 清空缓存，确保拿到最新结果
+                _clear_score_cache()
+                dates = [str(m.get("match_date") or "")[:10] for m in pending if m.get("match_date")]
                 updated = 0
-                for m in pending:
-                    sale_date = _derive_sale(m) or m.get("match_date")
-                    match_code = m.get("match_code")
-                    if not sale_date or not match_code:
-                        continue
-                    try:
-                        score = _fetch_score(sale_date, match_code)
-                    except Exception as e:
-                        logger.warning(f"[比分回填] 抓取异常 {m.get('match_id')}: {e}")
-                        continue
-                    if score:
+                if dates:
+                    scores = fetch_ft_scores(min(dates), max(dates))
+                    for m in pending:
+                        score = scores.get(str(m.get("match_id") or "").strip())
+                        if not score:
+                            continue
                         repo.update_match_score(m["match_id"], score[0], score[1])
                         logger.info(f"[比分回填] {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
                         updated += 1
@@ -1727,18 +1722,18 @@ def predict_match_direction(
             mid_o = len(open_handicaps) // 2
             match_info["handicap_open"] = -open_handicaps[mid_o]
 
-    # 比分回填：已结束但DB无比分时，从500.com竞彩列表页抓取并落库
+    # 比分回填：已结束但DB无比分时，从体彩赛果抓取并落库
     import time as _t
     ts = match.get("match_timestamp")
     is_finished = ts and ts < int(_t.time())
     if is_finished and match.get("home_score") is None:
         try:
             from repository import derive_sale_date
-            from odds500_service import fetch_match_score
+            from score_sporttery import fetch_match_score
             sale_date = derive_sale_date(match) or match.get("match_date")
             mcode = match.get("match_code")
             if sale_date and mcode:
-                score = fetch_match_score(sale_date, mcode)
+                score = fetch_match_score(sale_date, mcode, match_id=match_id)
                 if score:
                     match["home_score"], match["away_score"] = score[0], score[1]
                     from database import get_db as _get_db3
@@ -2154,18 +2149,15 @@ def list_match_results(
     if not rows:
         return {"items": [], "date": date}
 
-    # 按需回填缺比分的比赛（从500.com抓取）
+    # 按需回填缺比分的比赛（体彩赛果 API）
     pending = [r for r in rows if r.get("home_score") is None]
     if pending:
         try:
-            from odds500_service import fetch_match_score as _fetch_score
-            from repository import derive_sale_date as _derive_sale
+            from score_sporttery import fetch_ft_scores
+            dates = [str(m.get("match_date") or date)[:10] for m in pending]
+            scores = fetch_ft_scores(min(dates), max(dates)) if dates else {}
             for m in pending:
-                sale_date = _derive_sale(m) or m.get("match_date")
-                mcode = m.get("match_code")
-                if not sale_date or not mcode:
-                    continue
-                score = _fetch_score(sale_date, mcode)
+                score = scores.get(str(m.get("match_id") or "").strip())
                 if score:
                     m["home_score"], m["away_score"] = score[0], score[1]
                     with _get_db() as _conn:
@@ -2414,17 +2406,17 @@ def get_review(match_id: str):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
 
-    # 比分回填：已结束但DB无比分时，从500.com抓取
+    # 比分回填：已结束但DB无比分时，从体彩赛果抓取
     ts = match.get("match_timestamp")
     is_finished = ts and ts < int(_time.time())
     if is_finished and match.get("home_score") is None:
         try:
             from repository import derive_sale_date
-            from odds500_service import fetch_match_score
+            from score_sporttery import fetch_match_score
             sale_date = derive_sale_date(match) or match.get("match_date")
             mcode = match.get("match_code")
             if sale_date and mcode:
-                score = fetch_match_score(sale_date, mcode)
+                score = fetch_match_score(sale_date, mcode, match_id=match_id)
                 if score:
                     match["home_score"], match["away_score"] = score[0], score[1]
                     with _get_db() as _conn:

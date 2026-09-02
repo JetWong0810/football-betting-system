@@ -6,7 +6,7 @@ import httpx
 
 import settings
 from repository import OddsRepository
-from scraper.score_500 import fetch_match_score, clear_cache as clear_score_cache
+from scraper.score_sporttery import clear_cache as clear_score_cache, fetch_ft_scores
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ class SportterySyncService:
         for pool_name, pool_code in settings.POOL_CODES.items():
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
-        # 回填已完赛但缺比分的比赛(最近3天，从500.com抓取)
+        # 回填已完赛但缺比分的比赛(最近3天，体彩赛果 sectionsNo999)
         try:
             self.stats["scores"] = self.backfill_scores(days=3)
         except Exception as e:
@@ -210,7 +210,7 @@ class SportterySyncService:
         return updated
 
     def backfill_scores(self, days: int = 3) -> int:
-        """回填已开赛但缺比分的比赛(数据源: 500.com)。
+        """回填已开赛但缺比分的比赛(数据源: 体彩赛果 API)。
 
         开赛满 2h 的优先抓(大概率已完赛可出分)；有分才写 finished，不按时长盲标。
         """
@@ -224,22 +224,25 @@ class SportterySyncService:
             if (m.get("match_timestamp") or 0) <= now_ts - 2 * 3600
         )
         logger.info(f"待回填比分: {len(pending)} 场(其中开赛≥2h优先 {ripe} 场)")
-        clear_score_cache()  # 每轮重新抓，确保拿到最新结果
+        dates = [str(m.get("match_date") or "")[:10] for m in pending if m.get("match_date")]
+        end = datetime.now(_BJ).date()
+        begin = end - timedelta(days=max(days, 1))
+        begin_s = min(dates + [begin.isoformat()])
+        end_s = max(dates + [end.isoformat()])
+        clear_score_cache()
+        try:
+            scores = fetch_ft_scores(begin_s, end_s)
+        except Exception as e:
+            logger.warning(f"拉取体彩赛果比分失败 {begin_s}~{end_s}: {e}")
+            return 0
         updated = 0
         for m in pending:
-            sale_date = derive_sale_date(m)
-            match_code = m.get("match_code")
-            if not sale_date or not match_code:
+            score = scores.get(str(m.get("match_id") or "").strip())
+            if not score:
                 continue
-            try:
-                score = fetch_match_score(sale_date, match_code)
-            except Exception as e:
-                logger.warning(f"抓取比分异常 {m.get('match_id')}: {e}")
-                continue
-            if score:
-                self.repository.update_match_score(m["match_id"], score[0], score[1])
-                logger.info(f"  回填 {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
-                updated += 1
+            self.repository.update_match_score(m["match_id"], score[0], score[1])
+            logger.info(f"  回填 {m.get('home_team_name')} {score[0]}:{score[1]} {m.get('away_team_name')}")
+            updated += 1
         return updated
 
     def refresh_live_asian_bet365(self, max_workers: int = 4) -> int:

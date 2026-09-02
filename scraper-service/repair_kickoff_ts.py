@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from database import get_db
 from repository import OddsRepository
-from scraper.score_500 import clear_cache, fetch_match_score
+from scraper.score_sporttery import clear_cache, fetch_ft_scores
 from scraper.sporttery_service import beijing_kickoff_ts, derive_sale_date
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -79,14 +79,14 @@ def backfill_scores(dry_run: bool) -> int:
     repo = OddsRepository()
     pending = repo.get_finished_without_score(days=7)
     logger.info("pending without score: %s", len(pending))
+    if not pending:
+        return 0
+    dates = [str(m.get("match_date") or "")[:10] for m in pending if m.get("match_date")]
     clear_cache()
+    scores = fetch_ft_scores(min(dates), max(dates)) if dates else {}
     updated = 0
     for m in pending:
-        sale_date = derive_sale_date(m)
-        code = m.get("match_code")
-        if not sale_date or not code:
-            continue
-        score = fetch_match_score(sale_date, code)
+        score = scores.get(str(m.get("match_id") or "").strip())
         if not score:
             continue
         updated += 1

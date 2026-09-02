@@ -145,8 +145,13 @@ _score_cache: Dict[str, Optional[tuple]] = {}
 
 
 def clear_score_cache() -> None:
-    """清空比分缓存，确保下次 fetch_match_score 重新从 500.com 拉取最新数据"""
+    """清空比分缓存，确保下次 fetch_match_score 重新拉取最新数据"""
     _score_cache.clear()
+    try:
+        from score_sporttery import clear_score_cache as _clear_st
+        _clear_st()
+    except Exception:
+        pass
 
 
 def _load_jczq_list(match_date: str) -> None:
@@ -266,11 +271,19 @@ def get_fid_for_match(match_date: str, match_number: str) -> Optional[str]:
         return None
 
 
-def fetch_match_score(match_date: str, match_number: str) -> Optional[tuple]:
-    """获取比赛最终比分 (home_score, away_score)，未结束或无数据返回 None
+def fetch_match_score(match_date: str, match_number: str, match_id: Optional[str] = None) -> Optional[tuple]:
+    """获取比赛最终比分 (home_score, away_score)，未结束或无数据返回 None。
 
-    竞彩期号日期和比赛开赛日期可能差1天，找不到时自动尝试前后一天。
+    优先体彩赛果 API；500.com 列表页仅作兜底（当前会被乐盾拦截）。
     """
+    try:
+        from score_sporttery import fetch_match_score as _st_score
+        got = _st_score(match_date, match_number, match_id=match_id)
+        if got:
+            return got
+    except Exception as e:
+        logger.warning(f"体彩赛果比分失败: {e}")
+
     cache_key = f"{match_date}:{match_number}"
     if cache_key in _score_cache:
         return _score_cache[cache_key]
