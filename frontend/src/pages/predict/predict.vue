@@ -365,96 +365,14 @@
       </scroll-view>
     </view>
 
-    <!-- 历史同赔详情弹窗 -->
-    <view class="similar-mask" v-if="showSimilarModal" @tap="closeSimilarModal"></view>
-    <view class="similar-modal" :class="{ show: showSimilarModal }">
-      <view class="similar-header">
-        <view class="similar-title-wrap">
-          <text class="similar-title">历史同赔详情</text>
-          <text
-            v-if="isJapanMatch"
-            class="jp-toggle"
-            :class="{ on: similarJapanOnly, loading: similarModeLoading }"
-            @tap.stop="toggleJapanOnly"
-          >仅日本</text>
-          <text
-            v-else-if="isSameLeagueMatch"
-            class="jp-toggle"
-            :class="{ on: similarLeagueOnly, loading: similarModeLoading }"
-            @tap.stop="toggleLeagueOnly"
-          >同赛事</text>
-        </view>
-        <text class="similar-close" @tap="closeSimilarModal">关闭</text>
-      </view>
-      <view v-if="similarJapanOnly" class="jp-hint">
-        <text>仅日职/日乙/杯赛 · 低赔±0.05 · 高赔±0.15</text>
-      </view>
-      <view v-else-if="similarLeagueOnly" class="jp-hint">
-        <text>仅{{ selectedMatch?.league || '同名赛事' }} · 低赔±0.05 · 高赔±0.15</text>
-      </view>
-      <view v-if="similarStats.total > 0" class="similar-stats">
-        <view class="stats-row">
-          <text class="stats-label">胜平负</text>
-          <text class="stats-item r-win">主胜 {{ similarStats.win }}({{ similarStats.winPct }}%)</text>
-          <text class="stats-item r-draw">平 {{ similarStats.draw }}({{ similarStats.drawPct }}%)</text>
-          <text class="stats-item r-loss">客胜 {{ similarStats.loss }}({{ similarStats.lossPct }}%)</text>
-          <text class="stats-n">{{ similarStats.total }}场</text>
-        </view>
-        <view class="stats-row">
-          <text class="stats-label">盘路</text>
-          <template v-if="similarStats.ahTotal > 0">
-            <text class="stats-item ah-upper">上盘 {{ similarStats.upper }}({{ similarStats.upperPct }}%){{ similarStats.halfUp ? ` 含半${similarStats.halfUp}` : '' }}</text>
-            <text class="stats-item ah-push">走水 {{ similarStats.push }}({{ similarStats.pushPct }}%)</text>
-            <text class="stats-item ah-lower">下盘 {{ similarStats.lower }}({{ similarStats.lowerPct }}%){{ similarStats.halfDown ? ` 含半${similarStats.halfDown}` : '' }}</text>
-            <text class="stats-n">{{ similarStats.ahTotal }}场</text>
-          </template>
-          <text v-else class="stats-empty">无亚盘数据</text>
-        </view>
-      </view>
-      <scroll-view class="similar-body" scroll-y scroll-x>
-        <view class="similar-table">
-          <view class="similar-row similar-thead">
-            <text class="col-sim">相似度</text>
-            <text class="col-team">主队</text>
-            <text class="col-score">比分</text>
-            <text class="col-team">客队</text>
-            <text class="col-result">结果</text>
-            <text class="col-ah-result">盘路</text>
-            <text class="col-ah">亚初</text>
-            <text class="col-ah">亚终</text>
-            <text class="col-odds">初盘</text>
-            <text class="col-odds">终盘</text>
-            <text class="col-date">日期</text>
-            <text class="col-league">联赛</text>
-          </view>
-          <view
-            class="similar-row"
-            :class="{ 'is-single': m.isSingle }"
-            v-for="(m, mi) in similarMatches"
-            :key="mi"
-          >
-            <view class="col-sim">
-              <text class="sim-num">{{ m.similarity }}%</text>
-              <text class="single-mark" :class="{ on: m.isSingle }">{{ m.isSingle ? '单' : '' }}</text>
-            </view>
-            <text class="col-team">{{ m.homeTeam }}</text>
-            <text class="col-score">{{ m.score }}</text>
-            <text class="col-team">{{ m.awayTeam }}</text>
-            <text class="col-result" :class="resultClass(m.result)">{{ m.result }}</text>
-            <text class="col-ah-result" :class="ahResultClass(m.ahResult)">{{ m.ahResult || '-' }}</text>
-            <text class="col-ah">{{ m.handicapOpen || '-' }}</text>
-            <text class="col-ah">{{ m.handicapClose || m.handicap || '-' }}</text>
-            <text class="col-odds">{{ m.openOdds }}</text>
-            <text class="col-odds">{{ m.closeOdds }}</text>
-            <text class="col-date">{{ m.date }}</text>
-            <text class="col-league" :class="{ 'league-same': m.sameLeague }">{{ m.league }}</text>
-          </view>
-          <view v-if="similarMatches.length === 0" class="similar-empty">
-            <text>暂无历史同赔数据</text>
-          </view>
-        </view>
-      </scroll-view>
-    </view>
+    <SimilarOddsModal
+      :visible="showSimilarModal"
+      :match-id="selectedMatch?.matchId || ''"
+      :league="selectedMatch?.league || ''"
+      :initial-matches="similarDefaultMatches"
+      :initial-ref-score="similarDefaultRef"
+      @close="closeSimilarModal"
+    />
 
     <!-- 日期选择弹窗 -->
     <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
@@ -500,9 +418,9 @@ import { useConfigStore } from '@/stores/configStore'
 import { useBetStore } from '@/stores/betStore'
 import { calcRecommendedStake, calcTieredStakes, getStrategyPreset, checkRiskStatus } from '@/utils/strategyEngine'
 import { loadCalibration } from '@/utils/calibration'
-import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
+import { filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
-import { isSameLeagueEligible } from '@/utils/sameLeague'
+import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
 import H2hRefCard from '@/components/H2hRefCard.vue'
@@ -644,95 +562,21 @@ const showH2hModal = ref(false)
 const prediction = ref({ direction: '', confidence: 0, overallReverse: false, consensusDir: null })
 const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
-const similarMatches = ref([])
 const similarDefaultMatches = ref([])
-const similarJapanOnly = ref(false)
-const similarLeagueOnly = ref(false)
-const similarModeLoading = ref(false)
-const similarStats = computed(() => calcSimilarStats(similarMatches.value))
-const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
-const isSameLeagueMatch = computed(() => isSameLeagueEligible(selectedMatch.value?.league))
+const similarDefaultRef = ref(null)
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
+const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
 
 function applyPredictSimilarList(list) {
   return filterSimilarWithAh(list || [])
 }
 
 const openSimilarModal = () => {
-  similarJapanOnly.value = false
-  similarLeagueOnly.value = false
-  similarModeLoading.value = false
-  // 打开时用当前 F6 默认结果(已剔缺亚盘)
-  if (similarDefaultMatches.value.length) {
-    similarMatches.value = applyPredictSimilarList(similarDefaultMatches.value)
-  }
   showSimilarModal.value = true
 }
 const closeSimilarModal = () => {
   showSimilarModal.value = false
-  similarJapanOnly.value = false
-  similarLeagueOnly.value = false
-  similarModeLoading.value = false
-}
-function _restoreDefaultSimilarPredict() {
-  similarJapanOnly.value = false
-  similarLeagueOnly.value = false
-  similarMatches.value = applyPredictSimilarList(similarDefaultMatches.value)
-}
-async function toggleJapanOnly() {
-  if (!isJapanMatch.value || similarModeLoading.value) return
-  if (similarJapanOnly.value) {
-    _restoreDefaultSimilarPredict()
-    return
-  }
-  const mid = selectedMatch.value?.matchId
-  if (!mid) {
-    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
-    return
-  }
-  similarModeLoading.value = true
-  try {
-    const data = await request({
-      url: `/api/predict/${encodeURIComponent(mid)}/similar-odds`,
-      method: 'GET',
-      data: { japan_only: true },
-    })
-    similarLeagueOnly.value = false
-    similarJapanOnly.value = true
-    similarMatches.value = applyPredictSimilarList(data?.matches || [])
-  } catch (e) {
-    uni.showToast({ title: e?.message || '仅日本匹配失败', icon: 'none' })
-  } finally {
-    similarModeLoading.value = false
-  }
-}
-async function toggleLeagueOnly() {
-  if (!isSameLeagueMatch.value || similarModeLoading.value) return
-  if (similarLeagueOnly.value) {
-    _restoreDefaultSimilarPredict()
-    return
-  }
-  const mid = selectedMatch.value?.matchId
-  if (!mid) {
-    uni.showToast({ title: '比赛ID缺失', icon: 'none' })
-    return
-  }
-  similarModeLoading.value = true
-  try {
-    const data = await request({
-      url: `/api/predict/${encodeURIComponent(mid)}/similar-odds`,
-      method: 'GET',
-      data: { league_only: true },
-    })
-    similarJapanOnly.value = false
-    similarLeagueOnly.value = true
-    similarMatches.value = applyPredictSimilarList(data?.matches || [])
-  } catch (e) {
-    uni.showToast({ title: e?.message || '同赛事匹配失败', icon: 'none' })
-  } finally {
-    similarModeLoading.value = false
-  }
 }
 
 const allMatches = ref([])
@@ -1246,9 +1090,7 @@ async function startAnalysis() {
       analysisSteps.value[i].matches = factor.matches || []
       if (factor.name === '历史同赔') {
         similarDefaultMatches.value = applyPredictSimilarList(factor.matches || [])
-        similarMatches.value = similarDefaultMatches.value
-        similarJapanOnly.value = false
-        similarLeagueOnly.value = false
+        similarDefaultRef.value = factor.refScore != null ? factor.refScore : null
       }
       analysisSteps.value[i].status = 'done'
     }
@@ -1340,20 +1182,6 @@ function formatHandicap(v) {
   if (v === undefined || v === null) return ''
   const num = Number(v)
   return num > 0 ? `+${num}` : `${num}`
-}
-
-function resultClass(result) {
-  if (result === '主胜') return 'r-win'
-  if (result === '平局') return 'r-draw'
-  if (result === '客胜') return 'r-loss'
-  return ''
-}
-
-function ahResultClass(ah) {
-  if (ah === '上盘' || ah === '半上') return 'ah-upper'
-  if (ah === '下盘' || ah === '半下') return 'ah-lower'
-  if (ah === '走水') return 'ah-push'
-  return ''
 }
 
 function pickLeagueColor(league) {
@@ -1846,44 +1674,8 @@ onShow(async () => {
   color: #0d9488;
 }
 
-/* 历史同赔详情弹窗 */
+/* 因子说明遮罩(与历史同赔弹窗共用层级) */
 .similar-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 200; }
-.similar-modal {
-  position: fixed;
-  top: 50%;
-  left: 3vw;
-  right: 3vw;
-  bottom: auto;
-  max-height: 88vh;
-  height: auto;
-  background: #fff;
-  border-radius: 16rpx;
-  z-index: 201;
-  display: flex;
-  flex-direction: column;
-  transform: translateY(-50%) scale(0.9);
-  opacity: 0;
-  transition: transform 0.25s, opacity 0.25s;
-  pointer-events: none;
-
-  &.show { transform: translateY(-50%) scale(1); opacity: 1; pointer-events: auto; }
-}
-.similar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20rpx 24rpx;
-  border-bottom: 1rpx solid #e2e8f0;
-  flex-shrink: 0;
-}
-.similar-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.similar-title { font-size: 28rpx; font-weight: 600; color: #1e293b; }
 
 .factor-help-modal {
   position: fixed;
@@ -1984,124 +1776,6 @@ onShow(async () => {
   line-height: 1.55;
   & + & { margin-top: 6rpx; }
 }
-.jp-toggle {
-  font-size: 22rpx;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1rpx solid #cbd5e1;
-  border-radius: 6rpx;
-  padding: 4rpx 12rpx;
-  line-height: 1.4;
-  &.on { color: #fff; background: #0f766e; border-color: #0f766e; }
-  &.loading { opacity: 0.55; }
-}
-.jp-hint {
-  flex-shrink: 0;
-  padding: 8rpx 24rpx;
-  background: #f0fdfa;
-  border-bottom: 1rpx solid #ccfbf1;
-  font-size: 20rpx;
-  color: #0f766e;
-}
-.similar-close { font-size: 24rpx; color: #0d9488; padding: 8rpx 4rpx; }
-.similar-stats {
-  flex-shrink: 0;
-  padding: 12rpx 24rpx;
-  background: #f8fafb;
-  border-bottom: 1rpx solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-.stats-row {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8rpx 16rpx;
-  font-size: 22rpx;
-  font-variant-numeric: tabular-nums;
-}
-.stats-label {
-  width: 72rpx;
-  flex-shrink: 0;
-  color: #64748b;
-  font-weight: 600;
-  font-size: 20rpx;
-}
-.stats-item { font-weight: 500; }
-.stats-n { color: #94a3b8; font-size: 20rpx; margin-left: 4rpx; }
-.stats-empty { color: #94a3b8; font-size: 20rpx; }
-.similar-body {
-  flex: 0 1 auto;
-  overflow: auto;
-  min-height: 0;
-  max-height: calc(88vh - 200rpx);
-}
-.similar-table { min-width: 1430rpx; padding: 0 16rpx 24rpx; }
-.similar-row {
-  display: flex;
-  align-items: center;
-  padding: 14rpx 0;
-  border-bottom: 1rpx solid #f1f5f9;
-  gap: 4rpx;
-  &.is-single { background: #fff7f7; }
-}
-.similar-thead {
-  position: sticky;
-  top: 0;
-  background: #f8fafb;
-  font-weight: 600;
-  color: #64748b;
-  font-size: 20rpx;
-  z-index: 1;
-}
-.similar-row:not(.similar-thead) { font-size: 20rpx; color: #334155; }
-.similar-empty { text-align: center; padding: 60rpx; color: #94a3b8; font-size: 24rpx; }
-
-.col-sim {
-  width: 120rpx;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4rpx;
-}
-.sim-num {
-  width: 72rpx;
-  text-align: right;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-.single-mark {
-  width: 28rpx;
-  height: 28rpx;
-  flex-shrink: 0;
-  font-size: 16rpx;
-  font-weight: 700;
-  color: transparent;
-  text-align: center;
-  border: 1rpx solid transparent;
-  border-radius: 6rpx;
-  line-height: 26rpx;
-  &.on { color: #dc2626; border-color: #dc2626; }
-}
-.col-date { width: 110rpx; text-align: center; }
-.col-league { width: 90rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.col-league.league-same { color: #2979ff; font-weight: 600; }
-.col-team { width: 130rpx; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.col-score { width: 70rpx; text-align: center; font-weight: 600; }
-.col-result { width: 70rpx; text-align: center; font-weight: 500; }
-.col-odds { width: 170rpx; text-align: center; }
-.col-ah { width: 72rpx; text-align: center; font-variant-numeric: tabular-nums; }
-.col-handicap { width: 70rpx; text-align: center; }
-.col-ah-result { width: 70rpx; text-align: center; font-weight: 500; }
-
-.r-win { color: #dc2626; }
-.r-draw { color: #d97706; }
-.r-loss { color: #059669; }
-.ah-upper { color: #dc2626; }
-.ah-lower { color: #059669; }
-.ah-push { color: #64748b; }
 
 /* ===== 分析结果 ===== */
 .analysis-result {

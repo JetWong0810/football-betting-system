@@ -2034,16 +2034,23 @@ def predict_similar_odds_detail(
     match_id: str,
     japan_only: bool = Query(False, description="仅日本赛事+放宽容差(弹窗开关)"),
     league_only: bool = Query(False, description="仅本场同名赛事+放宽容差(弹窗「同赛事」)"),
+    snapshot: Optional[str] = Query(
+        None, description="赔率轴快照: latest 或 history change_time(ISO); 初盘固定、终盘用该帧",
+    ),
 ):
-    """单场历史同赔详情(供弹窗「仅日本」/「同赛事」切换重查)。
+    """单场历史同赔详情(供弹窗「仅日本」/「同赛事」/赔率轴切换重查)。
 
     默认口径与 F6 一致;
     japan_only: 硬过滤日职/日乙/杯赛 + 低赔±0.05/高赔±0.15;
     league_only: 硬过滤本场 league_name 完全同名 + 同上容差(不含日本; 与 japan_only 互斥)。
+    snapshot: 非 latest 时用该帧作终盘(初盘仍为真实开盘), 不把本场亚终并入相似度。
     不影响批量分析/预测里的默认 F6 结果。
     """
     from predict_service import calc_factor_jczq_similar_odds
-    from jczq_similar_odds import get_match_spf_odds, is_japan_league, is_same_league_eligible
+    from jczq_similar_odds import (
+        get_match_spf_odds, is_japan_league, is_same_league_eligible,
+        list_spf_snapshots, apply_spf_snapshot,
+    )
     from database import get_db
 
     match = repo.get_match(match_id)
@@ -2058,21 +2065,34 @@ def predict_similar_odds_detail(
     if league_only and not is_same_league_eligible(league):
         raise HTTPException(status_code=400, detail="同赛事模式仅适用于五大联赛及二级、葡超/荷甲等指定赛事")
 
+    snapshots = list_spf_snapshots(match_id)
+    snap_id = (snapshot or "latest").strip() or "latest"
+    if snap_id != "latest" and not any(s.get("id") == snap_id for s in snapshots):
+        raise HTTPException(status_code=400, detail="无效的赔率快照")
+
+    empty = {
+        "matchId": match_id,
+        "league": league,
+        "japanOnly": japan_only,
+        "leagueOnly": league_only,
+        "isJapanLeague": is_japan_league(league),
+        "isSameLeagueEligible": is_same_league_eligible(league),
+        "snapshot": snap_id,
+        "snapshots": snapshots,
+        "isHistoricalSnapshot": snap_id != "latest",
+        "matches": [],
+        "refScore": 0,
+        "reason": "无竞彩spf赔率，无法匹配历史同赔",
+    }
+
     spf = get_match_spf_odds(match_id)
     if not spf:
-        return {
-            "matchId": match_id,
-            "league": league,
-            "japanOnly": japan_only,
-            "leagueOnly": league_only,
-            "isJapanLeague": is_japan_league(league),
-            "isSameLeagueEligible": is_same_league_eligible(league),
-            "matches": [],
-            "refScore": 0,
-            "reason": "无竞彩spf赔率，无法匹配历史同赔",
-        }
+        return empty
+
+    spf, is_hist = apply_spf_snapshot(spf, snapshots, snap_id)
 
     # 亚盘初/终: 仅 Bet365 系 jczq_ah_history, 不用澳门/matches 兜底
+    # 历史帧不把「当前亚终」并入相似度
     ah_open = ah_close = None
     try:
         with get_db() as conn:
@@ -2086,7 +2106,7 @@ def predict_similar_odds_detail(
             if ah:
                 if ah.get("open_handicap") is not None:
                     ah_open = float(ah["open_handicap"])
-                if ah.get("close_handicap") is not None:
+                if not is_hist and ah.get("close_handicap") is not None:
                     ah_close = float(ah["close_handicap"])
     except Exception as e:
         logger.warning(f"similar-odds 读亚盘失败 {match_id}: {e}")
@@ -2103,6 +2123,9 @@ def predict_similar_odds_detail(
         "leagueOnly": league_only,
         "isJapanLeague": is_japan_league(league),
         "isSameLeagueEligible": is_same_league_eligible(league),
+        "snapshot": snap_id,
+        "snapshots": snapshots,
+        "isHistoricalSnapshot": is_hist,
         "matches": f6.get("matches") or [],
         "refScore": f6.get("refScore"),
         "refBreakdown": f6.get("refBreakdown"),

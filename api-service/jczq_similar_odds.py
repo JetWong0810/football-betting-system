@@ -361,16 +361,43 @@ def _calc_stats(matches: List[Dict]) -> Dict:
     }
 
 
-def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict]:
-    """取某场竞彩比赛指定口径的初盘/终盘, 组装成 jczq_company dict。
+def _fmt_change_id(ct) -> str:
+    if ct is None:
+        return ""
+    if hasattr(ct, "strftime"):
+        return ct.strftime("%Y-%m-%dT%H:%M:%S")
+    return str(ct).replace(" ", "T")[:19]
 
-    odds_type: 'nspf'(让球胜平负) 或 'spf'(胜平负, 同世界杯口径)。
-    initial = jczq_odds_history 最早变动行。
-    current 优先 odds_win_draw_lose 即时快照(与赛事列表同口径: spf←had / nspf←hhad),
-    避免 scraper 已更新列表但 history 因变动门槛未 append 导致同赔仍用旧终盘;
-    无即时快照则回退 history 最晚行。
-    无 history 但有即时快照时 initial==current(等同 live 补种, 配合 F6 无变动降级)。
-    """
+
+def _fmt_chip_time(ct) -> str:
+    if ct is None:
+        return ""
+    if hasattr(ct, "strftime"):
+        return ct.strftime("%m-%d %H:%M")
+    s = str(ct).replace("T", " ")
+    return s[5:16] if len(s) >= 16 else s
+
+
+def _odds_close(a: Dict, b: Dict, eps: float = 0.005) -> bool:
+    try:
+        return (
+            abs(float(a["win"]) - float(b["win"])) < eps
+            and abs(float(a["draw"]) - float(b["draw"])) < eps
+            and abs(float(a["lose"]) - float(b["lose"])) < eps
+        )
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _low_value(win: float, draw: float, lose: float) -> Optional[float]:
+    try:
+        return min(float(win), float(draw), float(lose))
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_odds_series(match_id: str, odds_type: str = "spf"):
+    """history 行 + 即时 had/hhad。"""
     live_type = {"spf": "had", "nspf": "hhad"}.get(odds_type)
     hist_sql = """
         SELECT odds_win, odds_draw, odds_loss, change_time
@@ -406,6 +433,20 @@ def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict
             lw = ld = ll = 0.0
         if lw > 0 or ld > 0 or ll > 0:
             live_current = {"win": lw, "draw": ld, "lose": ll}
+    return list(rows or []), live_current
+
+
+def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict]:
+    """取某场竞彩比赛指定口径的初盘/终盘, 组装成 jczq_company dict。
+
+    odds_type: 'nspf'(让球胜平负) 或 'spf'(胜平负, 同世界杯口径)。
+    initial = jczq_odds_history 最早变动行。
+    current 优先 odds_win_draw_lose 即时快照(与赛事列表同口径: spf←had / nspf←hhad),
+    避免 scraper 已更新列表但 history 因变动门槛未 append 导致同赔仍用旧终盘;
+    无即时快照则回退 history 最晚行。
+    无 history 但有即时快照时 initial==current(等同 live 补种, 配合 F6 无变动降级)。
+    """
+    rows, live_current = _load_odds_series(match_id, odds_type)
 
     if rows:
         first, last = rows[0], rows[-1]
@@ -424,6 +465,90 @@ def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict
     if live_current:
         return {"initial": dict(live_current), "current": dict(live_current)}
     return None
+
+
+def list_spf_snapshots(match_id: str) -> List[Dict]:
+    """本场 spf 赔率轴: 初盘 + 每次变动 + 最新(即时 had, 若与末条不同则多一格)。
+
+    id=latest 表示用即时终盘; 其余 id 为 change_time(ISO)。
+    不足 2 格时前端不展示切换条。
+    """
+    rows, live_current = _load_odds_series(match_id, "spf")
+    snaps: List[Dict] = []
+    prev_low = None
+    for i, row in enumerate(rows):
+        try:
+            win = float(row["odds_win"])
+            draw = float(row["odds_draw"])
+            lose = float(row["odds_loss"])
+        except (TypeError, ValueError):
+            continue
+        low = _low_value(win, draw, lose)
+        delta = None
+        if prev_low is not None and low is not None:
+            delta = round(low - prev_low, 3)
+        snaps.append({
+            "id": _fmt_change_id(row.get("change_time")),
+            "kind": "open" if i == 0 else "tick",
+            "label": "初盘" if i == 0 else _fmt_chip_time(row.get("change_time")),
+            "time": _fmt_change_id(row.get("change_time")),
+            "win": win,
+            "draw": draw,
+            "lose": lose,
+            "lowDelta": delta,
+        })
+        prev_low = low
+
+    if live_current:
+        live_pack = {
+            "id": "latest",
+            "kind": "latest",
+            "label": "最新",
+            "time": None,
+            "win": live_current["win"],
+            "draw": live_current["draw"],
+            "lose": live_current["lose"],
+            "lowDelta": None,
+        }
+        if snaps and _odds_close(live_current, snaps[-1]):
+            snaps[-1]["id"] = "latest"
+            snaps[-1]["kind"] = "latest"
+            if len(snaps) > 1:
+                snaps[-1]["label"] = "最新"
+        else:
+            if snaps:
+                last = snaps[-1]
+                live_pack["lowDelta"] = round(
+                    (_low_value(live_current["win"], live_current["draw"], live_current["lose"]) or 0)
+                    - (_low_value(last["win"], last["draw"], last["lose"]) or 0),
+                    3,
+                )
+            snaps.append(live_pack)
+    elif snaps:
+        snaps[-1]["id"] = "latest"
+        snaps[-1]["kind"] = "latest"
+        if len(snaps) > 1:
+            snaps[-1]["label"] = "最新"
+
+    return snaps
+
+
+def apply_spf_snapshot(spf: Dict, snapshots: List[Dict], snapshot_id: Optional[str]) -> Tuple[Dict, bool]:
+    """用快照替换 spf['current']; 返回 (spf, is_historical)。
+
+    latest/空 = 不改。未知 id 返回原 spf 且 is_historical=False(调用方应 400)。
+    """
+    sid = (snapshot_id or "latest").strip()
+    if not sid or sid == "latest":
+        return spf, False
+    hit = next((s for s in snapshots if s.get("id") == sid), None)
+    if not hit:
+        return spf, False
+    out = {
+        "initial": dict(spf.get("initial") or {}),
+        "current": {"win": hit["win"], "draw": hit["draw"], "lose": hit["lose"]},
+    }
+    return out, True
 
 
 def get_match_nspf_odds(match_id: str) -> Optional[Dict]:
