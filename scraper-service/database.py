@@ -38,11 +38,12 @@ def _init_mysql_db() -> None:
 
 
 def _ensure_match_columns(cursor) -> None:
-    """确保 matches 表有 home_score/away_score/fid_500/sporttery_match_id 字段（兼容旧库）"""
+    """确保 matches 表有比分/fid_500/fid_zgzcw/sporttery_match_id 字段（兼容旧库）"""
     columns = {
         "home_score": "TINYINT DEFAULT NULL COMMENT '主队比分'",
         "away_score": "TINYINT DEFAULT NULL COMMENT '客队比分'",
         "fid_500": "VARCHAR(20) DEFAULT NULL COMMENT '500.com fixture id'",
+        "fid_zgzcw": "VARCHAR(20) DEFAULT NULL COMMENT '足彩网 fenxi matchid'",
         "sporttery_match_id": "VARCHAR(32) DEFAULT NULL COMMENT '体彩官网 matchId'",
     }
     for col, definition in columns.items():

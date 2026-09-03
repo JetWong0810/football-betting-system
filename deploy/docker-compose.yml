@@ -57,6 +57,7 @@ services:
       dockerfile: deploy/scraper-service/Dockerfile
     container_name: football-scraper
     restart: always
+    shm_size: 1gb
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"

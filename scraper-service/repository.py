@@ -536,7 +536,8 @@ class OddsRepository:
     def list_live_for_asian(self) -> List[Dict[str, Any]]:
         """在售/未出赛果体彩场(含进行中无比分, 开赛超72h脏数据排除)。"""
         sql = """
-            SELECT match_id, match_code, match_number, match_date, match_timestamp, fid_500
+            SELECT match_id, match_code, match_number, match_date, match_timestamp,
+                   fid_500, fid_zgzcw, asian_handicap, asian_home_odds, asian_away_odds
             FROM matches
             WHERE match_id NOT LIKE 'jczq%%'
               AND home_score IS NULL
@@ -548,10 +549,33 @@ class OddsRepository:
             cur = _execute(conn, sql)
             return list(cur.fetchall())
 
-    def upsert_asian_bet365(
+    def save_fid_zgzcw(
         self,
         match_id: str,
         fid: str,
+        home_rank: Optional[str] = None,
+        away_rank: Optional[str] = None,
+    ) -> None:
+        """写入足彩网 matchid, 不碰 fid_500。排名有值才覆盖。"""
+        if not match_id or not fid:
+            return
+        sets = ["fid_zgzcw=%s"]
+        params: list = [str(fid)]
+        if home_rank:
+            sets.append("home_team_rank=%s")
+            params.append(str(home_rank))
+        if away_rank:
+            sets.append("away_team_rank=%s")
+            params.append(str(away_rank))
+        sets.append("updated_at=CURRENT_TIMESTAMP")
+        params.append(match_id)
+        with get_db() as conn:
+            _execute(conn, f"UPDATE matches SET {', '.join(sets)} WHERE match_id=%s", tuple(params))
+
+    def upsert_asian_bet365(
+        self,
+        match_id: str,
+        fid: Optional[str] = None,
         *,
         raw_close_hc: float,
         raw_open_hc: Optional[float],
@@ -559,32 +583,56 @@ class OddsRepository:
         close_away: Optional[float],
         open_home: Optional[float],
         open_away: Optional[float],
+        fid_zgzcw: Optional[str] = None,
+        overwrite_open: bool = False,
     ) -> None:
         """写入 matches 亚盘快照 + jczq_ah_history(Bet365)。
 
-        raw_* 为 500.com 原值(正=主让); history 存标准负=主让。
+        raw_* 为 500.com / 足彩网原值(正=主让); history 存标准负=主让。
         终盘每次覆盖; 初盘 COALESCE 保留首抓。
+        fid 只写入 fid_500; 足彩网 id 走 fid_zgzcw, 禁止混用。
         """
         open_std = -float(raw_open_hc) if raw_open_hc is not None else None
         close_std = -float(raw_close_hc)
+        cols = [
+            "asian_handicap=%s",
+            "asian_home_odds=%s",
+            "asian_away_odds=%s",
+            "asian_company=%s",
+        ]
+        params = [raw_close_hc, close_home, close_away, "Bet365"]
+        if fid:
+            cols.append("fid_500=%s")
+            params.append(str(fid))
+        if fid_zgzcw:
+            cols.append("fid_zgzcw=%s")
+            params.append(str(fid_zgzcw))
+        cols.append("updated_at=CURRENT_TIMESTAMP")
+        params.append(match_id)
         with get_db() as conn:
             _execute(
                 conn,
-                "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
-                "asian_away_odds=%s, asian_company=%s, fid_500=%s, "
-                "updated_at=CURRENT_TIMESTAMP WHERE match_id=%s",
-                (raw_close_hc, close_home, close_away, "Bet365", fid, match_id),
+                f"UPDATE matches SET {', '.join(cols)} WHERE match_id=%s",
+                tuple(params),
+            )
+            open_sql = (
+                "open_handicap=VALUES(open_handicap), "
+                "open_home_odds=VALUES(open_home_odds), "
+                "open_away_odds=VALUES(open_away_odds), "
+                if overwrite_open
+                else
+                "open_handicap=COALESCE(open_handicap, VALUES(open_handicap)), "
+                "open_home_odds=COALESCE(open_home_odds, VALUES(open_home_odds)), "
+                "open_away_odds=COALESCE(open_away_odds, VALUES(open_away_odds)), "
             )
             _execute(
                 conn,
-                """INSERT INTO jczq_ah_history
+                f"""INSERT INTO jczq_ah_history
                    (match_id, open_handicap, open_home_odds, open_away_odds,
                     close_handicap, close_home_odds, close_away_odds, company)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                    ON DUPLICATE KEY UPDATE
-                     open_handicap=COALESCE(open_handicap, VALUES(open_handicap)),
-                     open_home_odds=COALESCE(open_home_odds, VALUES(open_home_odds)),
-                     open_away_odds=COALESCE(open_away_odds, VALUES(open_away_odds)),
+                     {open_sql}
                      close_handicap=VALUES(close_handicap),
                      close_home_odds=VALUES(close_home_odds),
                      close_away_odds=VALUES(close_away_odds),

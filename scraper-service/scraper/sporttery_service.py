@@ -64,6 +64,27 @@ def derive_sale_date(match: Dict) -> Optional[str]:
     return match.get("match_date")
 
 
+def _asian_close_unchanged(match: Dict, line: Dict) -> bool:
+    """库内终盘与新抓水位都在 0.005 内则跳过写入。"""
+    try:
+        old_hc = match.get("asian_handicap")
+        old_h = match.get("asian_home_odds")
+        if old_hc is None or old_h is None or line.get("close_home") is None:
+            return False
+        if abs(float(old_hc) - float(line["close_hc"])) > 0.005:
+            return False
+        if abs(float(old_h) - float(line["close_home"])) > 0.005:
+            return False
+        old_a = match.get("asian_away_odds")
+        new_a = line.get("close_away")
+        if old_a is not None and new_a is not None:
+            if abs(float(old_a) - float(new_a)) > 0.005:
+                return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def parse_decimal(value: Optional[str]) -> Optional[float]:
     if value in (None, "", "-", "null"):
         return None
@@ -245,63 +266,77 @@ class SportterySyncService:
             updated += 1
         return updated
 
-    def refresh_live_asian_bet365(self, max_workers: int = 4) -> int:
-        """在售场强制刷新 Bet365 亚盘终盘(每轮 scraper 调用)。
+    def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
+        """在售场刷新 Bet365 亚盘终盘。优先足彩网 fenxi /ypdb, 500 作可选兜底。
 
         仅 Bet365; 写入 jczq_ah_history(终盘覆盖, 初盘保留首抓) + matches.asian_*。
+        Playwright 串行, 二次验证中止本轮。max_workers 保留签名, 足彩网路径忽略。
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from scraper.asian_bet365 import clear_fid_cache, fetch_bet365_line, get_fid
+        from scraper.zgzcw_fenxi import FenxiSession
+        from scraper.zgzcw_live import fetch_jczq_live_map
 
         live = self.repository.list_live_for_asian()
         if not live:
             return 0
-        clear_fid_cache()
-        logger.info(f"在售亚盘刷新: {len(live)} 场(Bet365)")
+        logger.info(f"在售亚盘刷新: {len(live)} 场")
 
-        def _one(m: Dict) -> Optional[str]:
-            mid = m.get("match_id")
-            sale_date = derive_sale_date(m) or m.get("match_date")
-            mcode = m.get("match_code")
-            if not mid or not sale_date or not mcode:
-                return None
-            if hasattr(sale_date, "strftime"):
-                sale_date = sale_date.strftime("%Y-%m-%d")
-            else:
-                sale_date = str(sale_date)[:10]
-            fid = m.get("fid_500") or get_fid(sale_date, mcode)
-            if not fid:
-                return None
-            line = fetch_bet365_line(fid)
-            if not line or line.get("close_hc") is None:
-                return None
+        code_map = fetch_jczq_live_map()
+        for m in live:
+            info = code_map.get(m.get("match_code") or "")
+            if not info or not info.get("fid"):
+                continue
             try:
-                self.repository.upsert_asian_bet365(
-                    mid,
-                    str(fid),
-                    raw_close_hc=float(line["close_hc"]),
-                    raw_open_hc=line.get("open_hc"),
-                    close_home=line.get("close_home"),
-                    close_away=line.get("close_away"),
-                    open_home=line.get("open_home"),
-                    open_away=line.get("open_away"),
+                self.repository.save_fid_zgzcw(
+                    m["match_id"],
+                    info["fid"],
+                    home_rank=info.get("home_rank"),
+                    away_rank=info.get("away_rank"),
                 )
             except Exception as e:
-                logger.warning(f"亚盘落库失败 {mid}: {e}")
-                return None
-            return mid
+                logger.warning(f"写 fid_zgzcw 失败 {m.get('match_id')}: {e}")
+                continue
+            m["fid_zgzcw"] = info["fid"]
+
+        targets = [m for m in live if m.get("fid_zgzcw")]
+        if not targets:
+            logger.warning("zgzcw 未映射到在售场, 本轮亚盘跳过")
+            return 0
 
         updated = 0
-        workers = min(max_workers, max(1, len(live)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futs = [pool.submit(_one, m) for m in live]
-            for fut in as_completed(futs):
+        with FenxiSession() as sess:
+            for m in targets:
+                if sess.aborted:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
+                line = sess.fetch_ypdb_bet365(fid)
+                if not line or line.get("close_hc") is None:
+                    continue
+                if not overwrite_open and _asian_close_unchanged(m, line):
+                    sess.skipped += 1
+                    continue
                 try:
-                    if fut.result():
-                        updated += 1
+                    self.repository.upsert_asian_bet365(
+                        mid,
+                        fid=None,
+                        raw_close_hc=float(line["close_hc"]),
+                        raw_open_hc=line.get("open_hc"),
+                        close_home=line.get("close_home"),
+                        close_away=line.get("close_away"),
+                        open_home=line.get("open_home"),
+                        open_away=line.get("open_away"),
+                        fid_zgzcw=str(fid),
+                        overwrite_open=overwrite_open,
+                    )
                 except Exception as e:
-                    logger.warning(f"亚盘单场失败: {e}")
-        logger.info(f"在售亚盘刷新完成: {updated}/{len(live)}")
+                    logger.warning(f"亚盘落库失败 {mid}: {e}")
+                    continue
+                updated += 1
+                logger.info(
+                    f"  亚盘 {m.get('match_code')} cid={line.get('cid')} "
+                    f"{line.get('open_hc')}→{line.get('close_hc')} {line.get('name')}"
+                )
+        logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
         return updated
 
     # Parsing helpers -----------------------------------------------------

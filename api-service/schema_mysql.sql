@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS matches (
     notice TEXT,
     odds_update_time VARCHAR(50),
     fid_500 VARCHAR(20) DEFAULT NULL COMMENT '500.com fixture id',
+    fid_zgzcw VARCHAR(20) DEFAULT NULL COMMENT '足彩网 fenxi matchid',
     sporttery_match_id VARCHAR(32) DEFAULT NULL COMMENT '体彩官网 matchId',
     home_score TINYINT DEFAULT NULL,
     away_score TINYINT DEFAULT NULL,
