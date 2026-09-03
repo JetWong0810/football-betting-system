@@ -114,6 +114,7 @@ def main():
             exclude_match_id=mid,
             ah_handicap=ah_close,
             ah_open=ah_open,
+            is_single=bool(int(r.get("is_single") or 0) == 1),
         )
         matches = f6.get("matches") or []
         if len(matches) < MIN_SAMPLE:

@@ -30,7 +30,7 @@
       >
         <view class="snap-row">
           <view
-            v-for="s in snapshots"
+            v-for="s in snapshotsDesc"
             :key="s.id"
             class="snap-chip"
             :class="{ on: s.id === snapshotId }"
@@ -150,6 +150,7 @@ let fetchSeq = 0
 
 const isJapan = computed(() => isJapanLeague(props.league))
 const isSameLeague = computed(() => isSameLeagueEligible(props.league))
+const snapshotsDesc = computed(() => snapshots.value.slice().reverse())
 const stats = computed(() => calcSimilarStats(matches.value))
 const isHistorical = computed(() => snapshotId.value !== 'latest')
 const selectedLabel = computed(() => {

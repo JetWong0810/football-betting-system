@@ -3389,13 +3389,15 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                                   ah_handicap: Optional[float] = None,
                                   ah_open: Optional[float] = None,
                                   japan_mode: bool = False,
-                                  same_league_mode: bool = False) -> Dict[str, Any]:
+                                  same_league_mode: bool = False,
+                                  is_single: bool = False) -> Dict[str, Any]:
     """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
 
     匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
     japan_mode: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 弹窗开关, 不改默认F6)
     same_league_mode: 仅匹配本场 league 完全同名 + 同上放宽容差(弹窗「同赛事」, 与日本模式独立)
-    ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 相似度=低赔+高赔结构 + 亚盘分档 + 同联赛/时效/盘口软因子。
+    ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 相似度=低赔+高赔结构 + 亚盘分档 + 同联赛/时效/盘口(弱)/同单关/升降同向。
+    is_single: 本场单关时历史单关软加成, 不硬过滤。
     方向判定(以盘路为准, 与弹窗"盘路"列口径一致, 不用胜平负低赔命中):
     - 匹配 < 3场 或 无盘口: neutral, score=5
     - 盘路上盘命中 > 65%: upper, score=7
@@ -3441,7 +3443,8 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                                   require_direction=has_move,
                                   ah_open=ah_open, ah_close=ah_handicap,
                                   japan_mode=japan_mode,
-                                  same_league_mode=same_league_mode)
+                                  same_league_mode=same_league_mode,
+                                  is_single=is_single)
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
@@ -3694,7 +3697,8 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
         jczq_company_spf, league=match_info.get("league"),
         exclude_match_id=_mid,
         ah_handicap=match_info.get("handicap"),
-        ah_open=match_info.get("handicap_open"))
+        ah_open=match_info.get("handicap_open"),
+        is_single=is_single)
 
     # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
     # 交锋历史不进因子加权，只做 h2hRef 评估参考

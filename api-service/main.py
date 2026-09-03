@@ -1468,7 +1468,8 @@ def batch_similar(
         if spf:
             f6 = calc_factor_jczq_similar_odds(
                 spf, league=item.get("league"), exclude_match_id=mid,
-                ah_handicap=ahc, ah_open=ah_open)
+                ah_handicap=ahc, ah_open=ah_open,
+                is_single=bool(item.get("isSingle")))
         else:
             f6 = {"name": "历史同赔", "direction": "neutral", "score": 5,
                   "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
@@ -1984,10 +1985,12 @@ def predict_similar_odds_detail(
     except Exception as e:
         logger.warning(f"similar-odds 读亚盘失败 {match_id}: {e}")
 
+    is_single = resolve_had_is_single(match.get("is_single"), repo.get_wdl_odds(match_id))
     f6 = calc_factor_jczq_similar_odds(
         spf, league=league, exclude_match_id=match_id,
         ah_handicap=ah_close, ah_open=ah_open,
         japan_mode=japan_only, same_league_mode=league_only,
+        is_single=is_single,
     )
     return {
         "matchId": match_id,

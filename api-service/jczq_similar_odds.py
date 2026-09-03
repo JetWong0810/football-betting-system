@@ -656,6 +656,10 @@ def get_spf_pool() -> List[Dict]:
 
 AH_LINE_TOL = 0.5  # 亚盘相似: |Δ|≥0.5 球 → 该项贡献归零
 LEAGUE_SOFT_BOOST = 1.12  # 同联赛软加成(不再硬插队)
+SINGLE_SOFT_BOOST = 1.12  # 本场单关且历史也单关
+AH_MOVE_SAME_BOOST = 1.10  # 亚盘升/降/平同向
+AH_MOVE_OPP_BOOST = 0.92   # 升盘对上降盘
+AH_MOVE_EPS = 0.01
 # 欧赔结构相似: 低赔为主、高赔过线后参与打分
 LOW_ODDS_SIM_WEIGHT = 0.65
 HIGH_ODDS_SIM_WEIGHT = 0.35
@@ -669,6 +673,38 @@ def _ah_line_sim(hist: Optional[float], query: Optional[float], tol: float = AH_
         return max(0.0, 1.0 - abs(float(hist) - float(query)) / tol)
     except (TypeError, ValueError):
         return None
+
+
+def _ah_line_move(open_hc: Optional[float], close_hc: Optional[float]) -> Optional[str]:
+    """亚盘升降: 按让球深度 |hc|。升盘=加深, 降盘=变浅, 平=基本不动。缺一侧 None。"""
+    if open_hc is None or close_hc is None:
+        return None
+    try:
+        delta = abs(float(close_hc)) - abs(float(open_hc))
+    except (TypeError, ValueError):
+        return None
+    if delta > AH_MOVE_EPS:
+        return "up"
+    if delta < -AH_MOVE_EPS:
+        return "down"
+    return "flat"
+
+
+def _single_rank_boost(query_single: bool, hist_single: bool) -> float:
+    """仅本场单关时抬历史单关; 非单关查询不加, 避免 89% 同类把单关压下去。"""
+    if query_single and hist_single:
+        return SINGLE_SOFT_BOOST
+    return 1.0
+
+
+def _ah_move_rank_boost(query_move: Optional[str], hist_move: Optional[str]) -> float:
+    if not query_move or not hist_move:
+        return 1.0
+    if query_move == hist_move:
+        return AH_MOVE_SAME_BOOST
+    if {query_move, hist_move} == {"up", "down"}:
+        return AH_MOVE_OPP_BOOST
+    return 1.0
 
 
 def _time_decay_rank(match_date) -> float:
@@ -694,20 +730,20 @@ def _time_decay_rank(match_date) -> float:
 
 
 def _hc_proximity_rank(hist_hc: Optional[float], query_hc: Optional[float]) -> float:
-    """终盘盘口接近权重: ≤0.25→1.0 / ≤0.5→0.7 / ≤1.0→0.4 / 更远0.2; 缺一侧中性0.6。"""
+    """终盘盘口接近(弱): 升降同向已单独加成, 这里只作细调, 避免盘口三项叠乘。"""
     if hist_hc is None or query_hc is None:
-        return 0.6
+        return 0.92
     try:
         delta = abs(float(hist_hc) - float(query_hc))
     except (TypeError, ValueError):
-        return 0.6
+        return 0.92
     if delta <= 0.25:
         return 1.0
     if delta <= 0.5:
-        return 0.7
+        return 0.92
     if delta <= 1.0:
-        return 0.4
-    return 0.2
+        return 0.85
+    return 0.78
 
 
 def _blend_structural_sim(
@@ -742,7 +778,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
                   close_tolerance: Optional[float] = None,
                   league_filter: Optional[frozenset] = None,
                   soft_high: bool = False,
-                  high_tolerance_wide: float = HIGH_TOLERANCE_WIDE) -> Dict:
+                  high_tolerance_wide: float = HIGH_TOLERANCE_WIDE,
+                  is_single: bool = False) -> Dict:
     """共享匹配逻辑: 初盘低赔±tolerance+高赔±high_tolerance, 终盘同理, + 低赔方同侧 + 变动方向一致。
 
     "上盘球队"(低赔方)必须与预测比赛同一侧(同为胜/平/负的某一项), 初盘与终盘的低赔都在
@@ -760,7 +797,7 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     相似度(展示=排序):
       1) 欧赔结构 = 0.65*低赔初终接近 + 0.35*高赔初终接近(各自容差归一)
       2) 亚盘分档并入: 初+终→0.3; 仅终→0.2; 仅初→0.15; 历史全缺→×0.95
-      3) 软因子: 同联赛×1.12 × 时效衰减 × 终盘盘口接近; 封顶100
+      3) 软因子: 同联赛×1.12 × 时效 × 终盘接近(弱) × 同单关×1.12 × 亚盘升降同向×1.10(反向0.92); 封顶100
     排序: 按上述综合相似度降序(同联赛不再硬插队)。
     """
     input_low_key, input_low_open, input_low_close, input_direction = _get_low_odds_info(
@@ -847,16 +884,23 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
             odds_sim, m.get("open_handicap"), m.get("handicap"), ah_open, ah_close
         )
 
-        # 3) 软因子: 同联赛 / 时效 / 终盘盘口接近 → 综合相似度(展示即排序键)
-        # 改名别名(瑞超/瑞典超等)亦计同联赛
+        # 3) 软因子: 同联赛 / 时效 / 终盘接近(弱) / 同单关 / 亚盘升降同向
         hist_lg_name = (m.get("league_name") or "").strip()
         same_league = bool(league_norm) and hist_lg_name in same_league_name_set(league_norm)
         w_lg = LEAGUE_SOFT_BOOST if same_league else 1.0
         w_time = _time_decay_rank(m.get("match_date"))
         w_hc = _hc_proximity_rank(m.get("handicap"), ah_close)
-        similarity = round(min(100.0, structural * w_lg * w_time * w_hc * 100), 1)
+        hist_single = int(m.get("is_single") or 0) == 1
+        w_single = _single_rank_boost(bool(is_single), hist_single)
+        w_move = _ah_move_rank_boost(
+            _ah_line_move(ah_open, ah_close),
+            _ah_line_move(m.get("open_handicap"), m.get("handicap")),
+        )
+        rank_score = structural * w_lg * w_time * w_hc * w_single * w_move * 100
+        similarity = round(min(100.0, rank_score), 1)
 
         m["similarity"] = similarity
+        m["rank_score"] = rank_score
         m["hist_low_key"] = hist_low_key
         m["hist_low_open"] = hist_low_open
         m["hist_low_close"] = hist_low_close
@@ -866,8 +910,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         m["away_team_cn"] = m["away_team"]
         matched.append(m)
 
-    # 综合相似度降序(同联赛/时效/盘口已并入 similarity)
-    matched.sort(key=lambda x: -x["similarity"])
+    # 综合相似度降序; 展示封顶100, 排序用未封顶 rank_score(同单关/升降在满分时仍能分先后)
+    matched.sort(key=lambda x: -x["rank_score"])
 
     # 缺亚盘终盘: 不进弹窗、不进盘路/胜平负统计(避免无盘样本稀释或用本场盘口硬填)
     matched = [m for m in matched if m.get("handicap") is not None]
@@ -887,6 +931,7 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
             "high_tolerance_close": close_high_tol,
             "soft_high": soft_high,
             "ah_open": ah_open, "ah_close": ah_close,
+            "is_single": bool(is_single),
             "league": league_norm or None,
             "league_filter": sorted(league_filter) if league_filter else None,
         },
@@ -908,10 +953,12 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                     soft_high: bool = False,
                     high_tolerance_wide: float = HIGH_TOLERANCE_WIDE,
                     japan_mode: bool = False,
-                    same_league_mode: bool = False) -> Dict:
+                    same_league_mode: bool = False,
+                    is_single: bool = False) -> Dict:
     """核心匹配(胜平负 spf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
 
     ah_open/ah_close: 本场亚盘初/终(标准负=主让), 传入则相似度分档并入亚盘路径接近度。
+    is_single: 本场是否单关; 仅此时给历史单关 ×1.12, 不硬过滤。
     league 非空时同联赛软加成(×1.12)并入相似度; exclude_match_id 剔除预测比赛自身。
     require_direction=False: 预测场仅有1条spf快照(无真实变动)时放弃方向过滤。
     japan_mode=True: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 与默认同结构)。
@@ -944,7 +991,8 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
                          close_tolerance=close_tolerance,
                          league_filter=league_filter,
                          soft_high=soft_high,
-                         high_tolerance_wide=high_tolerance_wide)
+                         high_tolerance_wide=high_tolerance_wide,
+                         is_single=is_single)
 
 
 if __name__ == "__main__":
