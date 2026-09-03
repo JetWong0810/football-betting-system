@@ -371,6 +371,7 @@
       :league="selectedMatch?.league || ''"
       :initial-matches="similarDefaultMatches"
       :initial-ref-score="similarDefaultRef"
+      :initial-snapshots="similarDefaultSnapshots"
       @close="closeSimilarModal"
     />
 
@@ -564,6 +565,7 @@ const aiAnalysis = ref('')
 const showSimilarModal = ref(false)
 const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
+const similarDefaultSnapshots = ref([])
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
@@ -710,6 +712,9 @@ onLoad((query) => {
   recentRef.value = { home: [], away: [] }
   showRecentModal.value = false
   showH2hModal.value = false
+  similarDefaultMatches.value = []
+  similarDefaultRef.value = null
+  similarDefaultSnapshots.value = []
 
   if (query?.matchId) {
     pendingMatchId.value = query.matchId
@@ -1017,6 +1022,9 @@ function selectMatch(match) {
   recentRef.value = { home: [], away: [] }
   showRecentModal.value = false
   showH2hModal.value = false
+  similarDefaultMatches.value = []
+  similarDefaultRef.value = null
+  similarDefaultSnapshots.value = []
   uni.removeStorageSync('predict-last-result')
   loadJapanContext(match?.matchId)
 }
@@ -1040,6 +1048,9 @@ async function startAnalysis() {
   recentRef.value = { home: [], away: [] }
   showRecentModal.value = false
   showH2hModal.value = false
+  similarDefaultMatches.value = []
+  similarDefaultRef.value = null
+  similarDefaultSnapshots.value = []
 
   // 初始化步骤为 pending 状态
   analysisSteps.value = factorNames.map(name => ({
@@ -1073,12 +1084,9 @@ async function startAnalysis() {
 
     clearInterval(animateInterval)
 
-    // 逐步展示结果（每300ms完成一个因子）
     const factors = data.factors || []
     for (let i = 0; i < analysisSteps.value.length; i++) {
       const factor = factors[i] || {}
-      analysisSteps.value[i].status = 'analyzing'
-      await new Promise(r => setTimeout(r, 300))
       analysisSteps.value[i].score = factor.score || 5
       analysisSteps.value[i].direction = factor.direction || 'neutral'
       analysisSteps.value[i].reason = factor.reason || ''
@@ -1094,6 +1102,7 @@ async function startAnalysis() {
       if (factor.name === '历史同赔') {
         similarDefaultMatches.value = applyPredictSimilarList(factor.matches || [])
         similarDefaultRef.value = factor.refScore != null ? factor.refScore : null
+        similarDefaultSnapshots.value = Array.isArray(factor.snapshots) ? factor.snapshots : []
       }
       analysisSteps.value[i].status = 'done'
     }

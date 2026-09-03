@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+import threading
+import time as _time_mod
 
 import httpx
 
@@ -21,6 +23,8 @@ RESULT_API_URL = (
 # 售卖日 → 上次懒回填 monotonic 秒; 同进程内 30min 内不重复打体彩
 _ENSURE_CACHE: Dict[str, float] = {}
 _ENSURE_TTL_SEC = 1800.0
+_ENSURE_LOCK = threading.Lock()
+_ENSURE_INFLIGHT: set = set()
 
 
 def fetch_match_results(begin_date: str, end_date: str) -> List[Dict]:
@@ -177,6 +181,33 @@ def ensure_closing_spf_for_sale_date(sale_date: str) -> int:
     n = backfill_closing_odds_for_dates(dates)
     _ENSURE_CACHE[sale_date] = now
     return n
+
+
+def ensure_closing_spf_for_sale_date_bg(sale_date: str) -> None:
+    """不挡批量同赔首屏: 终盘回填放到后台, 下次刷新读到校正后的 close。"""
+    try:
+        datetime.strptime(sale_date, "%Y-%m-%d")
+    except ValueError:
+        return
+    now = _time_mod.monotonic()
+    prev = _ENSURE_CACHE.get(sale_date)
+    if prev is not None and now - prev < _ENSURE_TTL_SEC:
+        return
+    with _ENSURE_LOCK:
+        if sale_date in _ENSURE_INFLIGHT:
+            return
+        _ENSURE_INFLIGHT.add(sale_date)
+
+    def _run():
+        try:
+            ensure_closing_spf_for_sale_date(sale_date)
+        except Exception as e:
+            logger.warning(f"后台终盘回填失败 date={sale_date}: {e}")
+        finally:
+            with _ENSURE_LOCK:
+                _ENSURE_INFLIGHT.discard(sale_date)
+
+    threading.Thread(target=_run, daemon=True, name=f"close-spf-{sale_date}").start()
 
 
 if __name__ == "__main__":

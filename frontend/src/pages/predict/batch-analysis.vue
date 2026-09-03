@@ -300,6 +300,7 @@
       :league="similarLeagueName"
       :initial-matches="similarDefaultMatches"
       :initial-ref-score="similarDefaultRef"
+      :initial-snapshots="similarDefaultSnapshots"
       @close="closeSimilar"
       @same-event="onSimilarSameEvent"
     />
@@ -391,6 +392,7 @@ const calSelected = ref('')
 const showSimilar = ref(false)
 const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
+const similarDefaultSnapshots = ref([])
 const similarMatchId = ref('')
 const similarLeagueName = ref('')
 
@@ -566,8 +568,7 @@ async function fetchBatch(forStatus) {
   return request({
     url: '/api/predict/batch-similar',
     data: { date: date.value, status: forStatus },
-    // 当日场次多时后端会懒抓亚盘，常超默认 15s
-    timeout: 60000,
+    timeout: 30000,
   })
 }
 
@@ -971,6 +972,7 @@ function ahResultClass(ah) {
 function openSimilar(it) {
   similarDefaultMatches.value = applySimilarList(it?.f6?.matches || [])
   similarDefaultRef.value = it?.f6?.refScore != null ? it.f6.refScore : null
+  similarDefaultSnapshots.value = Array.isArray(it?.f6?.snapshots) ? it.f6.snapshots : []
   similarMatchId.value = it?.matchId || ''
   similarLeagueName.value = it?.league || ''
   showSimilar.value = true

@@ -1092,7 +1092,7 @@ def _fmt_worth_wan(v: Optional[float]) -> str:
     return f"€{v:.1f}万"
 
 
-def fetch_jczq_squad_worth(sale_date: str) -> Dict[str, Dict[str, Any]]:
+def fetch_jczq_squad_worth(sale_date: str, live: bool = True) -> Dict[str, Dict[str, Any]]:
     """抓取竞彩对阵球队身价，按 match_code(如周三001) 索引。
 
     Returns:
@@ -1117,6 +1117,8 @@ def fetch_jczq_squad_worth(sale_date: str) -> Dict[str, Dict[str, Any]]:
     cached = _WORTH_CACHE.get(sale_date)
     if cached is not None and now - _WORTH_CACHE_TS.get(sale_date, 0) < _WORTH_CACHE_TTL:
         return cached
+    if not live:
+        return cached or {}
 
     url = f"https://zx.500.com/jczq/worth/?d={sale_date}"
     try:
@@ -1179,9 +1181,10 @@ def fetch_jczq_squad_worth(sale_date: str) -> Dict[str, Dict[str, Any]]:
 def get_match_squad_worth(
     sale_date: Optional[str],
     match_code: Optional[str],
+    live: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """按售卖日+场次号取单场身价。"""
     if not sale_date or not match_code:
         return None
-    return fetch_jczq_squad_worth(sale_date).get(str(match_code).strip()) or None
+    return fetch_jczq_squad_worth(sale_date, live=live).get(str(match_code).strip()) or None
 

@@ -186,28 +186,27 @@ def predict_wc_match(match_info: Dict[str, Any],
                      asian_data: Optional[List] = None,
                      euro_data: Optional[Dict] = None) -> Dict[str, Any]:
     """世界杯预测主流程"""
-    handicap = match_info.get("handicap")
     is_home_let = _home_is_upper(match_info)
-
-    # F3 市场信号 & F4 市场热度: 纯量化，不需要AI
-    f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
-    f3["name"] = "市场信号"
-    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
-                     match_info.get("handicap"))
-    f4["name"] = "市场热度"
-
-    # F5 竞彩赔率 & F6 历史同赔: 从euro_data中提取竞彩官方数据
-    jczq_company = None
-    if euro_data and euro_data.get("companies"):
-        jczq_company = next(
-            (c for c in euro_data["companies"] if "竞彩" in c.get("bookmaker", "")),
-            None
-        )
-    f5 = calc_factor_jczq_odds(jczq_company, home_is_upper=is_home_let)
-    f6 = calc_factor_similar_odds(jczq_company)
-
-    # F1 近期状态 & F2 实力定位: 需要AI辅助
+    is_single = bool(match_info.get("is_single"))
     prompt = build_ai_prompt(match_info, match_data)
+
+    def _quant_factors():
+        f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
+        f3["name"] = "市场信号"
+        f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
+                         match_info.get("handicap"))
+        f4["name"] = "市场热度"
+        jczq_company = None
+        if euro_data and euro_data.get("companies"):
+            jczq_company = next(
+                (c for c in euro_data["companies"] if "竞彩" in c.get("bookmaker", "")),
+                None
+            )
+        f5 = calc_factor_jczq_odds(jczq_company, home_is_upper=is_home_let)
+        f6 = calc_factor_similar_odds(jczq_company)
+        f7 = calc_factor6(is_single, f4["direction"], f4["score"])
+        return f3, f4, f5, f6, f7
+
     ai_f1_list = []
     ai_f3_list = []
 
@@ -218,9 +217,11 @@ def predict_wc_match(match_info: Dict[str, Any],
             logger.warning(f"[wc_predict] AI调用异常: {e}")
             return []
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(_safe_call, prompt) for _ in range(3)]
-        for future in futures:
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        quant_fut = executor.submit(_quant_factors)
+        ai_futs = [executor.submit(_safe_call, prompt) for _ in range(3)]
+        f3, f4, f5, f6, f7 = quant_fut.result()
+        for future in ai_futs:
             ai_factors = future.result()
             ai_f1 = next((f for f in ai_factors if f["name"] == "近期状态"), None)
             if ai_f1:
@@ -232,10 +233,6 @@ def predict_wc_match(match_info: Dict[str, Any],
     f1 = calc_factor1(match_data, match_info, ai_f1_list or None)
     f2 = calc_factor3(match_info, ai_f3_list or None)
     f2["name"] = "实力定位"
-
-    # F7 单关修正: 基于市场热度(f4)的结果
-    is_single = bool(match_info.get("is_single"))
-    f7 = calc_factor6(is_single, f4["direction"], f4["score"])
 
     all_factors = [f1, f2, f3, f4, f5, f6, f7]
 

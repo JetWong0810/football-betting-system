@@ -371,8 +371,6 @@ async function startAnalysis() {
     const factors = data.factors || []
     for (let i = 0; i < analysisSteps.value.length; i++) {
       const factor = factors[i] || {}
-      analysisSteps.value[i].status = 'analyzing'
-      await new Promise(r => setTimeout(r, 300))
       analysisSteps.value[i].score = factor.score || 5
       analysisSteps.value[i].direction = factor.direction || 'neutral'
       analysisSteps.value[i].reason = factor.reason || ''

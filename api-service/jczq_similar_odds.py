@@ -8,6 +8,7 @@
 """
 
 import logging
+import threading
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -121,6 +122,7 @@ def _high_odds_tolerance(odds: Optional[float], base: float = HIGH_TOLERANCE,
 # 历史池缓存: 2018-2025 静态数据，进程内只加载一次
 _pool_cache: Optional[List[Dict]] = None
 _spf_pool_cache: Optional[List[Dict]] = None
+_spf_pool_lock = threading.Lock()
 
 
 def _get_conn():
@@ -589,69 +591,72 @@ def get_spf_pool() -> List[Dict]:
     global _spf_pool_cache
     if _spf_pool_cache is not None:
         return _spf_pool_cache
-    sql = """
-        SELECT
-            m.match_id, m.match_date, m.league_name,
-            m.home_team_name, m.away_team_name,
-            m.home_score, m.away_score,
-            m.is_single,
-            ah.open_handicap AS open_handicap,
-            ah.close_handicap AS handicap,
-            f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
-            l.odds_win  AS close_win, l.odds_draw  AS close_draw, l.odds_loss  AS close_loss
-        FROM (
-            SELECT match_id, MIN(change_time) mn, MAX(change_time) mx
-            FROM jczq_odds_history
-            WHERE odds_type = 'spf'
-            GROUP BY match_id
-            HAVING COUNT(*) >= 2
-        ) t
-        JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'spf' AND f.change_time = t.mn
-        JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'spf' AND l.change_time = t.mx
-        JOIN matches m ON m.match_id = t.match_id
-        LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id AND ah.company LIKE 'Bet365%'
-        WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
-    """
-    conn = _get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            rows = cur.fetchall()
-    finally:
-        conn.close()
-
-    pool = []
-    for r in rows:
-        # spf 结果按 raw 比分(不用让球)
+    with _spf_pool_lock:
+        if _spf_pool_cache is not None:
+            return _spf_pool_cache
+        sql = """
+            SELECT
+                m.match_id, m.match_date, m.league_name,
+                m.home_team_name, m.away_team_name,
+                m.home_score, m.away_score,
+                m.is_single,
+                ah.open_handicap AS open_handicap,
+                ah.close_handicap AS handicap,
+                f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
+                l.odds_win  AS close_win, l.odds_draw  AS close_draw, l.odds_loss  AS close_loss
+            FROM (
+                SELECT match_id, MIN(change_time) mn, MAX(change_time) mx
+                FROM jczq_odds_history
+                WHERE odds_type = 'spf'
+                GROUP BY match_id
+                HAVING COUNT(*) >= 2
+            ) t
+            JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'spf' AND f.change_time = t.mn
+            JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'spf' AND l.change_time = t.mx
+            JOIN matches m ON m.match_id = t.match_id
+            LEFT JOIN jczq_ah_history ah ON ah.match_id = t.match_id AND ah.company LIKE 'Bet365%'
+            WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+        """
+        conn = _get_conn()
         try:
-            diff = int(r["home_score"]) - int(r["away_score"])
-        except (TypeError, ValueError):
-            continue
-        if diff > 0:
-            result = "H"
-        elif diff == 0:
-            result = "D"
-        else:
-            result = "A"
-        hc = r["handicap"]
-        oh = r.get("open_handicap")
-        pool.append({
-            "match_id": r["match_id"],
-            "match_date": str(r["match_date"]) if r["match_date"] else "",
-            "league_name": r["league_name"] or "",
-            "home_team": r["home_team_name"] or "",
-            "away_team": r["away_team_name"] or "",
-            "home_score": int(r["home_score"]),
-            "away_score": int(r["away_score"]),
-            "is_single": 1 if int(r.get("is_single") or 0) == 1 else 0,
-            "open_handicap": float(oh) if oh is not None else None,
-            "handicap": float(hc) if hc is not None else None,
-            "result": result,
-            "open_win": float(r["open_win"]), "open_draw": float(r["open_draw"]), "open_loss": float(r["open_loss"]),
-            "close_win": float(r["close_win"]), "close_draw": float(r["close_draw"]), "close_loss": float(r["close_loss"]),
-        })
-    _spf_pool_cache = pool
-    return pool
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        pool = []
+        for r in rows:
+            # spf 结果按 raw 比分(不用让球)
+            try:
+                diff = int(r["home_score"]) - int(r["away_score"])
+            except (TypeError, ValueError):
+                continue
+            if diff > 0:
+                result = "H"
+            elif diff == 0:
+                result = "D"
+            else:
+                result = "A"
+            hc = r["handicap"]
+            oh = r.get("open_handicap")
+            pool.append({
+                "match_id": r["match_id"],
+                "match_date": str(r["match_date"]) if r["match_date"] else "",
+                "league_name": r["league_name"] or "",
+                "home_team": r["home_team_name"] or "",
+                "away_team": r["away_team_name"] or "",
+                "home_score": int(r["home_score"]),
+                "away_score": int(r["away_score"]),
+                "is_single": 1 if int(r.get("is_single") or 0) == 1 else 0,
+                "open_handicap": float(oh) if oh is not None else None,
+                "handicap": float(hc) if hc is not None else None,
+                "result": result,
+                "open_win": float(r["open_win"]), "open_draw": float(r["open_draw"]), "open_loss": float(r["open_loss"]),
+                "close_win": float(r["close_win"]), "close_draw": float(r["close_draw"]), "close_loss": float(r["close_loss"]),
+            })
+        _spf_pool_cache = pool
+        return pool
 
 
 AH_LINE_TOL = 0.5  # 亚盘相似: |Δ|≥0.5 球 → 该项贡献归零

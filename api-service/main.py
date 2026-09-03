@@ -24,7 +24,7 @@ from database import init_db, fetch_sync_status
 from repository import OddsRepository, derive_sale_date
 from user_repository import UserRepository
 from match_note_repository import MatchNoteRepository, NOTE_MAX_LEN
-from odds500_service import get_fid_for_match, get_match_squad_worth
+from odds500_service import get_match_squad_worth
 from predict_service import predict_match
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
@@ -251,11 +251,25 @@ def _attach_squad_worth(match_info: Dict[str, Any], match: Dict[str, Any]) -> No
         return
     try:
         sale_date = derive_sale_date(match) or match.get("match_date")
-        worth = get_match_squad_worth(sale_date, match.get("match_code"))
+        worth = get_match_squad_worth(sale_date, match.get("match_code"), live=False)
         if worth:
             match_info["squad_worth"] = worth
     except Exception as e:
         logger.warning(f"注入球队身价失败: {e}")
+
+
+def _attach_f6_snapshots(factors: Optional[List], match_id: str) -> None:
+    """给 F6 带上赔率轴, 同赔弹窗默认打开不必再打 similar-odds。"""
+    from jczq_similar_odds import list_spf_snapshots
+    snaps: List[Dict[str, Any]] = []
+    try:
+        snaps = list_spf_snapshots(match_id)
+    except Exception as e:
+        logger.warning(f"spf 快照加载失败 {match_id}: {e}")
+    for f in factors or []:
+        if f.get("name") == "历史同赔":
+            f["snapshots"] = snaps
+            return
 
 
 def format_match(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -312,6 +326,16 @@ async def startup_event():
     # 后台定时比分回填（每10分钟）：已开赛但缺比分的比赛从体彩赛果拉取
     import threading as _th
     _th.Thread(target=_score_backfill_loop, daemon=True).start()
+    _th.Thread(target=_warmup_spf_pool, daemon=True).start()
+
+
+def _warmup_spf_pool():
+    try:
+        from jczq_similar_odds import get_spf_pool
+        n = len(get_spf_pool())
+        logger.info(f"[同赔池] 预热完成 {n} 场")
+    except Exception as e:
+        logger.warning(f"[同赔池] 预热失败: {e}")
 
 
 def _score_backfill_loop():
@@ -1269,23 +1293,23 @@ def batch_similar(
 
     status=not_started(在售) 或 finished(已结束, 回测视角)。
     仅 F6(纯历史同赔,无 AI 调用);池(45038场)进程内缓存,~20场 <1s。
-    在售/已结束均返回 ahHandicap(亚盘仅 Bet365,缺则无亚盘); 已结束额外返回
+    在售/已结束均返回 ahHandicap(亚盘仅 Bet365 库内,缺则无亚盘,不再现场抓 500); 已结束额外返回
     actualScore/actualResult/actualAh/hit, 供对比 F6 方向与实际盘路(回测)。
     """
     import time as _time
     from predict_service import calc_factor_jczq_similar_odds
-    from jczq_similar_odds import get_match_spf_odds, _ah_outcome, _get_low_odds_info
+    from jczq_similar_odds import get_match_spf_odds, list_spf_snapshots, _ah_outcome, _get_low_odds_info
 
     if not date:
         date = _time.strftime("%Y-%m-%d", _time.localtime())
 
-    # 已结束: 用体彩赛果终赔校正 spf(在售池封盘前停更会导致末条非真终盘)
+    # 已结束: 后台校正 spf 终盘, 不挡本轮首屏(下次刷新读到校正值)
     if status == "finished":
         try:
-            from closing_odds import ensure_closing_spf_for_sale_date
-            ensure_closing_spf_for_sale_date(date)
+            from closing_odds import ensure_closing_spf_for_sale_date_bg
+            ensure_closing_spf_for_sale_date_bg(date)
         except Exception as _e:
-            logger.warning(f"终盘懒回填失败 date={date}: {_e}")
+            logger.warning(f"终盘懒回填启动失败 date={date}: {_e}")
 
     where: List = []
     params: List = []
@@ -1327,119 +1351,6 @@ def batch_similar(
                     "close": float(ch) if ch is not None else None,
                 }
 
-    # 缺终盘或缺初盘: 并行懒抓500.com 仅 Bet365; 无则本场无亚盘
-    # 并行+写入 jczq_ah_history, 避免串行超时, 且下次直接命中初/终盘。
-    if rows:
-        need_asian = [
-            r for r in rows
-            if r["match_id"] not in ah_map
-            or ah_map[r["match_id"]].get("close") is None
-            or ah_map[r["match_id"]].get("open") is None
-        ]
-        if need_asian:
-            try:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                from repository import derive_sale_date as _derive_sale_ah
-                from odds500_service import get_fid_for_match, fetch_asian_handicap
-                from database import get_db as _get_db_ah
-
-                def _fetch_one_asian(m):
-                    sale_date = _derive_sale_ah(m) or m.get("match_date")
-                    mcode = m.get("match_code")
-                    if not sale_date or not mcode:
-                        return None
-                    fid = m.get("fid_500") or get_fid_for_match(sale_date, mcode)
-                    if not fid:
-                        return None
-                    asian_list = fetch_asian_handicap(fid)
-                    preferred = next(
-                        (a for a in asian_list if a.get("bookmaker") == "Bet365"), None
-                    )
-                    if not preferred or not preferred.get("current"):
-                        return None
-                    curr = preferred["current"]
-                    ini = preferred.get("initial") or {}
-                    hc = curr.get("handicap")
-                    if hc is None:
-                        return None
-                    try:
-                        close_std = -float(hc)
-                        oh_raw = ini.get("handicap")
-                        open_std = -float(oh_raw) if oh_raw is not None else None
-                    except (TypeError, ValueError):
-                        return None
-                    return {
-                        "match_id": m["match_id"],
-                        "fid": fid,
-                        "hc": hc,
-                        "home_odds": curr.get("home"),
-                        "away_odds": curr.get("away"),
-                        "open_home": ini.get("home"),
-                        "open_away": ini.get("away"),
-                        "company": "Bet365",
-                        "open_std": open_std,
-                        "close_std": close_std,
-                    }
-
-                with ThreadPoolExecutor(max_workers=min(8, len(need_asian))) as pool:
-                    futs = [pool.submit(_fetch_one_asian, m) for m in need_asian]
-                    for fut in as_completed(futs):
-                        try:
-                            got = fut.result()
-                        except Exception as _fe:
-                            logger.warning(f"批量同赔亚盘单场失败: {_fe}")
-                            continue
-                        if not got:
-                            continue
-                        mid = got["match_id"]
-                        prev = ah_map.get(mid) or {}
-                        ah_map[mid] = {
-                            "open": got["open_std"] if got["open_std"] is not None else prev.get("open"),
-                            "close": got["close_std"] if got["close_std"] is not None else prev.get("close"),
-                        }
-                        for m in need_asian:
-                            if m["match_id"] == mid:
-                                m["asian_handicap"] = got["hc"]
-                                m["fid_500"] = got["fid"]
-                                break
-                        try:
-                            with _get_db_ah() as _conn_ah:
-                                cur_ah = _conn_ah.cursor()
-                                cur_ah.execute(
-                                    "UPDATE matches SET asian_handicap=%s, asian_home_odds=%s, "
-                                    "asian_away_odds=%s, asian_company=%s, fid_500=%s "
-                                    "WHERE match_id=%s",
-                                    (got["hc"], got["home_odds"], got["away_odds"],
-                                     got["company"], got["fid"], mid),
-                                )
-                                # 标准约定负=主让; 写入后下次批量不再重复抓;
-                                # 覆盖原澳门等非 Bet365 行
-                                if got["open_std"] is not None or got["close_std"] is not None:
-                                    cur_ah.execute(
-                                        "INSERT INTO jczq_ah_history "
-                                        "(match_id, open_handicap, open_home_odds, open_away_odds, "
-                                        " close_handicap, close_home_odds, close_away_odds, company) "
-                                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
-                                        "ON DUPLICATE KEY UPDATE "
-                                        "open_handicap=COALESCE(VALUES(open_handicap), open_handicap), "
-                                        "open_home_odds=COALESCE(VALUES(open_home_odds), open_home_odds), "
-                                        "open_away_odds=COALESCE(VALUES(open_away_odds), open_away_odds), "
-                                        "close_handicap=COALESCE(VALUES(close_handicap), close_handicap), "
-                                        "close_home_odds=COALESCE(VALUES(close_home_odds), close_home_odds), "
-                                        "close_away_odds=COALESCE(VALUES(close_away_odds), close_away_odds), "
-                                        "company=VALUES(company)",
-                                        (
-                                            mid,
-                                            got["open_std"], got["open_home"], got["open_away"],
-                                            got["close_std"], got["home_odds"], got["away_odds"],
-                                            got["company"],
-                                        ),
-                                    )
-                        except Exception as _we:
-                            logger.warning(f"批量同赔亚盘落库失败 {mid}: {_we}")
-            except Exception as e:
-                logger.warning(f"批量同赔亚盘懒回填失败: {e}")
-
     match_ids = [r["match_id"] for r in rows]
     odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
 
@@ -1477,6 +1388,11 @@ def batch_similar(
         item["spf"] = spf  # 本场初盘/终盘(胜平负), 供对比展示
         item["hasMove"] = has_move
         item["f6"] = f6
+        try:
+            f6["snapshots"] = list_spf_snapshots(mid)
+        except Exception as _se:
+            logger.warning(f"批量同赔快照失败 {mid}: {_se}")
+            f6["snapshots"] = []
 
         # 已结束: 实际比分/结果/盘路(回测)
         if status == "finished":
@@ -1660,6 +1576,7 @@ def predict_match_direction(
 
     try:
         result = predict_match(match_info, match_data=match_data, asian_data=asian_data, euro_data=euro_data)
+        _attach_f6_snapshots(result.get("factors"), match_id)
         match_formatted = format_match(match)
         # 返回实际使用的亚盘盘口值
         if match_info.get("handicap") is not None:

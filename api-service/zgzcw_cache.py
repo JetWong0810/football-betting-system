@@ -177,24 +177,8 @@ def _form_from_local(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _try_500(fid: str, kind: str):
-    if not fid:
-        return None
-    try:
-        from odds500_service import fetch_asian_handicap, fetch_european_odds, fetch_match_data
-        if kind == "form":
-            return fetch_match_data(fid)
-        if kind == "asian":
-            return fetch_asian_handicap(fid)
-        if kind == "euro":
-            return fetch_european_odds(fid)
-    except Exception as e:
-        logger.warning(f"500 {kind} 兜底失败 fid={fid}: {e}")
-    return None
-
-
 def load_predict_inputs(match: Dict[str, Any]) -> Tuple[Optional[Dict], List, Optional[Dict]]:
-    """返回 (match_data, asian_data, euro_data)。API 不开浏览器。"""
+    """返回 (match_data, asian_data, euro_data)。只读缓存/本地库，同步路径不打 500。"""
     cache = get_fenxi_cache(match.get("match_id") or "")
     form = _loads((cache or {}).get("form_json"))
     asian = _loads((cache or {}).get("asian_json"))
@@ -210,15 +194,8 @@ def load_predict_inputs(match: Dict[str, Any]) -> Tuple[Optional[Dict], List, Op
     if not asian:
         asian = asian_from_db(match)
 
-    fid_500 = str(match.get("fid_500") or "").strip()
     if not form or not (form.get("homeRecent") or form.get("awayRecent")):
         form = _form_from_local(match) or form
-    if (not form or not (form.get("homeRecent") or form.get("awayRecent"))) and fid_500:
-        form = _try_500(fid_500, "form") or form
-    if not asian and fid_500:
-        asian = _try_500(fid_500, "asian") or []
-    if (not euro or not euro.get("companies")) and fid_500:
-        euro = _try_500(fid_500, "euro") or euro
 
     if form:
         if match.get("home_team_rank") and not form.get("homeRank"):

@@ -3586,34 +3586,28 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     Returns:
         {"factors": [...], "prediction": {...}}
     """
-    handicap = match_info.get("handicap")
     # 上盘=亚盘让球方(平手主队上盘)，全因子同一基准；竞彩hhad不定上下盘
     is_home_let = _home_is_upper(match_info)
     is_single = bool(match_info.get("is_single"))
-
-    # F3 市场信号：初盘+亚盘变动+欧赔变动+亚欧一致性
-    f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
-    f3["name"] = "市场信号"
-    # F4 市场热度：纯量化（多公司水位一致性）+ 用户手动输入优先
-    f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
-                     match_info.get("handicap"))
-    f4["name"] = "市场热度"
-
-    # F5 竞彩赔率 & F6 历史同赔: 从 jczq_odds_history 取本场 nspf 初/终盘
-    # F5竞彩赔率 & F6历史同赔 均用 spf(胜平负)口径(与世界杯一致, 用户预期)
-    _mid = match_info.get("match_id")
-    jczq_company_spf = get_match_spf_odds(_mid) if _mid else None
-    f5 = calc_factor_jczq_odds(jczq_company_spf, home_is_upper=is_home_let)
-    f6 = calc_factor_jczq_similar_odds(
-        jczq_company_spf, league=match_info.get("league"),
-        exclude_match_id=_mid,
-        ah_handicap=match_info.get("handicap"),
-        ah_open=match_info.get("handicap_open"),
-        is_single=is_single)
-
-    # F1 近期状态 & F2 实力定位: DeepSeek推理(3次调用取多数，并行加速)
-    # 交锋历史不进因子加权，只做 h2hRef 评估参考
     prompt = build_ai_prompt(match_info, match_data)
+
+    def _quant_factors():
+        f3 = calc_factor4(asian_data or [], is_home_let, euro_data)
+        f3["name"] = "市场信号"
+        f4 = calc_factor5(asian_data or [], is_home_let, match_info.get("market_heat_desc"),
+                         match_info.get("handicap"))
+        f4["name"] = "市场热度"
+        _mid = match_info.get("match_id")
+        jczq_spf = get_match_spf_odds(_mid) if _mid else None
+        f5 = calc_factor_jczq_odds(jczq_spf, home_is_upper=is_home_let)
+        f6 = calc_factor_jczq_similar_odds(
+            jczq_spf, league=match_info.get("league"),
+            exclude_match_id=_mid,
+            ah_handicap=match_info.get("handicap"),
+            ah_open=match_info.get("handicap_open"),
+            is_single=is_single)
+        f7 = calc_factor6(is_single, f4["direction"], f4["score"])
+        return f3, f4, f5, f6, f7, jczq_spf
 
     ai_f1_list = []
     ai_f3_list = []
@@ -3627,9 +3621,11 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
             logger.warning(f"[predict] AI调用异常: {e}")
             return []
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(_safe_call, prompt) for _ in range(3)]
-        for future in futures:
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        quant_fut = executor.submit(_quant_factors)
+        ai_futs = [executor.submit(_safe_call, prompt) for _ in range(3)]
+        f3, f4, f5, f6, f7, jczq_company_spf = quant_fut.result()
+        for future in ai_futs:
             ai_factors = future.result()
             ai_f1 = next((f for f in ai_factors if f["name"] == "近期状态"), None)
             if ai_f1:
@@ -3641,9 +3637,6 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     f1 = calc_factor1(match_data, match_info, ai_f1_list or None)
     f2 = calc_factor3(match_info, ai_f3_list or None)
     f2["name"] = "实力定位"
-
-    # F7: 单关修正（基于F4市场热度结果）
-    f7 = calc_factor6(is_single, f4["direction"], f4["score"])
 
     # 组装7因子(与世界杯对齐: F1近期 F2实力 F3市场信号 F4市场热度 F5竞彩赔率 F6历史同赔 F7单关)
     all_factors = [f1, f2, f3, f4, f5, f6, f7]

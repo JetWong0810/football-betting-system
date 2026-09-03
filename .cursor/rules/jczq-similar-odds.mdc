@@ -61,8 +61,8 @@ sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 
 ## 批量同赔分析
 - `GET /api/predict/batch-similar?date=&status=not_started|finished`(main.py)。
 - 未开始/已结束统一按 `match_number LIKE date前缀`(竞彩售卖期,与赛果查询一致,含跨凌晨场);完赛判定=`timestamp<now` 或 `home_score` 非空。
-- finished 额外返回 actualScore/actualResult/actualAh(亚盘)/hit(F6方向 vs 实际盘路)/summary.hitRate。亚盘**强制 Bet365**(jczq_ah_history company LIKE 'Bet365%'; 缺则懒抓仅 Bet365, 无则「无亚盘」); 不用澳门/`matches.asian_handicap` 兜底。
-- **在售终盘刷新**: scraper 每 10min(`refresh_live_asian_bet365`)强制覆盖 Bet365 终盘; 同赔页读库, 仅缺数据时懒抓。
+- finished 额外返回 actualScore/actualResult/actualAh(亚盘)/hit(F6方向 vs 实际盘路)/summary.hitRate。亚盘**强制 Bet365**(jczq_ah_history company LIKE 'Bet365%'; 缺则本场无亚盘); 不用澳门/`matches.asian_handicap` 兜底。
+- **在售终盘刷新**: scraper 每 10min(`refresh_live_asian_bet365`)强制覆盖 Bet365 终盘; 同赔页只读库, 不现场抓 500。
 - 前端:predict.vue 选择赛事面板"同赔分析"按钮(两状态都显示,带 status 跳转)→ batch-analysis.vue(初盘/终盘对比 + 右上角方向旁 refScore + 同赔弹窗 + 已结束回测实际结果行 + 命中率)。
 
 同赔弹窗(predict.vue / batch-analysis.vue)

@@ -135,6 +135,7 @@ const props = defineProps({
   league: { type: String, default: '' },
   initialMatches: { type: Array, default: () => [] },
   initialRefScore: { type: Number, default: null },
+  initialSnapshots: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['close', 'same-event'])
@@ -219,7 +220,7 @@ function resetLocal() {
   japanOnly.value = false
   leagueOnly.value = false
   loading.value = false
-  snapshots.value = []
+  snapshots.value = Array.isArray(props.initialSnapshots) ? props.initialSnapshots.slice() : []
   matches.value = applyList(props.initialMatches)
   refScore.value = props.initialRefScore != null ? props.initialRefScore : null
 }
@@ -288,7 +289,8 @@ watch(
   ([vis]) => {
     if (!vis) return
     resetLocal()
-    fetchSimilar()
+    const hasDefault = (props.initialMatches || []).length > 0 || props.initialRefScore != null
+    if (!hasDefault) fetchSimilar()
   },
 )
 </script>
