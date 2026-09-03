@@ -138,6 +138,7 @@ export function emptyStructure() {
     jcMove: null,
     otherHeat: null,
     extra: '',
+    kellyHint: null,
   }
 }
 
@@ -408,6 +409,7 @@ export function formatNoteContent(s) {
   }
   if (s.jcMove && JC[s.jcMove]) lines.push(`竞彩${JC[s.jcMove]}`)
   if (s.otherHeat && OTHER_HEAT[s.otherHeat]) lines.push(`个人热度${OTHER_HEAT[s.otherHeat]}`)
+  if (s.kellyHint) lines.push(String(s.kellyHint))
   const extra = String(s.extra || '').trim()
   if (extra) lines.push(extra)
   return lines.join('\n')
@@ -447,6 +449,10 @@ export function structureChips(s) {
   }
   if (s.otherHeat && OTHER_HEAT[s.otherHeat]) {
     push(`热度${OTHER_HEAT[s.otherHeat]}`, s.otherHeat === 'away' ? 'lower' : s.otherHeat === 'home' ? 'upper' : 'mute')
+  }
+  if (s.kellyHint) {
+    const t = String(s.kellyHint)
+    push(t, t.includes('偏松') ? 'warn' : 'mute')
   }
   return chips
 }

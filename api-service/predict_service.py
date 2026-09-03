@@ -2799,7 +2799,61 @@ def _effective_dir(factor: Dict[str, Any], reverse_set: set) -> str:
     return d
 
 
-def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+YINGHE_THRESHOLD = 0.03
+
+
+def detect_spf_yinghe(
+    spf_odds: Optional[Dict],
+    consensus_dir: str,
+    home_is_upper: bool,
+) -> Dict[str, Any]:
+    """竞彩胜平负(had/spf)是否迎合展示共识。
+
+    轴: 上盘对应的 1x2 项(主上盘=主胜, 客上盘=客胜)。
+    迎合上盘: 该项下降; 迎合下盘: 该项上升。阈值 0.03, 与 F5 小幅变动对齐但略严。
+    """
+    empty = {
+        "hit": False, "delta": None, "label": None,
+        "open": None, "close": None, "consensus": consensus_dir,
+    }
+    if consensus_dir not in ("upper", "lower") or not spf_odds:
+        return empty
+    initial = spf_odds.get("initial") or {}
+    current = spf_odds.get("current") or {}
+    key = "win" if home_is_upper else "lose"
+    label = "主胜" if key == "win" else "客胜"
+    try:
+        open_v = float(initial.get(key))
+        close_v = float(current.get(key))
+    except (TypeError, ValueError):
+        return empty
+    delta = round(close_v - open_v, 3)
+    if consensus_dir == "upper":
+        hit = delta <= -YINGHE_THRESHOLD
+    else:
+        hit = delta >= YINGHE_THRESHOLD
+    return {
+        "hit": hit,
+        "delta": delta,
+        "label": label,
+        "open": round(open_v, 3),
+        "close": round(close_v, 3),
+        "consensus": consensus_dir,
+    }
+
+
+def _yinghe_reason(yinghe: Optional[Dict]) -> str:
+    if not yinghe or not yinghe.get("hit"):
+        return "单关且竞彩胜平负赔率迎合共识"
+    label = yinghe.get("label") or "胜平负"
+    open_v, close_v = yinghe.get("open"), yinghe.get("close")
+    if open_v is not None and close_v is not None:
+        return f"单关且竞彩{label}{open_v:.2f}→{close_v:.2f}迎合共识"
+    return "单关且竞彩胜平负赔率迎合共识"
+
+
+def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict[str, float]] = None,
+                    reverse_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """综合计算最终预测方向和置信度 - 净方向占比模型
 
     置信度拆为两个独立维度：
@@ -2813,6 +2867,9 @@ def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict
     Args:
         factors: 因子列表
         custom_weights: 自定义权重字典(可选，默认用全局FACTOR_WEIGHTS)
+        reverse_ctx: 竞彩整体逆向上下文。传入后整体逆向需额外满足
+            单关 + 竞彩胜平负迎合共识；不传(世界杯)保持原「一边倒且加权仍跟风」。
+            字段: is_single, spf_odds, home_is_upper。
     """
     weights = custom_weights or FACTOR_WEIGHTS
     factors = [f for f in factors if not f.get("refOnly") and f.get("name") in weights]
@@ -2903,11 +2960,24 @@ def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict
         return {"direction": "neutral", "confidence": 38, "score": 0.0,
                 "neutral_count": neutral_count, "overall_reverse": False}
 
-    # 整体逆向：仅当展示共识一边倒(≥6/7同向)，且加权后仍跟展示共识同向时翻一次。
+    # 整体逆向：展示共识一边倒(≥6/7同向)，且加权后仍跟展示共识同向时翻一次。
     # 避免与市场热度/单关的因子级逆向双重翻转(本已反向又翻回共识)。
-    overall_reverse = bool(
-        reverse_candidate and raw_dom_dir and direction == raw_dom_dir
-    )
+    # 竞彩(reverse_ctx): 再要求单关 + 竞彩胜平负迎合该共识。
+    yinghe = None
+    follows_consensus = bool(reverse_candidate and raw_dom_dir and direction == raw_dom_dir)
+    if reverse_ctx is not None:
+        yinghe = detect_spf_yinghe(
+            reverse_ctx.get("spf_odds"),
+            raw_dom_dir or "",
+            bool(reverse_ctx.get("home_is_upper", True)),
+        )
+        overall_reverse = bool(
+            follows_consensus
+            and reverse_ctx.get("is_single")
+            and yinghe.get("hit")
+        )
+    else:
+        overall_reverse = follows_consensus
     if overall_reverse:
         direction = "lower" if direction == "upper" else "upper"
         dom_weight, dom_intensity_sum = (lower_weight, lower_w) if direction == "lower" else (upper_weight, upper_w)
@@ -2953,6 +3023,12 @@ def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict
     confidence = int(base + strength_bonus + coverage_bonus - missing_penalty - reverse_penalty)
     confidence = max(35, min(92, confidence))
 
+    reverse_reason = None
+    if overall_reverse:
+        reverse_reason = (
+            _yinghe_reason(yinghe) if reverse_ctx is not None
+            else "展示共识一边倒且加权仍跟风"
+        )
     return {
         "direction": direction,
         "confidence": confidence,
@@ -2963,6 +3039,8 @@ def calc_prediction(factors: List[Dict[str, Any]], custom_weights: Optional[Dict
         "strong_ratio": round(strong_ratio, 3),
         "overall_reverse": overall_reverse,
         "consensus_dir": raw_dom_dir if overall_reverse else None,
+        "yinghe": yinghe,
+        "reverse_reason": reverse_reason,
     }
 
 
@@ -2996,10 +3074,18 @@ def generate_analysis(factors: List[Dict], prediction: Dict, match_info: Dict) -
         if consensus not in ("upper", "lower"):
             consensus = "lower" if direction == "upper" else "upper"
         consensus_text = "上盘" if consensus == "upper" else "下盘"
-        parts.append(
-            f"多数因子看{consensus_text}，热度逆向仍压不住，触发整体逆向，"
-            f"建议方向: {dir_text}，置信度{conf}%。"
-        )
+        yinghe_hit = (prediction.get("yinghe") or {}).get("hit")
+        if yinghe_hit:
+            parts.append(
+                f"多数因子看{consensus_text}，单关且竞彩胜平负赔率迎合该共识，"
+                f"热度逆向仍压不住，触发整体逆向，"
+                f"建议方向: {dir_text}，置信度{conf}%。"
+            )
+        else:
+            parts.append(
+                f"多数因子看{consensus_text}，热度逆向仍压不住，触发整体逆向，"
+                f"建议方向: {dir_text}，置信度{conf}%。"
+            )
     else:
         dir_text = "上盘" if direction == "upper" else "下盘"
         parts.append(f"综合{len(factors)}项因子，建议方向: {dir_text}（{upper_team}{'赢盘' if direction == 'upper' else '输盘'}），置信度{conf}%。")
@@ -3483,6 +3569,95 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "refScore": ref_score, "refBreakdown": breakdown, **_mode}
 
 
+KELLY_FLAG = 0.03
+_KELLY_SIDES = (("win", "主胜"), ("draw", "平局"), ("lose", "客胜"))
+_KELLY_BOOKS = _SHARP_BOOKS + _MAINSTREAM_BOOKS
+
+
+def _kelly_triple(company: Optional[Dict]) -> Optional[Dict[str, float]]:
+    if not company:
+        return None
+    raw = company.get("kelly") or {}
+    out = {}
+    for key in ("win", "draw", "lose"):
+        val = raw.get(key)
+        if val is None:
+            return None
+        try:
+            out[key] = float(val)
+        except (TypeError, ValueError):
+            return None
+    return out
+
+
+def _is_official_euro(company: Dict) -> bool:
+    name = str(company.get("bookmaker") or "")
+    return "官方" in name
+
+
+def build_kelly_hint(euro_data: Optional[Dict]) -> Optional[Dict[str, Any]]:
+    """官方凯利相对主流的偏离。只展示, 不进 7 因子。"""
+    companies = (euro_data or {}).get("companies") or []
+    official = next((c for c in companies if _is_official_euro(c)), None)
+    off = _kelly_triple(official)
+    if not off:
+        return None
+    samples: List[Dict[str, float]] = []
+    books: List[str] = []
+    for book in _KELLY_BOOKS:
+        row = next((c for c in companies if _match_bookmaker(c.get("bookmaker", ""), book)), None)
+        if not row or _is_official_euro(row):
+            continue
+        trip = _kelly_triple(row)
+        if not trip:
+            continue
+        samples.append(trip)
+        books.append(book)
+    if len(samples) < 2:
+        return None
+    avg = {
+        key: round(sum(s[key] for s in samples) / len(samples), 2)
+        for key in ("win", "draw", "lose")
+    }
+    items = []
+    for key, label in _KELLY_SIDES:
+        delta = round(off[key] - avg[key], 2)
+        tag = ""
+        if delta >= KELLY_FLAG:
+            tag = "偏松"
+        elif delta <= -KELLY_FLAG:
+            tag = "偏紧"
+        items.append({
+            "key": key,
+            "label": label,
+            "official": round(off[key], 2),
+            "mainstream": avg[key],
+            "delta": delta,
+            "tag": tag,
+        })
+    loose = [x for x in items if x["tag"] == "偏松"]
+    tight = [x for x in items if x["tag"] == "偏紧"]
+    flagged = bool(loose or tight)
+    if loose:
+        hit = max(loose, key=lambda x: x["delta"])
+        headline = f"官方{hit['label']}凯利偏松，可能迎合{hit['label']}"
+        lean = hit["key"]
+    elif tight:
+        hit = min(tight, key=lambda x: x["delta"])
+        headline = f"官方{hit['label']}凯利偏紧"
+        lean = hit["key"]
+    else:
+        headline = "官方凯利接近主流"
+        lean = None
+    return {
+        "headline": headline,
+        "flagged": flagged,
+        "lean": lean,
+        "books": books,
+        "items": items,
+    }
+
+
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
                   asian_data: Optional[List] = None,
                   euro_data: Optional[Dict] = None) -> Dict[str, Any]:
@@ -3559,7 +3734,12 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     all_factors = [f1, f2, f3, f4, f5, f6, f7]
 
     # 综合计算(7因子权重, 不使用盘口先验：竞彩整数盘的走水偏差不适用于真实亚盘小数盘口)
-    prediction = calc_prediction(all_factors, FACTOR_WEIGHTS)
+    # 整体逆向: 单关 + 展示共识一边倒 + 竞彩胜平负迎合该共识
+    prediction = calc_prediction(all_factors, FACTOR_WEIGHTS, reverse_ctx={
+        "is_single": is_single,
+        "spf_odds": jczq_company_spf,
+        "home_is_upper": is_home_let,
+    })
 
     # 生成分析文本
     analysis = generate_analysis(all_factors, prediction, match_info)
@@ -3568,10 +3748,12 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     h2h_ref = build_h2h_ref(match_data, match_info)
     recent_ref = build_recent_ref(match_data)
     h2h_factor = build_h2h_factor(h2h_ref, match_info)
+    kelly_hint = build_kelly_hint(euro_data)
 
     return {
         "factors": all_factors + [h2h_factor],
         "prediction": prediction,
         "h2hRef": h2h_ref,
         "recentRef": recent_ref,
+        "kellyHint": kelly_hint,
     }

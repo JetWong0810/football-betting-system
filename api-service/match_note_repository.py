@@ -312,9 +312,22 @@ class MatchNoteRepository:
             "deleted": False,
         }
 
-    def merge_factor_summary(self, user_id: int, match_id: str, factors: Any) -> Optional[Dict[str, Any]]:
+    def merge_factor_summary(
+        self,
+        user_id: int,
+        match_id: str,
+        factors: Any,
+        extras: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """预测完成后把因子计数合并进个人分析, 不覆盖其它点选。"""
         summary = summarize_core_factors(factors)
+        summary["kellyHint"] = (extras or {}).get("kellyHint") or None
+        if extras:
+            for key, val in extras.items():
+                if key == "kellyHint":
+                    continue
+                if val not in (None, "", False, [], {}):
+                    summary[key] = val
         existing = self.get_note(user_id, match_id) or {}
         struct = dict(existing.get("structure") or {})
         struct.update(summary)

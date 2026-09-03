@@ -1694,7 +1694,13 @@ def predict_match_direction(
 
         if user_id:
             try:
-                match_note_repo.merge_factor_summary(user_id, match_id, result.get("factors") or [])
+                extras = {}
+                hint = result.get("kellyHint") or {}
+                if hint.get("flagged") and hint.get("headline"):
+                    extras["kellyHint"] = hint["headline"]
+                match_note_repo.merge_factor_summary(
+                    user_id, match_id, result.get("factors") or [], extras=extras or None
+                )
             except Exception as note_err:
                 logger.warning(f"[predict] 回写个人分析因子失败: {note_err}")
 
@@ -1704,6 +1710,7 @@ def predict_match_direction(
             "prediction": result["prediction"],
             "h2hRef": result.get("h2hRef") or {"matches": [], "summary": {"total": 0}},
             "recentRef": result.get("recentRef") or {"home": [], "away": []},
+            "kellyHint": result.get("kellyHint"),
         }
     except Exception as e:
         logger.error(f"预测失败: {e}", exc_info=True)
