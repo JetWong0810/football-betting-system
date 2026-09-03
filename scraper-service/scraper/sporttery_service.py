@@ -15,6 +15,12 @@ EURO_TTL_SEC = int(os.getenv("ZGZCW_EURO_TTL_SEC", "2700"))
 FORM_TTL_SEC = int(os.getenv("ZGZCW_FORM_TTL_SEC", "21600"))
 OU_TTL_SEC = int(os.getenv("ZGZCW_OU_TTL_SEC", "2700"))
 TICKS_TTL_SEC = int(os.getenv("ZGZCW_TICKS_TTL_SEC", "2700"))
+# 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
+LIGHT_WINDOW_SEC = int(os.getenv("PRE_KICKOFF_LIGHT_SEC", "720"))
+PRE_KICKOFF_LEAD_SEC = int(os.getenv("PRE_KICKOFF_LEAD_SEC", "90"))
+NEAR_KICKOFF_SEC = int(os.getenv("PRE_KICKOFF_NEAR_SEC", "180"))
+NEAR_POLL_SEC = int(os.getenv("PRE_KICKOFF_POLL_SEC", "45"))
+TOO_LATE_SEC = int(os.getenv("PRE_KICKOFF_TOO_LATE_SEC", "15"))
 
 # 体彩 matchDate/matchTime 是北京墙钟；容器常为 UTC，naive .timestamp() 会 +8h
 _BJ = timezone(timedelta(hours=8))
@@ -108,6 +114,28 @@ def _is_stale(ts, ttl_sec: int) -> bool:
         return True
 
 
+def compute_sync_sleep(
+    eta: Optional[float],
+    full_interval: int = 600,
+    lead: int = PRE_KICKOFF_LEAD_SEC,
+    near: int = NEAR_KICKOFF_SEC,
+    near_sleep: int = NEAR_POLL_SEC,
+    too_late: int = TOO_LATE_SEC,
+) -> int:
+    """下场开赛倒计时 → 本轮结束后睡多久。尽量在开赛前再抓一次体彩赔率。"""
+    if eta is None or eta > full_interval:
+        return max(1, int(full_interval))
+    if eta <= too_late:
+        return max(1, int(full_interval))
+    if eta <= near:
+        return max(8, min(int(near_sleep), int(eta - too_late)))
+    return max(8, min(int(full_interval), int(eta - lead)))
+
+
+def should_light_sync(eta: Optional[float], window: int = LIGHT_WINDOW_SEC) -> bool:
+    return eta is not None and 0 < eta < window
+
+
 def parse_decimal(value: Optional[str]) -> Optional[float]:
     if value in (None, "", "-", "null"):
         return None
@@ -160,22 +188,26 @@ class SportterySyncService:
         "getUniformMatchResultV1.qry"
     )
 
-    def run_once(self) -> Dict[str, int]:
+    def seconds_until_next_kickoff(self) -> Optional[float]:
+        return self.repository.seconds_until_next_kickoff()
+
+    def run_once(self, light: bool = False) -> Dict[str, int]:
         self.stats = {"matches": 0, "odds": 0, "scores": 0, "closing_odds": 0, "asian": 0}
         for pool_name, pool_code in settings.POOL_CODES.items():
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
-        # 回填已完赛但缺比分的比赛(最近3天，体彩赛果 sectionsNo999)
+        if light:
+            logger.info("临近开赛轻量同步: 只更新体彩赔率, 跳过比分/终盘校正/亚盘")
+            self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
+            return self.stats
         try:
             self.stats["scores"] = self.backfill_scores(days=3)
         except Exception as e:
             logger.warning(f"比分回填失败: {e}")
-        # 赛果终赔校正(在售池封盘前停更, history 末条常不是真终盘)
         try:
             self.stats["closing_odds"] = self.backfill_closing_odds(days=3)
         except Exception as e:
             logger.warning(f"终盘回填失败: {e}")
-        # 在售 Bet365 亚盘定时刷新(终盘覆盖, 供同赔页)
         try:
             self.stats["asian"] = self.refresh_live_asian_bet365()
         except Exception as e:

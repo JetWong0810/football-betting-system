@@ -534,6 +534,29 @@ class OddsRepository:
             rows = cur.fetchall()
             return list(rows)
 
+    def seconds_until_next_kickoff(self) -> Optional[float]:
+        """最近一场未开赛的倒计时(秒)。无则 None。"""
+        sql = """
+            SELECT MIN(match_timestamp) - UNIX_TIMESTAMP() AS eta
+            FROM matches
+            WHERE match_id NOT LIKE 'jczq%%'
+              AND home_score IS NULL
+              AND match_timestamp IS NOT NULL
+              AND match_timestamp > UNIX_TIMESTAMP()
+        """
+        with get_db() as conn:
+            cur = _execute(conn, sql)
+            row = cur.fetchone()
+        if not row:
+            return None
+        eta = row.get("eta") if isinstance(row, dict) else (row[0] if row else None)
+        if eta is None:
+            return None
+        try:
+            return float(eta)
+        except (TypeError, ValueError):
+            return None
+
     def list_live_for_asian(self) -> List[Dict[str, Any]]:
         """在售/未出赛果体彩场(含进行中无比分, 开赛超72h脏数据排除)。"""
         sql = """
