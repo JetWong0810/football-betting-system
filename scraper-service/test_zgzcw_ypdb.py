@@ -30,6 +30,16 @@ YPDB_HTML = """
 <td>0.95</td><td>平手</td><td>0.85</td>
 <td>0.90</td><td>平/半</td><td>0.90</td>
 </tr>
+<tr>
+<td>7</td><td><a href="/ypdb/zhishu?company_id=3">ＳＢ/*</a></td>
+<td>0.86</td><td>平手</td><td>0.94</td>
+<td>0.82</td><td>受平/半</td><td>1.04</td>
+</tr>
+<tr>
+<td>8</td><td><a href="/ypdb/zhishu?company_id=11">韦*</a></td>
+<td>0.89</td><td>平手</td><td>0.91</td>
+<td>0.79</td><td>受平/半</td><td>1.01</td>
+</tr>
 </table>
 """
 
@@ -62,6 +72,20 @@ BJOP_HTML = """
 <td>3.80↑</td><td>3.40↓</td><td>2.00</td>
 <td></td><td>24.89</td><td>27.82</td><td>47.29</td>
 <td>0.98</td><td>0.95</td><td>0.92</td><td>0.95</td>
+</tr>
+<tr>
+<td>6</td><td><a href="/bjop/zhishu?company_id=3">ＳＢ/*</a></td>
+<td>2.70</td><td>3.20</td><td>2.40</td>
+<td>2.76</td><td>3.35</td><td>2.28</td>
+<td></td><td>32.96</td><td>27.15</td><td>39.89</td>
+<td>0.88</td><td>0.97</td><td>0.89</td><td>0.91</td>
+</tr>
+<tr>
+<td>7</td><td><a href="/bjop/zhishu?company_id=11">韦*</a></td>
+<td>2.80</td><td>3.20</td><td>2.40</td>
+<td>2.90</td><td>3.13</td><td>2.30</td>
+<td></td><td>31.37</td><td>29.07</td><td>39.56</td>
+<td>0.93</td><td>0.91</td><td>0.90</td><td>0.91</td>
 </tr>
 </table>
 """
@@ -137,10 +161,12 @@ def main() -> None:
     books = {c["bookmaker"]: c for c in parse_ypdb_mainstream(YPDB_HTML)}
     assert "Bet365" in books and "Pinnacle" in books and "威廉希尔" in books, books.keys()
     assert books["Pinnacle"]["current"]["handicap"] == 0.5
+    assert books["皇冠"]["cid"] == 3 and books["韦德"]["cid"] == 11, books.keys()
+    assert "伟德" not in books
 
     euro = parse_bjop(BJOP_HTML)
     names = [c["bookmaker"] for c in euro["companies"]]
-    assert names == ["竞彩官方", "Pinnacle", "Bet365"], names
+    assert names == ["竞彩官方", "Pinnacle", "Bet365", "皇冠", "韦德"], names
     b365 = next(c for c in euro["companies"] if c["bookmaker"] == "Bet365")
     assert abs(b365["current"]["win"] - 3.80) < 1e-9
     assert abs(b365["returnRate"] - 95.0) < 1e-9

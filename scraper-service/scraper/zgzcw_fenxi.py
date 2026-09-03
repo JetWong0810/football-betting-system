@@ -36,12 +36,15 @@ DXDB_URL = "https://fenxi.zgzcw.com/{fid}/dxdb"
 YPDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/ypdb/zhishu?company_id={cid}"
 
 # cid → 规范名。禁止子串匹配。
+# cid=3 沙巴(ＳＢ/SBOBET)按皇冠计入 F3; cid=11 是韦德, 不是伟德, 只进热度。
 ASIAN_CID_BOOK = {
     2: "Bet365",
     22: "Pinnacle",
     9: "威廉希尔",
     7: "澳门",
     5: "立博",
+    3: "皇冠",
+    11: "韦德",
 }
 EURO_CID_BOOK = {
     2: "Bet365",
@@ -49,7 +52,8 @@ EURO_CID_BOOK = {
     9: "威廉希尔",
     7: "澳门",
     5: "立博",
-    11: "伟德",
+    3: "皇冠",
+    11: "韦德",
 }
 
 _BLOCK_MARKERS = (

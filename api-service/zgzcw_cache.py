@@ -18,6 +18,8 @@ _EMPTY_FORM = {
 }
 
 _MAINSTREAM_AH = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
+# 足彩网 cid 读时纠正: 3=沙巴当皇冠; 11=韦德(旧缓存曾误标伟德)。
+_ZGZCW_CID_BOOK = {3: "皇冠", 11: "韦德"}
 
 
 def _loads(raw) -> Any:
@@ -29,6 +31,25 @@ def _loads(raw) -> Any:
         return json.loads(raw)
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
+
+
+def _normalize_bookmaker(row: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        cid = int(row.get("cid") or 0)
+    except (TypeError, ValueError):
+        return row
+    name = _ZGZCW_CID_BOOK.get(cid)
+    if not name or row.get("bookmaker") == name:
+        return row
+    out = dict(row)
+    out["bookmaker"] = name
+    return out
+
+
+def _normalize_companies(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    return [_normalize_bookmaker(c) if isinstance(c, dict) else c for c in rows]
 
 
 def get_fenxi_cache(match_id: str) -> Optional[Dict[str, Any]]:
@@ -182,6 +203,10 @@ def load_predict_inputs(match: Dict[str, Any]) -> Tuple[Optional[Dict], List, Op
         asian = asian.get("companies") or []
     if not isinstance(asian, list):
         asian = []
+    asian = _normalize_companies(asian)
+    if isinstance(euro, dict) and euro.get("companies"):
+        euro = dict(euro)
+        euro["companies"] = _normalize_companies(euro["companies"])
     if not asian:
         asian = asian_from_db(match)
 
@@ -236,7 +261,7 @@ def _companies(blob) -> List[Dict[str, Any]]:
         data = data.get("companies") or []
     if not isinstance(data, list):
         return []
-    return data
+    return _normalize_companies(data)
 
 
 def _euro_summary_rows(companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
