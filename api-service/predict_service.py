@@ -3572,95 +3572,6 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "refScore": ref_score, "refBreakdown": breakdown, **_mode}
 
 
-KELLY_FLAG = 0.03
-_KELLY_SIDES = (("win", "主胜"), ("draw", "平局"), ("lose", "客胜"))
-_KELLY_BOOKS = _SHARP_BOOKS + _MAINSTREAM_BOOKS
-
-
-def _kelly_triple(company: Optional[Dict]) -> Optional[Dict[str, float]]:
-    if not company:
-        return None
-    raw = company.get("kelly") or {}
-    out = {}
-    for key in ("win", "draw", "lose"):
-        val = raw.get(key)
-        if val is None:
-            return None
-        try:
-            out[key] = float(val)
-        except (TypeError, ValueError):
-            return None
-    return out
-
-
-def _is_official_euro(company: Dict) -> bool:
-    name = str(company.get("bookmaker") or "")
-    return "官方" in name
-
-
-def build_kelly_hint(euro_data: Optional[Dict]) -> Optional[Dict[str, Any]]:
-    """官方凯利相对主流的偏离。只展示, 不进 7 因子。"""
-    companies = (euro_data or {}).get("companies") or []
-    official = next((c for c in companies if _is_official_euro(c)), None)
-    off = _kelly_triple(official)
-    if not off:
-        return None
-    samples: List[Dict[str, float]] = []
-    books: List[str] = []
-    for book in _KELLY_BOOKS:
-        row = next((c for c in companies if _match_bookmaker(c.get("bookmaker", ""), book)), None)
-        if not row or _is_official_euro(row):
-            continue
-        trip = _kelly_triple(row)
-        if not trip:
-            continue
-        samples.append(trip)
-        books.append(book)
-    if len(samples) < 2:
-        return None
-    avg = {
-        key: round(sum(s[key] for s in samples) / len(samples), 2)
-        for key in ("win", "draw", "lose")
-    }
-    items = []
-    for key, label in _KELLY_SIDES:
-        delta = round(off[key] - avg[key], 2)
-        tag = ""
-        if delta >= KELLY_FLAG:
-            tag = "偏松"
-        elif delta <= -KELLY_FLAG:
-            tag = "偏紧"
-        items.append({
-            "key": key,
-            "label": label,
-            "official": round(off[key], 2),
-            "mainstream": avg[key],
-            "delta": delta,
-            "tag": tag,
-        })
-    loose = [x for x in items if x["tag"] == "偏松"]
-    tight = [x for x in items if x["tag"] == "偏紧"]
-    flagged = bool(loose or tight)
-    if loose:
-        hit = max(loose, key=lambda x: x["delta"])
-        headline = f"官方{hit['label']}凯利偏松，可能迎合{hit['label']}"
-        lean = hit["key"]
-    elif tight:
-        hit = min(tight, key=lambda x: x["delta"])
-        headline = f"官方{hit['label']}凯利偏紧"
-        lean = hit["key"]
-    else:
-        headline = "官方凯利接近主流"
-        lean = None
-    return {
-        "headline": headline,
-        "flagged": flagged,
-        "lean": lean,
-        "books": books,
-        "items": items,
-    }
-
-
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
                   asian_data: Optional[List] = None,
                   euro_data: Optional[Dict] = None) -> Dict[str, Any]:
@@ -3752,12 +3663,10 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
     h2h_ref = build_h2h_ref(match_data, match_info)
     recent_ref = build_recent_ref(match_data)
     h2h_factor = build_h2h_factor(h2h_ref, match_info)
-    kelly_hint = build_kelly_hint(euro_data)
 
     return {
         "factors": all_factors + [h2h_factor],
         "prediction": prediction,
         "h2hRef": h2h_ref,
         "recentRef": recent_ref,
-        "kellyHint": kelly_hint,
     }

@@ -162,8 +162,6 @@
           <text class="reverse-text">{{ reverseTagText }}</text>
         </view>
 
-        <KellyHintCard v-if="kellyHint" :data="kellyHint" />
-
         <!-- 已结束比赛：实际结果对比 (有比分才展示) -->
         <view class="actual-result" v-if="selectedMatch?.matchStatus === 'finished' && hasScore">
           <view class="actual-header">
@@ -424,7 +422,6 @@ import { filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
 import JapanIntelCard from '@/components/JapanIntelCard.vue'
-import KellyHintCard from '@/components/KellyHintCard.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
 import H2hRefCard from '@/components/H2hRefCard.vue'
 import RecentFormModal from '@/components/RecentFormModal.vue'
@@ -569,7 +566,6 @@ const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
-const kellyHint = ref(null)
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
 
 function applyPredictSimilarList(list) {
@@ -712,7 +708,6 @@ onLoad((query) => {
   selectedMatch.value = null
   h2hRef.value = null
   recentRef.value = { home: [], away: [] }
-  kellyHint.value = null
   showRecentModal.value = false
   showH2hModal.value = false
 
@@ -793,7 +788,6 @@ async function fetchMatches() {
           aiAnalysis.value = ''
           h2hRef.value = null
           recentRef.value = { home: [], away: [] }
-          kellyHint.value = null
           showRecentModal.value = false
           showH2hModal.value = false
           // 等 onShow 跳过缓存恢复后再开跑; 标志在回调里清
@@ -1021,7 +1015,6 @@ function selectMatch(match) {
   aiAnalysis.value = ''
   h2hRef.value = null
   recentRef.value = { home: [], away: [] }
-  kellyHint.value = null
   showRecentModal.value = false
   showH2hModal.value = false
   uni.removeStorageSync('predict-last-result')
@@ -1045,7 +1038,6 @@ async function startAnalysis() {
   aiAnalysis.value = ''
   h2hRef.value = null
   recentRef.value = { home: [], away: [] }
-  kellyHint.value = null
   showRecentModal.value = false
   showH2hModal.value = false
 
@@ -1131,7 +1123,6 @@ async function startAnalysis() {
     aiAnalysis.value = pred.analysis || '分析完成'
     h2hRef.value = data.h2hRef || { matches: [], summary: { total: 0 } }
     recentRef.value = data.recentRef || { home: [], away: [] }
-    kellyHint.value = data.kellyHint || null
     analysisComplete.value = true
 
     // 缓存本次预测结果
@@ -1144,7 +1135,6 @@ async function startAnalysis() {
         aiAnalysis: aiAnalysis.value,
         h2hRef: h2hRef.value,
         recentRef: recentRef.value,
-        kellyHint: kellyHint.value,
         matchStatus: matchStatus.value,
         timestamp: Date.now()
       })
@@ -1155,7 +1145,6 @@ async function startAnalysis() {
     analysisSteps.value = []
     h2hRef.value = null
     recentRef.value = { home: [], away: [] }
-    kellyHint.value = null
     showRecentModal.value = false
     showH2hModal.value = false
     uni.showToast({ title: e.message || '预测失败', icon: 'none' })
@@ -1211,7 +1200,6 @@ watch(matchStatus, async () => {
   analysisComplete.value = false
   h2hRef.value = null
   recentRef.value = { home: [], away: [] }
-  kellyHint.value = null
   showRecentModal.value = false
   showH2hModal.value = false
   searchKey.value = ''
