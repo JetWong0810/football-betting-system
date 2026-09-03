@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
+import json
 
 from database import get_db, update_sync_status
 
@@ -643,4 +644,49 @@ class OddsRepository:
                     close_std, close_home, close_away,
                     "Bet365",
                 ),
+            )
+
+    def list_fenxi_meta(self, match_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        if not match_ids:
+            return {}
+        ph = ",".join(["%s"] * len(match_ids))
+        sql = (
+            f"SELECT match_id, asian_fetched_at, euro_fetched_at, form_fetched_at "
+            f"FROM jczq_fenxi_cache WHERE match_id IN ({ph})"
+        )
+        with get_db() as conn:
+            cur = _execute(conn, sql, tuple(match_ids))
+            return {r["match_id"]: r for r in cur.fetchall()}
+
+    def upsert_fenxi_cache(
+        self,
+        match_id: str,
+        *,
+        asian=None,
+        euro=None,
+        form=None,
+    ) -> None:
+        if not match_id or (asian is None and euro is None and form is None):
+            return
+        with get_db() as conn:
+            _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
+            sets: List[str] = []
+            params: list = []
+            if asian is not None:
+                sets.append("asian_json=%s")
+                sets.append("asian_fetched_at=NOW()")
+                params.append(json.dumps(asian, ensure_ascii=False))
+            if euro is not None:
+                sets.append("euro_json=%s")
+                sets.append("euro_fetched_at=NOW()")
+                params.append(json.dumps(euro, ensure_ascii=False))
+            if form is not None:
+                sets.append("form_json=%s")
+                sets.append("form_fetched_at=NOW()")
+                params.append(json.dumps(form, ensure_ascii=False))
+            params.append(match_id)
+            _execute(
+                conn,
+                f"UPDATE jczq_fenxi_cache SET {', '.join(sets)} WHERE match_id=%s",
+                tuple(params),
             )

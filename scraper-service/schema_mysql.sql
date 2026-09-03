@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS sync_status (
     total_odds INT DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS jczq_fenxi_cache (
+    match_id VARCHAR(100) PRIMARY KEY,
+    asian_json MEDIUMTEXT,
+    euro_json MEDIUMTEXT,
+    form_json MEDIUMTEXT,
+    asian_fetched_at DATETIME DEFAULT NULL,
+    euro_fetched_at DATETIME DEFAULT NULL,
+    form_fetched_at DATETIME DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS jczq_odds_history (
     id INT AUTO_INCREMENT PRIMARY KEY,
     match_id VARCHAR(100) NOT NULL,

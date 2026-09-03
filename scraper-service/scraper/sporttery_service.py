@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -9,6 +10,9 @@ from repository import OddsRepository
 from scraper.score_sporttery import clear_cache as clear_score_cache, fetch_ft_scores
 
 logger = logging.getLogger(__name__)
+
+EURO_TTL_SEC = int(os.getenv("ZGZCW_EURO_TTL_SEC", "2700"))
+FORM_TTL_SEC = int(os.getenv("ZGZCW_FORM_TTL_SEC", "21600"))
 
 # 体彩 matchDate/matchTime 是北京墙钟；容器常为 UTC，naive .timestamp() 会 +8h
 _BJ = timezone(timedelta(hours=8))
@@ -83,6 +87,23 @@ def _asian_close_unchanged(match: Dict, line: Dict) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+def _is_stale(ts, ttl_sec: int) -> bool:
+    if ts is None:
+        return True
+    if isinstance(ts, str):
+        raw = ts.replace("Z", "")
+        try:
+            ts = datetime.fromisoformat(raw)
+        except ValueError:
+            return True
+    if getattr(ts, "tzinfo", None):
+        ts = ts.replace(tzinfo=None)
+    try:
+        return (datetime.now() - ts).total_seconds() > ttl_sec
+    except TypeError:
+        return True
 
 
 def parse_decimal(value: Optional[str]) -> Optional[float]:
@@ -267,9 +288,9 @@ class SportterySyncService:
         return updated
 
     def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
-        """在售场刷新 Bet365 亚盘终盘。优先足彩网 fenxi /ypdb, 500 作可选兜底。
+        """在售场刷新亚盘/欧赔/基本面。ypdb 优先, 剩余预算才开 bjop/bsls。
 
-        仅 Bet365; 写入 jczq_ah_history(终盘覆盖, 初盘保留首抓) + matches.asian_*。
+        Bet365 写入 jczq_ah_history; 主流公司 JSON 写入 jczq_fenxi_cache。
         Playwright 串行, 二次验证中止本轮。max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
@@ -302,14 +323,26 @@ class SportterySyncService:
             logger.warning("zgzcw 未映射到在售场, 本轮亚盘跳过")
             return 0
 
+        meta = self.repository.list_fenxi_meta([m["match_id"] for m in targets])
         updated = 0
         with FenxiSession() as sess:
+            packs = {}
             for m in targets:
                 if sess.aborted:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
-                line = sess.fetch_ypdb_bet365(fid)
+                pack = sess.fetch_ypdb(fid)
+                if not pack:
+                    continue
+                packs[mid] = pack
+                companies = pack.get("companies") or []
+                if companies:
+                    try:
+                        self.repository.upsert_fenxi_cache(mid, asian=companies)
+                    except Exception as e:
+                        logger.warning(f"亚盘缓存失败 {mid}: {e}")
+                line = pack.get("bet365")
                 if not line or line.get("close_hc") is None:
                     continue
                 if not overwrite_open and _asian_close_unchanged(m, line):
@@ -336,6 +369,38 @@ class SportterySyncService:
                     f"  亚盘 {m.get('match_code')} cid={line.get('cid')} "
                     f"{line.get('open_hc')}→{line.get('close_hc')} {line.get('name')}"
                 )
+
+            for m in targets:
+                if sess.aborted:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
+                row_meta = meta.get(mid) or {}
+                asian_changed = mid in packs and not _asian_close_unchanged(
+                    m, (packs[mid].get("bet365") or {})
+                )
+                need_bjop = asian_changed or _is_stale(row_meta.get("euro_fetched_at"), EURO_TTL_SEC)
+                need_bsls = _is_stale(row_meta.get("form_fetched_at"), FORM_TTL_SEC)
+                if need_bjop and sess.remaining > 0:
+                    euro = sess.fetch_bjop(fid)
+                    if euro and euro.get("companies"):
+                        try:
+                            self.repository.upsert_fenxi_cache(mid, euro=euro)
+                            logger.info(f"  欧赔 {m.get('match_code')} {len(euro['companies'])}家")
+                        except Exception as e:
+                            logger.warning(f"欧赔缓存失败 {mid}: {e}")
+                if need_bsls and sess.remaining > 0:
+                    form = sess.fetch_bsls(fid)
+                    if form and (form.get("homeRecent") or form.get("awayRecent")):
+                        try:
+                            self.repository.upsert_fenxi_cache(mid, form=form)
+                            logger.info(
+                                f"  基本面 {m.get('match_code')} "
+                                f"近{len(form.get('homeRecent') or [])}/"
+                                f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"基本面缓存失败 {mid}: {e}")
         logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
         return updated
 

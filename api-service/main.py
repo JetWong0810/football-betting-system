@@ -514,25 +514,12 @@ def get_match_indices(match_id: str):
 
 @app.get("/api/matches/{match_id}/data")
 def get_match_data(match_id: str):
-    """获取比赛基本面数据(交锋历史/近期战绩/未来赛程)"""
+    """获取比赛基本面数据(交锋历史/近期战绩/未来赛程)。优先读预抓缓存。"""
     match = repo.get_match(match_id)
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
-
-    match_code = match.get("match_code")
-    if not match_code:
-        raise HTTPException(status_code=400, detail="比赛缺少编号信息")
-
-    from repository import derive_sale_date
-    sale_date = derive_sale_date(match) or match.get("match_date")
-    if not sale_date:
-        raise HTTPException(status_code=400, detail="比赛缺少日期信息")
-
-    fid = get_fid_for_match(sale_date, match_code)
-    if not fid:
-        raise HTTPException(status_code=404, detail="未找到500.com对应比赛")
-
-    data = fetch_match_data(fid)
+    from zgzcw_cache import load_match_form
+    data = load_match_form(match)
     return {"match": format_match(match), "data": data}
 
 
@@ -1634,93 +1621,30 @@ def predict_match_direction(
     if req and req.market_heat:
         match_info["market_heat_desc"] = req.market_heat
 
-    # 获取500.com的fid，用于拉取基本面和亚盘/欧赔数据
-    match_data = None
-    asian_data = None
-    euro_data = None
-    fid = None
-
-    # 优先使用数据库已存储的 fid_500
-    stored_fid = match.get("fid_500")
-    if stored_fid:
-        fid = str(stored_fid)
-    else:
-        match_code = match.get("match_code")
-        if match_code:
-            from repository import derive_sale_date
-            sale_date = derive_sale_date(match) or match.get("match_date")
-            if sale_date:
-                fid = get_fid_for_match(sale_date, match_code)
-                # 缓存 fid 到数据库，避免重复请求
-                if fid:
-                    try:
-                        from database import get_db as _get_db2
-                        with _get_db2() as _conn2:
-                            _conn2.cursor().execute(
-                                "UPDATE matches SET fid_500 = %s WHERE match_id = %s",
-                                (fid, match_id))
-                    except Exception:
-                        pass
-
-    if fid:
+    # 亚盘/欧赔/基本面: 读 scraper 预抓缓存, 不开浏览器
+    from zgzcw_cache import apply_asian_handicap, load_predict_inputs
+    match_data, asian_data, euro_data = load_predict_inputs(match)
+    if match_data:
+        if match_data.get("homeRank"):
+            match_info["home_rank"] = match_data["homeRank"]
+        if match_data.get("awayRank"):
+            match_info["away_rank"] = match_data["awayRank"]
+        if match_data.get("homeTeamName"):
+            match_info["home_team_500"] = match_data["homeTeamName"]
+        if match_data.get("awayTeamName"):
+            match_info["away_team_500"] = match_data["awayTeamName"]
+        if match_data.get("homeTeamId"):
+            match_info["home_team_id_500"] = match_data["homeTeamId"]
+        if match_data.get("awayTeamId"):
+            match_info["away_team_id_500"] = match_data["awayTeamId"]
         try:
-            match_data = fetch_match_data(fid)
-            # 用500.com页面抓取的实时排名补充/覆盖DB排名
-            if match_data.get("homeRank"):
-                match_info["home_rank"] = match_data["homeRank"]
-            if match_data.get("awayRank"):
-                match_info["away_rank"] = match_data["awayRank"]
-            if match_data.get("homeTeamName"):
-                match_info["home_team_500"] = match_data["homeTeamName"]
-            if match_data.get("awayTeamName"):
-                match_info["away_team_500"] = match_data["awayTeamName"]
-            if match_data.get("homeTeamId"):
-                match_info["home_team_id_500"] = match_data["homeTeamId"]
-            if match_data.get("awayTeamId"):
-                match_info["away_team_id_500"] = match_data["awayTeamId"]
-            try:
-                from team_identity import enrich_match_data_aliases, upsert_from_match_data
-                enrich_match_data_aliases(match_data)
+            from team_identity import enrich_match_data_aliases, upsert_from_match_data
+            enrich_match_data_aliases(match_data)
+            if match_data.get("homeTeamId") or match_data.get("awayTeamId"):
                 upsert_from_match_data(match_id, match, match_data)
-            except Exception as e:
-                logger.warning(f"沉淀500球队身份失败: {e}")
         except Exception as e:
-            logger.warning(f"获取基本面数据失败: {e}")
-        try:
-            from odds500_service import fetch_asian_handicap, fetch_european_odds
-            asian_data = fetch_asian_handicap(fid)
-        except Exception as e:
-            logger.warning(f"获取亚盘数据失败: {e}")
-        try:
-            euro_data = fetch_european_odds(fid)
-        except Exception as e:
-            logger.warning(f"获取欧赔数据失败: {e}")
-
-    # 优先使用500.com亚盘的真实盘口值（比竞彩hhad的整数盘口更精确）
-    # 500.com: 正值=主队让球, 负值=客队让球(受让)
-    # 系统内统一: 负值=主队让球(与竞彩hhad一致)
-    # 取多家主流公司即时盘口的中位数（即时盘比初盘更反映当前市场判断）
-    if asian_data:
-        mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
-        curr_handicaps = []
-        open_handicaps = []
-        for c in asian_data:
-            if c.get("bookmaker") in mainstream:
-                h = c.get("current", {}).get("handicap")
-                if h is not None:
-                    curr_handicaps.append(float(h))
-                oh = (c.get("initial") or {}).get("handicap")
-                if oh is not None:
-                    open_handicaps.append(float(oh))
-        if curr_handicaps:
-            curr_handicaps.sort()
-            mid = len(curr_handicaps) // 2
-            median_hcap = curr_handicaps[mid]
-            match_info["handicap"] = -median_hcap
-        if open_handicaps:
-            open_handicaps.sort()
-            mid_o = len(open_handicaps) // 2
-            match_info["handicap_open"] = -open_handicaps[mid_o]
+            logger.warning(f"沉淀球队身份失败: {e}")
+    apply_asian_handicap(match_info, asian_data)
 
     # 比分回填：已结束但DB无比分时，从体彩赛果抓取并落库
     import time as _t
@@ -1853,76 +1777,29 @@ def worldcup_predict(match_id: str, req: PredictRequest = None):
     if req and req.market_heat:
         match_info["market_heat_desc"] = req.market_heat
 
-    match_data = None
-    asian_data = None
-    euro_data = None
-    fid = None
-
-    stored_fid = match.get("fid_500")
-    if stored_fid:
-        fid = str(stored_fid)
-    else:
-        match_code = match.get("match_code")
-        if match_code:
-            from repository import derive_sale_date
-            sale_date = derive_sale_date(match) or match.get("match_date")
-            if sale_date:
-                fid = get_fid_for_match(sale_date, match_code)
-                if fid:
-                    try:
-                        from database import get_db as _get_db2
-                        with _get_db2() as _conn2:
-                            _conn2.cursor().execute(
-                                "UPDATE matches SET fid_500 = %s WHERE match_id = %s",
-                                (fid, match_id))
-                    except Exception:
-                        pass
-
-    if fid:
+    from zgzcw_cache import apply_asian_handicap, load_predict_inputs
+    match_data, asian_data, euro_data = load_predict_inputs(match)
+    if match_data:
+        if match_data.get("homeRank"):
+            match_info["home_rank"] = match_data["homeRank"]
+        if match_data.get("awayRank"):
+            match_info["away_rank"] = match_data["awayRank"]
+        if match_data.get("homeTeamName"):
+            match_info["home_team_500"] = match_data["homeTeamName"]
+        if match_data.get("awayTeamName"):
+            match_info["away_team_500"] = match_data["awayTeamName"]
+        if match_data.get("homeTeamId"):
+            match_info["home_team_id_500"] = match_data["homeTeamId"]
+        if match_data.get("awayTeamId"):
+            match_info["away_team_id_500"] = match_data["awayTeamId"]
         try:
-            match_data = fetch_match_data(fid)
-            if match_data.get("homeRank"):
-                match_info["home_rank"] = match_data["homeRank"]
-            if match_data.get("awayRank"):
-                match_info["away_rank"] = match_data["awayRank"]
-            if match_data.get("homeTeamName"):
-                match_info["home_team_500"] = match_data["homeTeamName"]
-            if match_data.get("awayTeamName"):
-                match_info["away_team_500"] = match_data["awayTeamName"]
-            if match_data.get("homeTeamId"):
-                match_info["home_team_id_500"] = match_data["homeTeamId"]
-            if match_data.get("awayTeamId"):
-                match_info["away_team_id_500"] = match_data["awayTeamId"]
-            try:
-                from team_identity import enrich_match_data_aliases, upsert_from_match_data
-                enrich_match_data_aliases(match_data)
+            from team_identity import enrich_match_data_aliases, upsert_from_match_data
+            enrich_match_data_aliases(match_data)
+            if match_data.get("homeTeamId") or match_data.get("awayTeamId"):
                 upsert_from_match_data(match_id, match, match_data)
-            except Exception as e:
-                logger.warning(f"[worldcup] 沉淀500球队身份失败: {e}")
         except Exception as e:
-            logger.warning(f"[worldcup] 获取基本面数据失败: {e}")
-        try:
-            from odds500_service import fetch_asian_handicap, fetch_european_odds
-            asian_data = fetch_asian_handicap(fid)
-        except Exception as e:
-            logger.warning(f"[worldcup] 获取亚盘数据失败: {e}")
-        try:
-            euro_data = fetch_european_odds(fid)
-        except Exception as e:
-            logger.warning(f"[worldcup] 获取欧赔数据失败: {e}")
-
-    if asian_data:
-        mainstream = ["Pinnacle", "Bet365", "皇冠", "威廉希尔", "澳门", "立博"]
-        curr_handicaps = []
-        for c in asian_data:
-            if c.get("bookmaker") in mainstream:
-                h = c.get("current", {}).get("handicap")
-                if h is not None:
-                    curr_handicaps.append(float(h))
-        if curr_handicaps:
-            curr_handicaps.sort()
-            mid = len(curr_handicaps) // 2
-            match_info["handicap"] = -curr_handicaps[mid]
+            logger.warning(f"[worldcup] 沉淀球队身份失败: {e}")
+    apply_asian_handicap(match_info, asian_data)
 
     try:
         result = predict_wc_match(match_info, match_data=match_data, asian_data=asian_data, euro_data=euro_data)
