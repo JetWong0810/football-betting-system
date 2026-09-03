@@ -651,7 +651,8 @@ class OddsRepository:
             return {}
         ph = ",".join(["%s"] * len(match_ids))
         sql = (
-            f"SELECT match_id, asian_fetched_at, euro_fetched_at, form_fetched_at "
+            f"SELECT match_id, asian_fetched_at, euro_fetched_at, form_fetched_at, "
+            f"ou_fetched_at, ticks_fetched_at "
             f"FROM jczq_fenxi_cache WHERE match_id IN ({ph})"
         )
         with get_db() as conn:
@@ -665,8 +666,9 @@ class OddsRepository:
         asian=None,
         euro=None,
         form=None,
+        ou=None,
     ) -> None:
-        if not match_id or (asian is None and euro is None and form is None):
+        if not match_id or (asian is None and euro is None and form is None and ou is None):
             return
         with get_db() as conn:
             _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
@@ -684,9 +686,85 @@ class OddsRepository:
                 sets.append("form_json=%s")
                 sets.append("form_fetched_at=NOW()")
                 params.append(json.dumps(form, ensure_ascii=False))
+            if ou is not None:
+                sets.append("ou_json=%s")
+                sets.append("ou_fetched_at=NOW()")
+                params.append(json.dumps(ou, ensure_ascii=False))
             params.append(match_id)
             _execute(
                 conn,
                 f"UPDATE jczq_fenxi_cache SET {', '.join(sets)} WHERE match_id=%s",
                 tuple(params),
             )
+
+    def replace_ah_ticks(
+        self,
+        match_id: str,
+        ticks: List[Dict[str, Any]],
+        *,
+        company: str = "Bet365",
+        cid: int = 2,
+    ) -> int:
+        """整段替换某公司亚盘 ticks, 不碰 jczq_ah_history。"""
+        if not match_id or not ticks:
+            return 0
+        rows = []
+        for t in ticks:
+            ts = _normalize_tick_time(t.get("time"))
+            if not ts:
+                continue
+            rows.append((
+                match_id,
+                company,
+                int(cid),
+                ts,
+                t.get("home"),
+                t.get("handicap"),
+                t.get("handicapText") or "",
+                t.get("away"),
+            ))
+        if not rows:
+            return 0
+        with get_db() as conn:
+            _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
+            _execute(
+                conn,
+                "DELETE FROM jczq_ah_ticks WHERE match_id=%s AND company=%s",
+                (match_id, company),
+            )
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    """INSERT IGNORE INTO jczq_ah_ticks
+                       (match_id, company, cid, tick_time, home_odds, handicap, handicap_text, away_odds)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    rows,
+                )
+            finally:
+                cur.close()
+            _execute(
+                conn,
+                "UPDATE jczq_fenxi_cache SET ticks_fetched_at=NOW() WHERE match_id=%s",
+                (match_id,),
+            )
+        return len(rows)
+
+
+def _normalize_tick_time(raw) -> Optional[str]:
+    if raw is None:
+        return None
+    if hasattr(raw, "strftime"):
+        return raw.strftime("%Y-%m-%d %H:%M:%S")
+    text = str(raw).strip().replace("T", " ")
+    if not text:
+        return None
+    now = datetime.now()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m-%d %H:%M:%S", "%m-%d %H:%M"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            if dt.year == 1900:
+                dt = dt.replace(year=now.year)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return None

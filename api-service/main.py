@@ -24,7 +24,7 @@ from database import init_db, fetch_sync_status
 from repository import OddsRepository, derive_sale_date
 from user_repository import UserRepository
 from match_note_repository import MatchNoteRepository, NOTE_MAX_LEN
-from odds500_service import get_fid_for_match, fetch_all_indices, fetch_euro_history, fetch_asian_history, fetch_ou_history, fetch_match_data, get_match_squad_worth
+from odds500_service import get_fid_for_match, get_match_squad_worth
 from predict_service import predict_match
 from auth import hash_password, verify_password, create_access_token, require_auth, get_current_user_id
 from settings import WECHAT_APPID, WECHAT_SECRET, WECHAT_API_URL
@@ -485,30 +485,16 @@ def get_match_plays(match_id: str):
 
 @app.get("/api/matches/{match_id}/indices")
 def get_match_indices(match_id: str):
-    """获取比赛指数数据(欧赔/亚盘/大小球) - 实时从500.com抓取"""
+    """指数(欧赔/亚盘/大小球)只读预抓缓存, 不开浏览器。"""
     match = repo.get_match(match_id)
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
-
-    match_code = match.get("match_code")
-    if not match_code:
-        raise HTTPException(status_code=400, detail="比赛缺少编号信息")
-
-    # 售卖日期从期号解析 (260604201 -> 2026-06-04)
-    from repository import derive_sale_date
-    sale_date = derive_sale_date(match) or match.get("match_date")
-    if not sale_date:
-        raise HTTPException(status_code=400, detail="比赛缺少日期信息")
-
-    fid = get_fid_for_match(sale_date, match_code)
-    if not fid:
-        raise HTTPException(status_code=404, detail="未找到500.com对应比赛")
-
-    indices = fetch_all_indices(fid)
+    from zgzcw_cache import load_indices
+    packed = load_indices(match)
     return {
         "match": format_match(match),
-        "fid": fid,
-        "indices": indices,
+        "fid": packed.get("fid") or "",
+        "indices": packed.get("indices") or {},
     }
 
 
@@ -524,17 +510,20 @@ def get_match_data(match_id: str):
 
 
 @app.get("/api/odds/history")
-def get_odds_history(fid: str, cid: int, type: str = "european"):
-    """获取某公司赔率变动历史"""
-    if type == "european":
-        data = fetch_euro_history(fid, cid)
-    elif type == "asian":
-        data = fetch_asian_history(fid, cid)
-    elif type == "overunder":
-        data = fetch_ou_history(fid, cid)
-    else:
+def get_odds_history(
+    fid: str = "",
+    cid: int = 0,
+    type: str = "european",
+    matchId: Optional[str] = None,
+):
+    """赔率变动只读库。Bet365 亚盘走 ticks, 其余用初/即时两点。"""
+    if type not in ("european", "asian", "overunder"):
         raise HTTPException(status_code=400, detail="type 必须是 european/asian/overunder")
-    return {"history": data}
+    from zgzcw_cache import find_match_by_fid, load_odds_history
+    match = repo.get_match(matchId) if matchId else None
+    if not match and fid:
+        match = find_match_by_fid(fid)
+    return {"history": load_odds_history(match, type, cid)}
 
 
 # ==================== 用户相关API ====================

@@ -1,9 +1,10 @@
-"""足彩网 fenxi 分析页: 单 Playwright 上下文串行抓 /ypdb /bjop /bsls。
+"""足彩网 fenxi 分析页: 单 Playwright 上下文串行抓 /ypdb /bjop /bsls /dxdb /ypdb/zhishu。
 
 company_id 必须整段数字相等: 22 不得命中 2。
 ypdb 列序与 500 相反: 初盘(主/盘/客) 在前, 即时在后。
 盘口文案与 500 相同(受=主受让), 亚盘数值为 500 原值正=主让。
 入库公司名用规范名(Bet365), 不存 36*。
+大小球与亚盘 ticks 只给指数页, 不进 7 因子。
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ SLEEP_MAX = float(os.getenv("ZGZCW_FENXI_SLEEP_MAX", "3.0"))
 YPDB_URL = "https://fenxi.zgzcw.com/{fid}/ypdb"
 BJOP_URL = "https://fenxi.zgzcw.com/{fid}/bjop"
 BSLS_URL = "https://fenxi.zgzcw.com/{fid}/bsls"
+DXDB_URL = "https://fenxi.zgzcw.com/{fid}/dxdb"
+YPDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/ypdb/zhishu?company_id={cid}"
 
 # cid → 规范名。禁止子串匹配。
 ASIAN_CID_BOOK = {
@@ -66,7 +69,10 @@ _AH_BLOB_RE = re.compile(
 )
 _SCORE_RE = re.compile(r"^(\d+):(\d+)$")
 _DATE_RE = re.compile(r"^(\d{2,4})-(\d{1,2})-(\d{1,2})$")
+_DT_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)")
+_DT_SHORT_RE = re.compile(r"^(\d{1,2}-\d{1,2}[ T]\d{2}:\d{2}(?::\d{2})?)")
 _FLIP_AH = {"赢": "输", "赢半": "输半", "输": "赢", "输半": "赢半", "走": "走"}
+DXDB_CID_BOOK = {**EURO_CID_BOOK, **ASIAN_CID_BOOK}
 
 
 def _clean_hc(text: str) -> str:
@@ -95,17 +101,21 @@ def _is_ad(name: str) -> bool:
 def _ypdb_from_tds(tds, cid: int, name: str) -> Optional[dict]:
     if len(tds) < 8:
         return None
+    open_hc_text = _clean_hc(tds[3].get_text(strip=True))
+    close_hc_text = _clean_hc(tds[6].get_text(strip=True))
     open_home = _parse_odds(tds[2].get_text(strip=True))
-    open_hc = _parse_handicap_value(_clean_hc(tds[3].get_text(strip=True)))
+    open_hc = _parse_handicap_value(open_hc_text)
     open_away = _parse_odds(tds[4].get_text(strip=True))
     close_home = _parse_odds(tds[5].get_text(strip=True))
-    close_hc = _parse_handicap_value(_clean_hc(tds[6].get_text(strip=True)))
+    close_hc = _parse_handicap_value(close_hc_text)
     close_away = _parse_odds(tds[7].get_text(strip=True))
     if close_hc is None:
         return None
     return {
         "open_hc": open_hc,
         "close_hc": close_hc,
+        "open_hc_text": open_hc_text,
+        "close_hc_text": close_hc_text,
         "open_home": open_home,
         "open_away": open_away,
         "close_home": close_home,
@@ -162,11 +172,13 @@ def parse_ypdb_mainstream(html: str) -> List[dict]:
             "initial": {
                 "home": line["open_home"],
                 "handicap": line["open_hc"],
+                "handicapText": line.get("open_hc_text") or "",
                 "away": line["open_away"],
             },
             "current": {
                 "home": line["close_home"],
                 "handicap": line["close_hc"],
+                "handicapText": line.get("close_hc_text") or "",
                 "away": line["close_away"],
             },
         })
@@ -238,6 +250,116 @@ def parse_bjop(html: str) -> Dict:
             "implied": implied,
         })
     return {"companies": companies, "summary": {}}
+
+
+def _parse_ou_line(text: str) -> Optional[float]:
+    """大小球盘口: 2.5球 / 2/2.5球 → 2.5 / 2.25。"""
+    raw = _clean_hc(text).replace("球", "").replace(" ", "")
+    if not raw:
+        return None
+    if "/" in raw:
+        left, right = raw.split("/", 1)
+        a = _parse_odds(left)
+        b = _parse_odds(right)
+        if a is None or b is None:
+            return None
+        return round((a + b) / 2, 2)
+    return _parse_odds(raw)
+
+
+def parse_dxdb(html: str) -> List[dict]:
+    """大小球 → 与 500 fetch_over_under 同构。不进 7 因子。"""
+    soup = BeautifulSoup(html, "html.parser")
+    companies = []
+    seen = set()
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 8:
+            continue
+        name = tds[1].get_text(strip=True)
+        if _is_ad(name) or name in ("公司", "平均值", "最大值", "最小值"):
+            continue
+        if "平均" in name:
+            continue
+        a = tds[1].find("a", href=True) or tr.find("a", href=True)
+        cid = _link_cid(a["href"]) if a else None
+        book = DXDB_CID_BOOK.get(cid) if cid is not None else None
+        if not book or cid in seen:
+            continue
+        init_over = _parse_odds(tds[2].get_text(strip=True))
+        init_line = _parse_ou_line(tds[3].get_text(strip=True))
+        init_under = _parse_odds(tds[4].get_text(strip=True))
+        curr_over = _parse_odds(tds[5].get_text(strip=True))
+        curr_line = _parse_ou_line(tds[6].get_text(strip=True))
+        curr_under = _parse_odds(tds[7].get_text(strip=True))
+        if curr_line is None or curr_over is None or curr_under is None:
+            continue
+        seen.add(cid)
+        companies.append({
+            "bookmaker": book,
+            "cid": int(cid),
+            "initial": {
+                "over": init_over,
+                "line": init_line,
+                "under": init_under,
+            },
+            "current": {
+                "over": curr_over,
+                "line": curr_line,
+                "under": curr_under,
+            },
+        })
+    return companies
+
+
+def _zhishu_time(cells: List[str]) -> Optional[tuple]:
+    for i, c in enumerate(cells):
+        t = (c or "").strip()
+        if _DT_RE.match(t) or _DT_SHORT_RE.match(t):
+            return i, t
+    return None
+
+
+def _zhishu_triple(cells: List[str]) -> Optional[tuple]:
+    """从时间后的格子里找 主水/盘口/客水。"""
+    for i in range(len(cells) - 2):
+        home = _parse_odds(cells[i])
+        hc_text = _clean_hc(cells[i + 1])
+        away = _parse_odds(cells[i + 2])
+        hc = _parse_handicap_value(hc_text)
+        if home is not None and away is not None and hc is not None:
+            return home, hc, hc_text, away
+    return None
+
+
+def parse_ypdb_zhishu(html: str) -> List[dict]:
+    """Bet365 亚盘变动轴, 页面新在前。handicap=500 原值正=主让。"""
+    soup = BeautifulSoup(html, "html.parser")
+    out: List[dict] = []
+    seen = set()
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 4:
+            continue
+        found = _zhishu_time(cells)
+        if not found:
+            continue
+        time_i, time_s = found
+        triple = _zhishu_triple(cells[time_i + 1:])
+        if not triple:
+            continue
+        if time_s in seen:
+            continue
+        seen.add(time_s)
+        home, hc, hc_text, away = triple
+        out.append({
+            "home": home,
+            "handicap": hc,
+            "handicapText": hc_text,
+            "away": away,
+            "time": time_s,
+        })
+    return out
 
 
 def _norm_date(text: str) -> str:
@@ -562,3 +684,24 @@ class FenxiSession:
         if not data.get("homeRecent") and not data.get("awayRecent"):
             logger.info(f"bsls 无近期 fid={fid}")
         return data
+
+    def fetch_dxdb(self, fid: str) -> Optional[dict]:
+        html = self._open(DXDB_URL.format(fid=fid), f"dxdb fid={fid}")
+        if not html:
+            return None
+        companies = parse_dxdb(html)
+        if not companies:
+            logger.info(f"dxdb 无主流大小球 fid={fid}")
+        return {"companies": companies}
+
+    def fetch_ypdb_zhishu(self, fid: str, cid: int = BET365_CID) -> Optional[list]:
+        html = self._open(
+            YPDB_ZHISHU_URL.format(fid=fid, cid=cid),
+            f"ypdb/zhishu fid={fid} cid={cid}",
+        )
+        if not html:
+            return None
+        ticks = parse_ypdb_zhishu(html)
+        if not ticks:
+            logger.info(f"ypdb/zhishu 无 ticks fid={fid} cid={cid}")
+        return ticks

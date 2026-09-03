@@ -42,6 +42,8 @@ def _init_mysql_db() -> None:
                             # 忽略已存在的表等错误，继续执行
                             if "already exists" not in str(e).lower() and "duplicate" not in str(e).lower():
                                 print(f"警告: 执行 SQL 命令失败: {command[:50]}... 错误: {e}")
+            _ensure_fenxi_cache_columns(cursor)
+            _ensure_ah_ticks_table(cursor)
         conn.commit()
     finally:
         conn.close()
@@ -117,6 +119,65 @@ def _ensure_wechat_columns(cursor) -> None:
         _add_index_if_missing(cursor, "users", "idx_openid", "(openid)")
     except Exception as e:
         print(f"警告: 自动添加微信字段失败: {e}")
+
+
+def _ensure_column(cursor, table: str, column: str, definition: str) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME=%s AND COLUMN_NAME=%s
+        """,
+        (table, column),
+    )
+    exists = cursor.fetchone()
+    count = exists[0] if isinstance(exists, (tuple, list)) else (
+        exists.get("COUNT(*)") if isinstance(exists, dict) else 0
+    )
+    if count:
+        return
+    try:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    except Exception as e:
+        if "duplicate" not in str(e).lower():
+            print(f"警告: 添加字段 {table}.{column} 失败: {e}")
+
+
+def _ensure_fenxi_cache_columns(cursor) -> None:
+    _ensure_column(cursor, "jczq_fenxi_cache", "ou_json", "MEDIUMTEXT")
+    _ensure_column(cursor, "jczq_fenxi_cache", "ou_fetched_at", "DATETIME DEFAULT NULL")
+    _ensure_column(cursor, "jczq_fenxi_cache", "ticks_fetched_at", "DATETIME DEFAULT NULL")
+
+
+def _ensure_ah_ticks_table(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='jczq_ah_ticks'
+        """
+    )
+    exists = cursor.fetchone()
+    count = exists[0] if isinstance(exists, (tuple, list)) else (
+        exists.get("COUNT(*)") if isinstance(exists, dict) else 0
+    )
+    if count:
+        return
+    cursor.execute(
+        """
+        CREATE TABLE jczq_ah_ticks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            match_id VARCHAR(100) NOT NULL,
+            company VARCHAR(50) NOT NULL DEFAULT 'Bet365',
+            cid INT NOT NULL DEFAULT 2,
+            tick_time DATETIME NOT NULL,
+            home_odds DECIMAL(8,3) DEFAULT NULL,
+            handicap DECIMAL(6,2) DEFAULT NULL COMMENT '500原值 正=主让',
+            handicap_text VARCHAR(32) DEFAULT NULL,
+            away_odds DECIMAL(8,3) DEFAULT NULL,
+            UNIQUE KEY uk_match_company_time (match_id, company, tick_time),
+            INDEX idx_match_company (match_id, company)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
 
 
 def _connect():

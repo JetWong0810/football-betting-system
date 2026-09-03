@@ -673,7 +673,7 @@ async function toggleHistory(type, cid, index) {
 
   try {
     const res = await request({
-      url: `/api/odds/history?fid=${fid.value}&cid=${cid}&type=${type}`,
+      url: `/api/odds/history?fid=${fid.value}&cid=${cid}&type=${type}&matchId=${matchId.value}`,
     });
     historyModal.data = res.history || [];
   } catch (e) {

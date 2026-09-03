@@ -38,8 +38,9 @@ def get_fenxi_cache(match_id: str) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT asian_json, euro_json, form_json, "
-                "asian_fetched_at, euro_fetched_at, form_fetched_at "
+                "SELECT asian_json, euro_json, form_json, ou_json, "
+                "asian_fetched_at, euro_fetched_at, form_fetched_at, "
+                "ou_fetched_at, ticks_fetched_at "
                 "FROM jczq_fenxi_cache WHERE match_id=%s",
                 (match_id,),
             )
@@ -80,6 +81,7 @@ def asian_from_db(match: Dict[str, Any]) -> List[Dict[str, Any]]:
     if ah and ah.get("close_handicap") is not None:
         return [{
             "bookmaker": "Bet365",
+            "cid": 2,
             "initial": {
                 "home": ah.get("open_home_odds"),
                 "handicap": _neg(ah.get("open_handicap")),
@@ -100,6 +102,7 @@ def asian_from_db(match: Dict[str, Any]) -> List[Dict[str, Any]]:
         return []
     return [{
         "bookmaker": "Bet365",
+        "cid": 2,
         "initial": {},
         "current": {
             "home": match.get("asian_home_odds"),
@@ -217,3 +220,199 @@ def load_predict_inputs(match: Dict[str, Any]) -> Tuple[Optional[Dict], List, Op
 def load_match_form(match: Dict[str, Any]) -> Dict[str, Any]:
     form, _, _ = load_predict_inputs(match)
     return form or dict(_EMPTY_FORM)
+
+
+def _fmt_ts(ts) -> str:
+    if ts is None:
+        return ""
+    if hasattr(ts, "strftime"):
+        return ts.strftime("%Y-%m-%d %H:%M:%S")
+    return str(ts)[:19]
+
+
+def _companies(blob) -> List[Dict[str, Any]]:
+    data = _loads(blob)
+    if isinstance(data, dict):
+        data = data.get("companies") or []
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def _euro_summary_rows(companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not companies:
+        return []
+    try:
+        from odds500_service import _calc_euro_summary
+        summary = _calc_euro_summary(companies)
+    except Exception:
+        summary = {}
+    rows = []
+    for label, key in (("最大值", "max"), ("最小值", "min"), ("平均值", "avg")):
+        block = summary.get(key) or {}
+        if not block:
+            continue
+        rows.append({
+            "bookmaker": label,
+            "initial": block.get("initial") or {},
+            "current": block.get("current") or {},
+            "returnRate": block.get("returnRate") or 0,
+        })
+    return rows + companies
+
+
+def load_indices(match: Dict[str, Any]) -> Dict[str, Any]:
+    """指数页只读库, 不开浏览器。fid 返回 fid_zgzcw 供前端 history 查询。"""
+    cache = get_fenxi_cache(match.get("match_id") or "") or {}
+    euro = _companies(cache.get("euro_json"))
+    asian = _companies(cache.get("asian_json"))
+    ou = _companies(cache.get("ou_json"))
+    if not asian:
+        asian = asian_from_db(match)
+    return {
+        "fid": str(match.get("fid_zgzcw") or "").strip(),
+        "indices": {
+            "european": _euro_summary_rows(euro),
+            "asian": asian,
+            "overUnder": ou,
+        },
+    }
+
+
+def find_match_by_fid(fid: str) -> Optional[Dict[str, Any]]:
+    if not fid:
+        return None
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM matches WHERE fid_zgzcw=%s OR fid_500=%s LIMIT 1",
+                (fid, fid),
+            )
+            return cur.fetchone()
+    except Exception as e:
+        logger.warning(f"按 fid 查比赛失败 {fid}: {e}")
+        return None
+
+
+def list_ah_ticks(match_id: str, cid: int = 2) -> List[Dict[str, Any]]:
+    if not match_id:
+        return []
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT tick_time, home_odds, handicap, handicap_text, away_odds "
+                "FROM jczq_ah_ticks WHERE match_id=%s AND cid=%s "
+                "ORDER BY tick_time DESC",
+                (match_id, cid),
+            )
+            out = []
+            for r in cur.fetchall() or []:
+                out.append({
+                    "home": float(r["home_odds"]) if r.get("home_odds") is not None else None,
+                    "handicap": float(r["handicap"]) if r.get("handicap") is not None else None,
+                    "handicapText": r.get("handicap_text") or "",
+                    "away": float(r["away_odds"]) if r.get("away_odds") is not None else None,
+                    "time": _fmt_ts(r.get("tick_time")),
+                })
+            return out
+    except Exception as e:
+        logger.warning(f"读亚盘 ticks 失败 {match_id}: {e}")
+        return []
+
+
+def _two_point_history(item: Optional[Dict[str, Any]], kind: str, fetched_at) -> List[Dict[str, Any]]:
+    if not item:
+        return []
+    ini = item.get("initial") or {}
+    cur = item.get("current") or {}
+    now_s = _fmt_ts(fetched_at) or "即时"
+    if kind == "european":
+        curr_row = {
+            "win": cur.get("win"),
+            "draw": cur.get("draw"),
+            "lose": cur.get("lose"),
+            "returnRate": item.get("returnRate"),
+            "time": now_s,
+        }
+        init_row = {
+            "win": ini.get("win"),
+            "draw": ini.get("draw"),
+            "lose": ini.get("lose"),
+            "returnRate": item.get("returnRate"),
+            "time": "初盘",
+        }
+        if any(init_row.get(k) is not None for k in ("win", "draw", "lose")):
+            return [curr_row, init_row]
+        return [curr_row]
+    if kind == "asian":
+        curr_row = {
+            "home": cur.get("home"),
+            "handicap": cur.get("handicap"),
+            "handicapText": cur.get("handicapText") or "",
+            "away": cur.get("away"),
+            "time": now_s,
+        }
+        init_row = {
+            "home": ini.get("home"),
+            "handicap": ini.get("handicap"),
+            "handicapText": ini.get("handicapText") or "",
+            "away": ini.get("away"),
+            "time": "初盘",
+        }
+        if any(init_row.get(k) is not None for k in ("home", "handicap", "away")):
+            return [curr_row, init_row]
+        return [curr_row]
+    curr_row = {
+        "over": cur.get("over"),
+        "line": cur.get("line"),
+        "under": cur.get("under"),
+        "time": now_s,
+    }
+    init_row = {
+        "over": ini.get("over"),
+        "line": ini.get("line"),
+        "under": ini.get("under"),
+        "time": "初盘",
+    }
+    if any(init_row.get(k) is not None for k in ("over", "line", "under")):
+        return [curr_row, init_row]
+    return [curr_row]
+
+
+def _pick_company(companies: List[Dict[str, Any]], cid: int) -> Optional[Dict[str, Any]]:
+    for c in companies:
+        try:
+            if int(c.get("cid") or 0) == int(cid):
+                return c
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def load_odds_history(
+    match: Optional[Dict[str, Any]],
+    kind: str,
+    cid: int,
+) -> List[Dict[str, Any]]:
+    """赔率变动只读库。Bet365 亚盘优先 ticks; 其余用初/即时两点。"""
+    if not match:
+        return []
+    cache = get_fenxi_cache(match.get("match_id") or "") or {}
+    if kind == "asian" and int(cid) == 2:
+        ticks = list_ah_ticks(match.get("match_id") or "", cid=2)
+        if ticks:
+            return ticks
+        asian = _companies(cache.get("asian_json")) or asian_from_db(match)
+        item = _pick_company(asian, cid) or (asian[0] if asian else None)
+        return _two_point_history(item, "asian", cache.get("asian_fetched_at"))
+    if kind == "european":
+        euro = _companies(cache.get("euro_json"))
+        item = _pick_company(euro, cid)
+        return _two_point_history(item, "european", cache.get("euro_fetched_at"))
+    if kind == "overunder":
+        ou = _companies(cache.get("ou_json"))
+        item = _pick_company(ou, cid)
+        return _two_point_history(item, "overunder", cache.get("ou_fetched_at"))
+    return []

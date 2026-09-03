@@ -1,5 +1,12 @@
 """ypdb/bjop 解析回归: cid 必须整段相等; 公司名映射规范名。"""
-from scraper.zgzcw_fenxi import parse_bjop, parse_bsls, parse_ypdb_bet365, parse_ypdb_mainstream
+from scraper.zgzcw_fenxi import (
+    parse_bjop,
+    parse_bsls,
+    parse_dxdb,
+    parse_ypdb_bet365,
+    parse_ypdb_mainstream,
+    parse_ypdb_zhishu,
+)
 
 YPDB_HTML = """
 <table>
@@ -86,6 +93,40 @@ BSLS_HTML = """
 </table>
 """
 
+DXDB_HTML = """
+<table>
+<tr>
+<td>1</td><td>平均*</td>
+<td>0.90</td><td>2.5球</td><td>0.90</td>
+<td>0.88</td><td>2.5球</td><td>0.92</td>
+</tr>
+<tr>
+<td>2</td><td><a href="/dxdb/zhishu?company_id=22">平*</a></td>
+<td>0.90</td><td>2.5球</td><td>0.90</td>
+<td>0.85</td><td>2.5球</td><td>0.95</td>
+</tr>
+<tr>
+<td>5</td><td><a href="/dxdb/zhishu?company_id=2">36*</a></td>
+<td>0.85</td><td>2/2.5球</td><td>0.95</td>
+<td>0.88↓</td><td>2.5球↑</td><td>0.92↑</td>
+</tr>
+<tr>
+<td>6</td><td><a href="/dxdb/zhishu?company_id=9">威*</a></td>
+<td>0.80</td><td>2.5/3球</td><td>1.00</td>
+<td>0.82</td><td>2.5球</td><td>0.98</td>
+</tr>
+</table>
+"""
+
+ZHISHU_HTML = """
+<table>
+<tr><td>序号</td><td>时间</td><td>更新</td><td>主</td><td>盘口</td><td>客</td></tr>
+<tr><td>1</td><td>2026-09-03 12:23:59</td><td>即时</td><td>1↓</td><td>平手</td><td>0.8↑</td></tr>
+<tr><td>2</td><td>2026-09-03 11:00:00</td><td></td><td>0.95</td><td>平/半</td><td>0.85</td></tr>
+<tr><td>3</td><td>2026-09-03 10:00:00</td><td>初盘</td><td>0.9</td><td>平手</td><td>0.9</td></tr>
+</table>
+"""
+
 
 def main() -> None:
     line = parse_ypdb_bet365(YPDB_HTML)
@@ -122,7 +163,23 @@ def main() -> None:
     assert form["h2h"][1]["asianResult"] == "输", form["h2h"][1]
     assert form["h2h"][1]["handicap"] == "0.5", form["h2h"][1]
     assert form["homeFuture"] and "洛里昂" in form["homeFuture"][0]["match"]
-    print("ok ypdb/bjop/bsls")
+
+    ou = parse_dxdb(DXDB_HTML)
+    books = {c["bookmaker"]: c for c in ou}
+    assert "Bet365" in books and "Pinnacle" in books and "威廉希尔" in books, books.keys()
+    assert abs(books["Bet365"]["initial"]["line"] - 2.25) < 1e-9, books["Bet365"]
+    assert abs(books["Bet365"]["current"]["line"] - 2.5) < 1e-9
+    assert abs(books["威廉希尔"]["initial"]["line"] - 2.75) < 1e-9
+    assert books["Bet365"]["cid"] == 2
+
+    ticks = parse_ypdb_zhishu(ZHISHU_HTML)
+    assert len(ticks) == 3, ticks
+    assert ticks[0]["time"].startswith("2026-09-03 12:23")
+    assert abs(ticks[0]["home"] - 1.0) < 1e-9
+    assert ticks[0]["handicapText"] == "平手"
+    assert abs(ticks[1]["handicap"] - 0.25) < 1e-9
+    assert abs(ticks[-1]["home"] - 0.9) < 1e-9
+    print("ok ypdb/bjop/bsls/dxdb/zhishu")
 
 
 if __name__ == "__main__":

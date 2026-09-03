@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 EURO_TTL_SEC = int(os.getenv("ZGZCW_EURO_TTL_SEC", "2700"))
 FORM_TTL_SEC = int(os.getenv("ZGZCW_FORM_TTL_SEC", "21600"))
+OU_TTL_SEC = int(os.getenv("ZGZCW_OU_TTL_SEC", "2700"))
+TICKS_TTL_SEC = int(os.getenv("ZGZCW_TICKS_TTL_SEC", "2700"))
 
 # 体彩 matchDate/matchTime 是北京墙钟；容器常为 UTC，naive .timestamp() 会 +8h
 _BJ = timezone(timedelta(hours=8))
@@ -288,9 +290,10 @@ class SportterySyncService:
         return updated
 
     def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
-        """在售场刷新亚盘/欧赔/基本面。ypdb 优先, 剩余预算才开 bjop/bsls。
+        """在售场刷新亚盘/欧赔/基本面/指数。ypdb 优先, 剩余预算才开 bjop/bsls/dxdb/zhishu。
 
-        Bet365 写入 jczq_ah_history; 主流公司 JSON 写入 jczq_fenxi_cache。
+        Bet365 写入 jczq_ah_history; 主流公司 JSON 写入 jczq_fenxi_cache;
+        Bet365 亚盘 ticks 写入 jczq_ah_ticks, 不覆盖 history 终盘。
         Playwright 串行, 二次验证中止本轮。max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
@@ -401,6 +404,36 @@ class SportterySyncService:
                             )
                         except Exception as e:
                             logger.warning(f"基本面缓存失败 {mid}: {e}")
+
+            for m in targets:
+                if sess.aborted:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
+                row_meta = meta.get(mid) or {}
+                asian_changed = mid in packs and not _asian_close_unchanged(
+                    m, (packs[mid].get("bet365") or {})
+                )
+                need_ou = asian_changed or _is_stale(row_meta.get("ou_fetched_at"), OU_TTL_SEC)
+                need_ticks = asian_changed or _is_stale(
+                    row_meta.get("ticks_fetched_at"), TICKS_TTL_SEC
+                )
+                if need_ou and sess.remaining > 0:
+                    ou = sess.fetch_dxdb(fid)
+                    if ou and ou.get("companies"):
+                        try:
+                            self.repository.upsert_fenxi_cache(mid, ou=ou)
+                            logger.info(f"  大小球 {m.get('match_code')} {len(ou['companies'])}家")
+                        except Exception as e:
+                            logger.warning(f"大小球缓存失败 {mid}: {e}")
+                if need_ticks and sess.remaining > 0:
+                    ticks = sess.fetch_ypdb_zhishu(fid)
+                    if ticks:
+                        try:
+                            n = self.repository.replace_ah_ticks(mid, ticks)
+                            logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
+                        except Exception as e:
+                            logger.warning(f"亚盘轴落库失败 {mid}: {e}")
         logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
         return updated
 

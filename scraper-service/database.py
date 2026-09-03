@@ -33,6 +33,8 @@ def _init_mysql_db() -> None:
             # 为旧库补充比分/fid字段
             _ensure_match_columns(cursor)
             _ensure_fenxi_cache_table(cursor)
+            _ensure_fenxi_cache_columns(cursor)
+            _ensure_ah_ticks_table(cursor)
         conn.commit()
     finally:
         conn.close()
@@ -85,10 +87,72 @@ def _ensure_fenxi_cache_table(cursor) -> None:
             asian_json MEDIUMTEXT,
             euro_json MEDIUMTEXT,
             form_json MEDIUMTEXT,
+            ou_json MEDIUMTEXT,
             asian_fetched_at DATETIME DEFAULT NULL,
             euro_fetched_at DATETIME DEFAULT NULL,
             form_fetched_at DATETIME DEFAULT NULL,
+            ou_fetched_at DATETIME DEFAULT NULL,
+            ticks_fetched_at DATETIME DEFAULT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+
+
+def _ensure_column(cursor, table: str, column: str, definition: str) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME=%s AND COLUMN_NAME=%s
+        """,
+        (table, column),
+    )
+    exists = cursor.fetchone()
+    count = exists[0] if isinstance(exists, (tuple, list)) else (
+        exists.get("COUNT(*)") if isinstance(exists, dict) else 0
+    )
+    if count:
+        return
+    try:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    except Exception as e:
+        if "duplicate" not in str(e).lower():
+            print(f"警告: 添加字段 {table}.{column} 失败: {e}")
+
+
+def _ensure_fenxi_cache_columns(cursor) -> None:
+    _ensure_column(cursor, "jczq_fenxi_cache", "ou_json", "MEDIUMTEXT")
+    _ensure_column(cursor, "jczq_fenxi_cache", "ou_fetched_at", "DATETIME DEFAULT NULL")
+    _ensure_column(cursor, "jczq_fenxi_cache", "ticks_fetched_at", "DATETIME DEFAULT NULL")
+
+
+def _ensure_ah_ticks_table(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='jczq_ah_ticks'
+        """
+    )
+    exists = cursor.fetchone()
+    count = exists[0] if isinstance(exists, (tuple, list)) else (
+        exists.get("COUNT(*)") if isinstance(exists, dict) else 0
+    )
+    if count:
+        return
+    cursor.execute(
+        """
+        CREATE TABLE jczq_ah_ticks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            match_id VARCHAR(100) NOT NULL,
+            company VARCHAR(50) NOT NULL DEFAULT 'Bet365',
+            cid INT NOT NULL DEFAULT 2,
+            tick_time DATETIME NOT NULL,
+            home_odds DECIMAL(8,3) DEFAULT NULL,
+            handicap DECIMAL(6,2) DEFAULT NULL COMMENT '500原值 正=主让',
+            handicap_text VARCHAR(32) DEFAULT NULL,
+            away_odds DECIMAL(8,3) DEFAULT NULL,
+            UNIQUE KEY uk_match_company_time (match_id, company, tick_time),
+            INDEX idx_match_company (match_id, company)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )

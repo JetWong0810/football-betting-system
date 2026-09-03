@@ -106,10 +106,27 @@ CREATE TABLE IF NOT EXISTS jczq_fenxi_cache (
     asian_json MEDIUMTEXT,
     euro_json MEDIUMTEXT,
     form_json MEDIUMTEXT,
+    ou_json MEDIUMTEXT,
     asian_fetched_at DATETIME DEFAULT NULL,
     euro_fetched_at DATETIME DEFAULT NULL,
     form_fetched_at DATETIME DEFAULT NULL,
+    ou_fetched_at DATETIME DEFAULT NULL,
+    ticks_fetched_at DATETIME DEFAULT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS jczq_ah_ticks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    match_id VARCHAR(100) NOT NULL,
+    company VARCHAR(50) NOT NULL DEFAULT 'Bet365',
+    cid INT NOT NULL DEFAULT 2,
+    tick_time DATETIME NOT NULL,
+    home_odds DECIMAL(8,3) DEFAULT NULL,
+    handicap DECIMAL(6,2) DEFAULT NULL COMMENT '500原值 正=主让',
+    handicap_text VARCHAR(32) DEFAULT NULL,
+    away_odds DECIMAL(8,3) DEFAULT NULL,
+    UNIQUE KEY uk_match_company_time (match_id, company, tick_time),
+    INDEX idx_match_company (match_id, company)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prediction_history (
