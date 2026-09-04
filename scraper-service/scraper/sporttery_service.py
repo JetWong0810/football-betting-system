@@ -13,8 +13,10 @@ logger = logging.getLogger(__name__)
 
 EURO_TTL_SEC = int(os.getenv("ZGZCW_EURO_TTL_SEC", "2700"))
 FORM_TTL_SEC = int(os.getenv("ZGZCW_FORM_TTL_SEC", "21600"))
+ASIAN_TTL_SEC = int(os.getenv("ZGZCW_ASIAN_TTL_SEC", "1200"))
 OU_TTL_SEC = int(os.getenv("ZGZCW_OU_TTL_SEC", "2700"))
 TICKS_TTL_SEC = int(os.getenv("ZGZCW_TICKS_TTL_SEC", "2700"))
+_CACHE_MIN_LEN = 20
 # 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
 LIGHT_WINDOW_SEC = int(os.getenv("PRE_KICKOFF_LIGHT_SEC", "720"))
 PRE_KICKOFF_LEAD_SEC = int(os.getenv("PRE_KICKOFF_LEAD_SEC", "90"))
@@ -112,6 +114,35 @@ def _is_stale(ts, ttl_sec: int) -> bool:
         return (datetime.now() - ts).total_seconds() > ttl_sec
     except TypeError:
         return True
+
+
+def _cache_empty(meta: Optional[Dict], len_key: str, min_len: int = _CACHE_MIN_LEN) -> bool:
+    if not meta:
+        return True
+    try:
+        return int(meta.get(len_key) or 0) < min_len
+    except (TypeError, ValueError):
+        return True
+
+
+def need_form_fetch(meta: Optional[Dict], ttl: int = FORM_TTL_SEC) -> bool:
+    """缺近期/交锋或超过 TTL 才抓 /bsls。"""
+    if _cache_empty(meta, "form_len"):
+        return True
+    return _is_stale((meta or {}).get("form_fetched_at"), ttl)
+
+
+def need_asian_fetch(
+    meta: Optional[Dict],
+    ttl: int = ASIAN_TTL_SEC,
+    force: bool = False,
+) -> bool:
+    """亚盘已新则跳过 /ypdb, 把预算让给基本面。"""
+    if force:
+        return True
+    if _cache_empty(meta, "asian_len"):
+        return True
+    return _is_stale((meta or {}).get("asian_fetched_at"), ttl)
 
 
 def compute_sync_sleep(
@@ -322,11 +353,10 @@ class SportterySyncService:
         return updated
 
     def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
-        """在售场刷新亚盘/欧赔/基本面/指数。ypdb 优先, 剩余预算才开 bjop/bsls/dxdb/zhishu。
+        """在售场刷新亚盘/欧赔/基本面/指数。缺基本面优先, 亚盘已新则跳过 ypdb。
 
-        Bet365 写入 jczq_ah_history; 主流公司 JSON 写入 jczq_fenxi_cache;
-        Bet365 亚盘 ticks 写入 jczq_ah_ticks, 不覆盖 history 终盘。
-        Playwright 串行, 二次验证中止本轮。max_workers 保留签名, 足彩网路径忽略。
+        顺序: /bsls → /ypdb → /bjop → /dxdb+ticks。Playwright 有页数预算,
+        先补近期/交锋, 再刷新过期亚盘。max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
         from scraper.zgzcw_live import fetch_jczq_live_map
@@ -359,14 +389,45 @@ class SportterySyncService:
             return 0
 
         meta = self.repository.list_fenxi_meta([m["match_id"] for m in targets])
+        n_form = sum(1 for m in targets if need_form_fetch(meta.get(m["match_id"])))
+        n_asian = sum(
+            1 for m in targets
+            if need_asian_fetch(meta.get(m["match_id"]), force=overwrite_open)
+        )
+        logger.info(f"本轮待抓 基本面{n_form} 亚盘{n_asian}/{len(targets)}")
         updated = 0
         with FenxiSession() as sess:
             packs = {}
+
             for m in targets:
-                if sess.aborted:
+                if sess.aborted or sess.remaining <= 0:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
+                if not need_form_fetch(meta.get(mid)):
+                    continue
+                form = sess.fetch_bsls(fid)
+                if form and (form.get("homeRecent") or form.get("awayRecent")):
+                    try:
+                        self.repository.upsert_fenxi_cache(mid, form=form)
+                        row = meta.setdefault(mid, {})
+                        row["form_fetched_at"] = datetime.now()
+                        row["form_len"] = 99
+                        logger.info(
+                            f"  基本面 {m.get('match_code')} "
+                            f"近{len(form.get('homeRecent') or [])}/"
+                            f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"基本面缓存失败 {mid}: {e}")
+
+            for m in targets:
+                if sess.aborted or sess.remaining <= 0:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
+                if not need_asian_fetch(meta.get(mid), force=overwrite_open):
+                    continue
                 pack = sess.fetch_ypdb(fid)
                 if not pack:
                     continue
@@ -375,6 +436,9 @@ class SportterySyncService:
                 if companies:
                     try:
                         self.repository.upsert_fenxi_cache(mid, asian=companies)
+                        row = meta.setdefault(mid, {})
+                        row["asian_fetched_at"] = datetime.now()
+                        row["asian_len"] = max(len(companies) * 40, _CACHE_MIN_LEN)
                     except Exception as e:
                         logger.warning(f"亚盘缓存失败 {mid}: {e}")
                 line = pack.get("bet365")
@@ -406,7 +470,7 @@ class SportterySyncService:
                 )
 
             for m in targets:
-                if sess.aborted:
+                if sess.aborted or sess.remaining <= 0:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
@@ -414,31 +478,23 @@ class SportterySyncService:
                 asian_changed = mid in packs and not _asian_close_unchanged(
                     m, (packs[mid].get("bet365") or {})
                 )
-                need_bjop = asian_changed or _is_stale(row_meta.get("euro_fetched_at"), EURO_TTL_SEC)
-                need_bsls = _is_stale(row_meta.get("form_fetched_at"), FORM_TTL_SEC)
-                if need_bjop and sess.remaining > 0:
-                    euro = sess.fetch_bjop(fid)
-                    if euro and euro.get("companies"):
-                        try:
-                            self.repository.upsert_fenxi_cache(mid, euro=euro)
-                            logger.info(f"  欧赔 {m.get('match_code')} {len(euro['companies'])}家")
-                        except Exception as e:
-                            logger.warning(f"欧赔缓存失败 {mid}: {e}")
-                if need_bsls and sess.remaining > 0:
-                    form = sess.fetch_bsls(fid)
-                    if form and (form.get("homeRecent") or form.get("awayRecent")):
-                        try:
-                            self.repository.upsert_fenxi_cache(mid, form=form)
-                            logger.info(
-                                f"  基本面 {m.get('match_code')} "
-                                f"近{len(form.get('homeRecent') or [])}/"
-                                f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
-                            )
-                        except Exception as e:
-                            logger.warning(f"基本面缓存失败 {mid}: {e}")
+                need_bjop = (
+                    asian_changed
+                    or _cache_empty(row_meta, "euro_len")
+                    or _is_stale(row_meta.get("euro_fetched_at"), EURO_TTL_SEC)
+                )
+                if not need_bjop:
+                    continue
+                euro = sess.fetch_bjop(fid)
+                if euro and euro.get("companies"):
+                    try:
+                        self.repository.upsert_fenxi_cache(mid, euro=euro)
+                        logger.info(f"  欧赔 {m.get('match_code')} {len(euro['companies'])}家")
+                    except Exception as e:
+                        logger.warning(f"欧赔缓存失败 {mid}: {e}")
 
             for m in targets:
-                if sess.aborted:
+                if sess.aborted or sess.remaining <= 0:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
@@ -450,7 +506,7 @@ class SportterySyncService:
                 need_ticks = asian_changed or _is_stale(
                     row_meta.get("ticks_fetched_at"), TICKS_TTL_SEC
                 )
-                if need_ou and sess.remaining > 0:
+                if need_ou:
                     ou = sess.fetch_dxdb(fid)
                     if ou and ou.get("companies"):
                         try:
@@ -458,7 +514,9 @@ class SportterySyncService:
                             logger.info(f"  大小球 {m.get('match_code')} {len(ou['companies'])}家")
                         except Exception as e:
                             logger.warning(f"大小球缓存失败 {mid}: {e}")
-                if need_ticks and sess.remaining > 0:
+                if sess.aborted or sess.remaining <= 0:
+                    break
+                if need_ticks:
                     ticks = sess.fetch_ypdb_zhishu(fid)
                     if ticks:
                         try:

@@ -26,7 +26,7 @@ UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
 BET365_CID = int(os.getenv("ZGZCW_BET365_CID", "2"))
-FENXI_BUDGET = int(os.getenv("ZGZCW_FENXI_BUDGET", "25"))
+FENXI_BUDGET = int(os.getenv("ZGZCW_FENXI_BUDGET", "40"))
 SLEEP_MIN = float(os.getenv("ZGZCW_FENXI_SLEEP_MIN", "1.5"))
 SLEEP_MAX = float(os.getenv("ZGZCW_FENXI_SLEEP_MAX", "3.0"))
 YPDB_URL = "https://fenxi.zgzcw.com/{fid}/ypdb"

@@ -675,7 +675,10 @@ class OddsRepository:
         ph = ",".join(["%s"] * len(match_ids))
         sql = (
             f"SELECT match_id, asian_fetched_at, euro_fetched_at, form_fetched_at, "
-            f"ou_fetched_at, ticks_fetched_at "
+            f"ou_fetched_at, ticks_fetched_at, "
+            f"CHAR_LENGTH(IFNULL(form_json, '')) AS form_len, "
+            f"CHAR_LENGTH(IFNULL(asian_json, '')) AS asian_len, "
+            f"CHAR_LENGTH(IFNULL(euro_json, '')) AS euro_len "
             f"FROM jczq_fenxi_cache WHERE match_id IN ({ph})"
         )
         with get_db() as conn:
