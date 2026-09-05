@@ -1421,6 +1421,11 @@ _H2H_TIME_WEIGHTS = [
     (730, 0.4),
 ]
 _H2H_TIME_DEFAULT = 0.15
+_H2H_VENUE_FLIP = 0.6
+_H2H_VENUE_UNKNOWN = 0.8
+_H2H_MIN_TOTAL_WEIGHT = 1.0
+_H2H_MIN_DECIDED = 1.2
+_H2H_MIN_DIFF = 0.40
 
 _AR_FLIP = {"赢": "输", "赢半": "输半", "输": "赢", "输半": "赢半",
             "走": "走", "走盘": "走", "走水": "走", "平": "平"}
@@ -1674,16 +1679,54 @@ def build_h2h_ref(match_data: Optional[Dict], match_info: Dict) -> Dict[str, Any
     }
 
 
-def _h2h_count_dir(upper_n: int, lower_n: int) -> str:
-    if upper_n > lower_n:
-        return "upper"
-    if lower_n > upper_n:
-        return "lower"
-    return "neutral"
+def _h2h_comp_weight(row: Dict[str, Any]) -> float:
+    if row.get("sameLeague"):
+        return 1.0
+    return _competition_form_weight(row.get("competition"))
+
+
+def _h2h_venue_weight(row: Dict[str, Any]) -> float:
+    v = row.get("venue")
+    if v == "home":
+        return 1.0
+    if v == "away":
+        return _H2H_VENUE_FLIP
+    return _H2H_VENUE_UNKNOWN
+
+
+def _h2h_row_weight(row: Dict[str, Any], today: str) -> float:
+    w = (
+        _h2h_time_weight(row.get("date") or "", today)
+        * _h2h_comp_weight(row)
+        * _h2h_venue_weight(row)
+    )
+    return w if w >= 0.01 else 0.0
+
+
+def _h2h_weighted_dir(upper_w: float, lower_w: float) -> str:
+    decided = upper_w + lower_w
+    if decided < _H2H_MIN_DECIDED:
+        return "neutral"
+    diff = upper_w - lower_w
+    if abs(diff) < _H2H_MIN_DIFF:
+        return "neutral"
+    return "upper" if diff > 0 else "lower"
+
+
+def _h2h_weight_sum(rows_w, key: str, value: str) -> float:
+    return sum(w for m, w in rows_w if m.get(key) == value)
 
 
 def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any]:
-    """交锋历史展示因子：对齐 F1 对比条+子因素投票。refOnly，不进加权。"""
+    """交锋历史展示因子：时间衰减 + 赛事/同主客软权重，子因素投票。refOnly，不进加权。
+
+    每场权重 = 时间(半年1.0/一年0.7/两年0.4/更早0.15)
+        × 赛事(同联赛1.0 / 杯赛0.7 / 友谊0.2，欧战等同联赛)
+        × 同主客(同场地1.0 / 对调0.6)。
+    有效权过低则中性 5 分。同主客只作乘数，主场交锋仅展示不计票。
+    """
+    from datetime import date as date_type
+
     home = match_info.get("home_team", "主队")
     away = match_info.get("away_team", "客队")
     is_home_let = _home_is_upper(match_info)
@@ -1701,74 +1744,97 @@ def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any
     if not matches:
         return empty
 
-    league_rows = [m for m in matches if m.get("sameLeague")]
-    use_league = len(league_rows) >= 3
-    rows = league_rows if use_league else matches
-    sample_tag = f"同联赛{len(rows)}场" if use_league else f"{len(rows)}场"
+    anchor = (match_info.get("match_date") or "")[:10]
+    if len(anchor) < 10:
+        anchor = date_type.today().strftime("%Y-%m-%d")
+
+    weighted = [(m, _h2h_row_weight(m, anchor)) for m in matches]
+    total_w = sum(w for _, w in weighted)
+    n_league = sum(1 for m in matches if m.get("sameLeague"))
+    sample_tag = f"{len(matches)}场·有效权{total_w:.1f}"
+    if n_league:
+        sample_tag += f"（同联赛{n_league}）"
 
     details = []
     votes = []
 
-    home_w = sum(1 for m in rows if m.get("result") == "win")
-    away_w = sum(1 for m in rows if m.get("result") == "lose")
-    draws = sum(1 for m in rows if m.get("result") == "draw")
+    home_raw = sum(1 for m in matches if m.get("result") == "win")
+    away_raw = sum(1 for m in matches if m.get("result") == "lose")
+    draws = sum(1 for m in matches if m.get("result") == "draw")
+    home_w = _h2h_weight_sum(weighted, "result", "win")
+    away_w = _h2h_weight_sum(weighted, "result", "lose")
     upper_w, lower_w = (home_w, away_w) if is_home_let else (away_w, home_w)
-    sub1_dir = _h2h_count_dir(upper_w, lower_w)
+    upper_raw, lower_raw = (home_raw, away_raw) if is_home_let else (away_raw, home_raw)
+    sub1_dir = _h2h_weighted_dir(upper_w, lower_w)
     votes.append(sub1_dir)
+    raw_txt = f"{home_raw}-{draws}-{away_raw}"
     if sub1_dir == "upper":
-        sub1_desc = f"{upper_name}{upper_w}胜多于{lower_name}的{lower_w}胜（{sample_tag}，平{draws}）"
+        sub1_desc = f"{upper_name}加权{upper_w:.1f}:{lower_w:.1f}占优（交锋{raw_txt}，{sample_tag}）"
     elif sub1_dir == "lower":
-        sub1_desc = f"{lower_name}{lower_w}胜多于{upper_name}的{upper_w}胜（{sample_tag}，平{draws}）"
+        sub1_desc = f"{lower_name}加权{lower_w:.1f}:{upper_w:.1f}占优（交锋{raw_txt}，{sample_tag}）"
     else:
-        sub1_desc = f"交锋胜场持平{upper_w}-{lower_w}，平{draws}（{sample_tag}）"
+        sub1_desc = f"加权{upper_w:.1f}:{lower_w:.1f}接近（交锋{raw_txt}，{sample_tag}）"
     details.append({
         "name": "交锋胜负", "direction": sub1_dir, "desc": sub1_desc,
         "chart": _compare_chart(
-            upper_name, lower_name, upper_w, lower_w, unit="胜", vmax=max(upper_w, lower_w, 1)),
+            upper_name, lower_name, upper_raw, lower_raw, unit="胜",
+            vmax=max(upper_raw, lower_raw, 1)),
     })
 
-    home_rows = [m for m in rows if m.get("venue") == "home"]
+    home_rows = [m for m in matches if m.get("venue") == "home"]
     if len(home_rows) >= 2:
         hw = sum(1 for m in home_rows if m.get("result") == "win")
         hl = sum(1 for m in home_rows if m.get("result") == "lose")
+        home_weighted = [(m, w) for m, w in weighted if m.get("venue") == "home"]
+        hw_w = _h2h_weight_sum(home_weighted, "result", "win")
+        hl_w = _h2h_weight_sum(home_weighted, "result", "lose")
         if is_home_let:
-            sub2_dir = _h2h_count_dir(hw, hl)
+            sub2_dir = _h2h_weighted_dir(hw_w, hl_w)
             u_lab, l_lab, u_n, l_n = f"{upper_name}主场", f"{lower_name}客场", hw, hl
         else:
-            sub2_dir = _h2h_count_dir(hl, hw)
+            sub2_dir = _h2h_weighted_dir(hl_w, hw_w)
             u_lab, l_lab, u_n, l_n = f"{upper_name}客场", f"{lower_name}主场", hl, hw
-        if len(home_rows) >= 3:
-            votes.append(sub2_dir)
         details.append({
             "name": "主场交锋", "direction": sub2_dir,
             "desc": f"{home}主场{hw}胜{hl}负（{len(home_rows)}场）",
             "chart": _compare_chart(u_lab, l_lab, u_n, l_n, unit="胜", vmax=max(u_n, l_n, 1)),
         })
 
-    hist_u = sum(1 for m in rows if m.get("histAr") == "upper")
-    hist_l = sum(1 for m in rows if m.get("histAr") == "lower")
-    if hist_u + hist_l >= 1:
-        sub3_dir = _h2h_count_dir(hist_u, hist_l)
-        if hist_u + hist_l >= 3:
-            votes.append(sub3_dir)
+    hist_u_raw = sum(1 for m in matches if m.get("histAr") == "upper")
+    hist_l_raw = sum(1 for m in matches if m.get("histAr") == "lower")
+    hist_u = _h2h_weight_sum(weighted, "histAr", "upper")
+    hist_l = _h2h_weight_sum(weighted, "histAr", "lower")
+    if hist_u_raw + hist_l_raw >= 1:
+        sub3_dir = _h2h_weighted_dir(hist_u, hist_l)
+        votes.append(sub3_dir)
         if sub3_dir == "upper":
-            sub3_desc = f"当时盘{upper_name}赢盘更多（{hist_u}-{hist_l}）"
+            sub3_desc = (
+                f"当时盘{upper_name}加权赢盘更多"
+                f"（{hist_u:.1f}:{hist_l:.1f}，场次{hist_u_raw}-{hist_l_raw}）"
+            )
         elif sub3_dir == "lower":
-            sub3_desc = f"当时盘{lower_name}赢盘更多（{hist_l}-{hist_u}）"
+            sub3_desc = (
+                f"当时盘{lower_name}加权赢盘更多"
+                f"（{hist_l:.1f}:{hist_u:.1f}，场次{hist_l_raw}-{hist_u_raw}）"
+            )
         else:
-            sub3_desc = f"当时盘赢盘持平（{hist_u}-{hist_l}）"
+            sub3_desc = (
+                f"当时盘加权接近（{hist_u:.1f}:{hist_l:.1f}，场次{hist_u_raw}-{hist_l_raw}）"
+            )
         details.append({
             "name": "当时赢盘", "direction": sub3_dir, "desc": sub3_desc,
             "chart": _compare_chart(
-                upper_name, lower_name, hist_u, hist_l, unit="场", vmax=max(hist_u, hist_l, 1)),
+                upper_name, lower_name, hist_u_raw, hist_l_raw, unit="场",
+                vmax=max(hist_u_raw, hist_l_raw, 1)),
         })
 
-    line_u = sum(1 for m in rows if m.get("lineAr") == "upper")
-    line_l = sum(1 for m in rows if m.get("lineAr") == "lower")
-    if line_u + line_l >= 1:
-        sub4_dir = _h2h_count_dir(line_u, line_l)
-        if line_u + line_l >= 3:
-            votes.append(sub4_dir)
+    line_u_raw = sum(1 for m in matches if m.get("lineAr") == "upper")
+    line_l_raw = sum(1 for m in matches if m.get("lineAr") == "lower")
+    line_u = _h2h_weight_sum(weighted, "lineAr", "upper")
+    line_l = _h2h_weight_sum(weighted, "lineAr", "lower")
+    if line_u_raw + line_l_raw >= 1:
+        sub4_dir = _h2h_weighted_dir(line_u, line_l)
+        votes.append(sub4_dir)
         hc = match_info.get("handicap")
         try:
             hc_txt = _fmt_handicap(float(hc)) if hc is not None else ""
@@ -1776,16 +1842,24 @@ def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any
             hc_txt = ""
         line_tag = f"按本场盘{hc_txt}" if hc_txt else "按本场盘重算"
         if sub4_dir == "upper":
-            sub4_desc = f"{line_tag}，{upper_name}能赢盘更多（{line_u}-{line_l}）"
+            sub4_desc = f"{line_tag}，{upper_name}加权能赢盘更多（{line_u:.1f}:{line_l:.1f}）"
         elif sub4_dir == "lower":
-            sub4_desc = f"{line_tag}，{lower_name}能赢盘更多（{line_l}-{line_u}）"
+            sub4_desc = f"{line_tag}，{lower_name}加权能赢盘更多（{line_l:.1f}:{line_u:.1f}）"
         else:
-            sub4_desc = f"{line_tag}，上下盘持平（{line_u}-{line_l}）"
+            sub4_desc = f"{line_tag}，加权接近（{line_u:.1f}:{line_l:.1f}）"
         details.append({
             "name": "本场盘重算", "direction": sub4_dir, "desc": sub4_desc,
             "chart": _compare_chart(
-                upper_name, lower_name, line_u, line_l, unit="场", vmax=max(line_u, line_l, 1)),
+                upper_name, lower_name, line_u_raw, line_l_raw, unit="场",
+                vmax=max(line_u_raw, line_l_raw, 1)),
         })
+
+    if total_w < _H2H_MIN_TOTAL_WEIGHT:
+        return {
+            "name": "交锋历史", "score": 5, "direction": "neutral",
+            "reason": f"{len(matches)}场交锋有效权{total_w:.1f}（过旧或友谊赛偏多），参考价值低",
+            "details": details, "refOnly": True,
+        }
 
     upper_votes = votes.count("upper")
     lower_votes = votes.count("lower")
@@ -1797,13 +1871,14 @@ def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any
         direction, majority = "neutral", 0
 
     if majority >= 3:
-        score = 8
+        score = 8 if total_w >= 2.0 else 7
     elif majority == 2:
         score = 7
     else:
         score = 5
 
-    labels = [(d["name"].replace("交锋", ""), d["direction"]) for d in details]
+    labels = [(d["name"].replace("交锋", ""), d["direction"]) for d in details
+              if d["name"] != "主场交锋"]
     if direction == "neutral":
         u_parts = [n for n, d in labels if d == "upper"]
         l_parts = [n for n, d in labels if d == "lower"]
@@ -1813,7 +1888,7 @@ def build_h2h_factor(h2h_ref: Optional[Dict], match_info: Dict) -> Dict[str, Any
                 f"{', '.join(l_parts)}指向{lower_name}"
             )
         else:
-            reason = f"{sample_tag}交锋无明确优劣"
+            reason = f"{sample_tag}，交锋无明确优劣"
     else:
         win_team = upper_name if direction == "upper" else lower_name
         parts = [n for n, d in labels if d == direction]

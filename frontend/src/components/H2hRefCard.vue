@@ -280,8 +280,10 @@ const verdict = computed(() => {
 })
 
 function dateShort(date) {
-  const s = String(date || '')
-  return s.length >= 10 ? s.slice(5) : s || '-'
+  const s = String(date || '').trim()
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return `${m[1].slice(2)}-${m[2]}-${m[3]}`
+  return s || '-'
 }
 
 function parseMatch(row) {
@@ -522,7 +524,7 @@ const visibleParsed = computed(() => visible.value.map((row) => {
   font-size: 22rpx;
 }
 .col-event {
-  width: 90rpx;
+  width: 112rpx;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
