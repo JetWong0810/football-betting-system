@@ -561,6 +561,7 @@ class OddsRepository:
         """在售/未出赛果体彩场(含进行中无比分, 开赛超72h脏数据排除)。"""
         sql = """
             SELECT match_id, match_code, match_number, match_date, match_timestamp,
+                   home_team_name, away_team_name,
                    fid_500, fid_zgzcw, asian_handicap, asian_home_odds, asian_away_odds
             FROM matches
             WHERE match_id NOT LIKE 'jczq%%'

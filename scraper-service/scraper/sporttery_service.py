@@ -359,25 +359,20 @@ class SportterySyncService:
         先补近期/交锋, 再刷新过期亚盘。max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
-        from scraper.zgzcw_live import fetch_jczq_live_map
+        from scraper.zgzcw_live import resolve_zgzcw_fids
 
         live = self.repository.list_live_for_asian()
         if not live:
             return 0
         logger.info(f"在售亚盘刷新: {len(live)} 场")
 
-        code_map = fetch_jczq_live_map()
+        fid_map = resolve_zgzcw_fids(live)
         for m in live:
-            info = code_map.get(m.get("match_code") or "")
+            info = fid_map.get(str(m.get("match_id") or ""))
             if not info or not info.get("fid"):
                 continue
             try:
-                self.repository.save_fid_zgzcw(
-                    m["match_id"],
-                    info["fid"],
-                    home_rank=info.get("home_rank"),
-                    away_rank=info.get("away_rank"),
-                )
+                self.repository.save_fid_zgzcw(m["match_id"], info["fid"])
             except Exception as e:
                 logger.warning(f"写 fid_zgzcw 失败 {m.get('match_id')}: {e}")
                 continue
