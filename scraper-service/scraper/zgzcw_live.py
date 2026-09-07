@@ -1,15 +1,16 @@
 """足彩网 fid 映射: 竞彩场次号 + 投注页队ID × 全量直播页。
 
-live.zgzcw.com 首页只列进行中/刚完赛的竞彩编号场, 未开赛周六场经常不在上面。
-全量页 /qb/ 有 fid 但没有「周六001」; 投注页有体彩 match_id 和 saishi 队ID。
-用队ID把投注页接到 /qb/, 不依赖中文队名是否完全一致。
+live.zgzcw.com 首页只列进行中/刚完赛的竞彩编号场, 未开赛场经常不在上面。
+默认 /qb/ 窗口大约到次日 00:00, 跨夜竞彩(周一欧晚=北京次日 01:00+)不在默认页。
+需再拉 /qb/?date=开赛日, 用投注页队ID对齐, 不依赖中文队名是否完全一致。
 """
 from __future__ import annotations
 
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Set
 
 import httpx
 from bs4 import BeautifulSoup
@@ -194,6 +195,40 @@ def _info(fid: str, home_rank=None, away_rank=None, source: str = "") -> Dict[st
     }
 
 
+def extra_qb_dates(
+    live: List[Dict[str, Any]],
+    bet_map: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """默认 /qb/ 不含跨夜场, 补开赛日(售卖日+1 与投注页比赛时间)。"""
+    dates: Set[str] = set()
+    for m in live:
+        sale = _kickoff_date(m.get("match_date"))
+        if sale:
+            try:
+                nxt = datetime.strptime(sale, "%Y-%m-%d") + timedelta(days=1)
+                dates.add(nxt.strftime("%Y-%m-%d"))
+            except ValueError:
+                pass
+    for b in bet_map.values():
+        kd = (b.get("kickoff") or "")[:10]
+        if len(kd) == 10 and kd[4] == "-" and kd[7] == "-":
+            dates.add(kd)
+    return sorted(dates)
+
+
+def merge_qb_rows(*batches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen: Set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for rows in batches:
+        for row in rows:
+            fid = str(row.get("fid") or "")
+            if not fid or fid in seen:
+                continue
+            seen.add(fid)
+            out.append(row)
+    return out
+
+
 def _pick_qb_by_tids(
     home_tid: str,
     away_tid: str,
@@ -248,8 +283,10 @@ def match_zgzcw_fids(
             )
             continue
 
-        want_date = _kickoff_date(m.get("match_date"))
+        sale_date = _kickoff_date(m.get("match_date"))
         bet = bet_map.get(mid)
+        kick_date = (bet.get("kickoff") or "")[:10] if bet else ""
+        want_date = kick_date or sale_date
         if bet:
             hit = _pick_qb_by_tids(bet["home_tid"], bet["away_tid"], qb_index, want_date)
             if hit:
@@ -261,8 +298,23 @@ def match_zgzcw_fids(
                 )
                 continue
 
-        key = (want_date, _norm_team(m.get("home_team_name")), _norm_team(m.get("away_team_name")))
-        named = qb_names.get(key) or []
+        home_n = _norm_team(m.get("home_team_name"))
+        away_n = _norm_team(m.get("away_team_name"))
+        name_dates = [want_date, sale_date, kick_date]
+        if sale_date:
+            try:
+                name_dates.append(
+                    (datetime.strptime(sale_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                )
+            except ValueError:
+                pass
+        named: List[Dict[str, Any]] = []
+        for d in name_dates:
+            if not d:
+                continue
+            named = qb_names.get((d, home_n, away_n)) or []
+            if len(named) == 1:
+                break
         if len(named) == 1:
             hit = named[0]
             result[mid] = _info(hit["fid"], hit.get("home_rank"), hit.get("away_rank"), "name")
@@ -280,14 +332,21 @@ def resolve_zgzcw_fids(
         live_html = _http_get(client, LIVE_URL, "live")
         bet_html = _http_get(client, BET_URL, "bet")
         qb_html = _http_get(client, QB_URL, "qb")
-    code_map = parse_live_code_map(live_html)
-    bet_map = parse_betting_matches(bet_html)
-    qb_rows = parse_qb_fixtures(qb_html)
+        code_map = parse_live_code_map(live_html)
+        bet_map = parse_betting_matches(bet_html)
+        qb_rows = parse_qb_fixtures(qb_html)
+        extra_dates = extra_qb_dates(live, bet_map)
+        extras: List[List[Dict[str, Any]]] = []
+        for d in extra_dates:
+            extra_html = _http_get(client, f"{QB_URL}?date={d}", f"qb:{d}")
+            extras.append(parse_qb_fixtures(extra_html))
+    qb_rows = merge_qb_rows(qb_rows, *extras)
     mapped = match_zgzcw_fids(live, code_map, bet_map, qb_rows)
     n_new = sum(1 for v in mapped.values() if v.get("source") != "db")
     logger.info(
         f"zgzcw 映射 {len(mapped)}/{len(live)} "
-        f"(live场次{len(code_map)} 投注{len(bet_map)} qb{len(qb_rows)} 新匹配{n_new})"
+        f"(live场次{len(code_map)} 投注{len(bet_map)} qb{len(qb_rows)} "
+        f"补日{extra_dates} 新匹配{n_new})"
     )
     return mapped
 

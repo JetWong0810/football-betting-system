@@ -1,6 +1,8 @@
 """zgzcw fid: 首页场次号 / 投注页队ID / 全量页队名。"""
 from scraper.zgzcw_live import (
+    extra_qb_dates,
     match_zgzcw_fids,
+    merge_qb_rows,
     parse_betting_matches,
     parse_live_code_map,
     parse_qb_fixtures,
@@ -128,6 +130,72 @@ def test_match_name_fallback_without_betting():
     assert out["2041267"]["source"] == "name"
 
 
+QB_NEXT_DAY_HTML = """
+<table>
+<tr class="matchTr" matchid="4467155">
+<td></td>
+<td>瑞超</td>
+<td></td>
+<td class="matchDate" date="2026-09-08 01:00:00">09-08 01:00</td>
+<td>未</td>
+<td><em class="paim">[13]</em>
+<a href="http://saishi.zgzcw.com/soccer/team/184/10963">卡尔马</a></td>
+<td>-</td>
+<td><a href="http://saishi.zgzcw.com/soccer/team/184/10464">佐加顿斯</a>
+<em class="paim">[3]</em></td>
+</tr>
+</table>
+"""
+
+BET_NEXT_DAY_HTML = """
+<table>
+<tr class="beginBet">
+<td><a href="javascript:void(0);" id="show_2041323" class="ah">
+<code style="display:none">周一</code><i>004</i></a></td>
+<td>瑞超</td>
+<td><span title="比赛时间:2026-09-08 01:00">01:00</span></td>
+<td><a href="http://saishi.zgzcw.com/soccer/team/184/10963">卡尔马</a>
+<em class="pm">[13]</em></td>
+<td>VS</td>
+<td><em class="pm">[3]</em>
+<a href="http://saishi.zgzcw.com/soccer/team/184/10464">佐加顿斯</a></td>
+</tr>
+</table>
+"""
+
+
+def test_extra_qb_dates_covers_overnight():
+    live = [{"match_id": "2041323", "match_date": "2026-09-07"}]
+    bet = parse_betting_matches(BET_NEXT_DAY_HTML)
+    assert extra_qb_dates(live, bet) == ["2026-09-08"]
+
+
+def test_default_qb_misses_overnight_then_dated_qb_maps():
+    live = [{
+        "match_id": "2041323", "match_code": "周一004",
+        "match_date": "2026-09-07",
+        "home_team_name": "卡尔马", "away_team_name": "佐加顿斯",
+    }]
+    bet = parse_betting_matches(BET_NEXT_DAY_HTML)
+    missed = match_zgzcw_fids(live, {}, bet, parse_qb_fixtures(QB_HTML))
+    assert "2041323" not in missed
+    qb = merge_qb_rows(parse_qb_fixtures(QB_HTML), parse_qb_fixtures(QB_NEXT_DAY_HTML))
+    out = match_zgzcw_fids(live, {}, bet, qb)
+    assert out["2041323"]["fid"] == "4467155"
+    assert out["2041323"]["source"] == "qb"
+
+
+def test_name_fallback_uses_kickoff_date_not_sale_date():
+    live = [{
+        "match_id": "2041323", "match_code": "周一004",
+        "match_date": "2026-09-07",
+        "home_team_name": "卡尔马", "away_team_name": "佐加顿斯",
+    }]
+    out = match_zgzcw_fids(live, {}, {}, parse_qb_fixtures(QB_NEXT_DAY_HTML))
+    assert out["2041323"]["fid"] == "4467155"
+    assert out["2041323"]["source"] == "name"
+
+
 def test_keeps_existing_db_fid_if_unmapped():
     live = [{
         "match_id": "x", "match_code": "周一009",
@@ -137,3 +205,16 @@ def test_keeps_existing_db_fid_if_unmapped():
     out = match_zgzcw_fids(live, {}, {}, parse_qb_fixtures(QB_HTML))
     assert out["x"]["fid"] == "999"
     assert out["x"]["source"] == "db"
+
+
+if __name__ == "__main__":
+    test_parse_live_code_map()
+    test_parse_qb_and_bet()
+    test_match_prefers_live_code()
+    test_match_qb_by_team_id_ignores_name_diff()
+    test_match_name_fallback_without_betting()
+    test_extra_qb_dates_covers_overnight()
+    test_default_qb_misses_overnight_then_dated_qb_maps()
+    test_name_fallback_uses_kickoff_date_not_sale_date()
+    test_keeps_existing_db_fid_if_unmapped()
+    print("ok zgzcw live")
