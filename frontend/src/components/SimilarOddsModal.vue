@@ -53,7 +53,7 @@
         <text>仅日职/日乙/杯赛 · 低赔±0.05 · 高赔±0.15</text>
       </view>
       <view v-else-if="leagueOnly" class="jp-hint">
-        <text>仅{{ league || '同名赛事' }} · 低赔±0.05 · 高赔±0.15</text>
+        <text>仅{{ league || '同名赛事' }} · 低赔±0.04 · 高赔±0.12</text>
       </view>
 
       <view v-if="stats.total > 0" class="similar-stats">

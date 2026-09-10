@@ -1828,7 +1828,7 @@ def predict_similar_odds_detail(
 
     默认口径与 F6 一致;
     japan_only: 硬过滤日职/日乙/杯赛 + 低赔±0.05/高赔±0.15;
-    league_only: 硬过滤本场 league_name 完全同名 + 同上容差(不含日本; 与 japan_only 互斥)。
+    league_only: 硬过滤本场 league_name 完全同名 + 低赔±0.04/高赔±0.12(不含日本; 与 japan_only 互斥)。
     snapshot: 非 latest 时用该帧作终盘(初盘仍为真实开盘), 不把本场亚终并入相似度。
     不影响批量分析/预测里的默认 F6 结果。
     """

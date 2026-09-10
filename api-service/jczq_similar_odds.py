@@ -32,7 +32,8 @@ JP_LEAGUES = frozenset({"日职", "日职乙", "日乙", "日联杯", "日天皇
 JP_TOLERANCE = 0.05          # 初/终盘低赔 ±0.05(默认 ±0.03)
 JP_HIGH_TOLERANCE = 0.15     # 初/终盘高赔 ±0.15(默认 ±0.1; ≥6 仍用 ±0.15)
 
-# 同赛事模式(弹窗开关, 与日本模式独立): 仅匹配本场同赛事(+别名) + 同日本放宽容差
+# 同赛事模式(弹窗开关, 与日本模式独立): 仅匹配本场同赛事(+别名) + 独立放宽容差
+# 低赔±0.04 / 高赔±0.12(初终对称; 比默认±0.03/±0.1 宽, 比日本±0.05/±0.15 紧)
 # 不混同国二级/杯赛。日本场仍走 japan_mode, 不走本开关。
 # 白名单按 spf 同赔池体量(已完赛且初终盘齐全)选取: 五大联赛及二级 + 北欧/美洲/亚澳等大体量联赛 + 欧冠/欧罗巴 +
 # 亚冠/解放者杯等洲际俱乐部 + 体量≥100 的在售联赛(芬超/沙特联) + 杯赛(英足总杯/英联杯/欧协联)。
@@ -80,8 +81,8 @@ SAME_LEAGUE_ALIAS_GROUPS = (
     # 沙特联 → 沙职(2026 改名)
     frozenset({"沙特联", "沙职"}),
 )
-SAME_LEAGUE_TOLERANCE = JP_TOLERANCE
-SAME_LEAGUE_HIGH_TOLERANCE = JP_HIGH_TOLERANCE
+SAME_LEAGUE_TOLERANCE = 0.04          # 初/终盘低赔 ±0.04(默认 ±0.03, 日本 ±0.05)
+SAME_LEAGUE_HIGH_TOLERANCE = 0.12     # 初/终盘高赔 ±0.12(默认 ±0.1, 日本 ±0.15)
 
 
 def is_japan_league(league: Optional[str]) -> bool:
@@ -967,7 +968,7 @@ def find_similar_spf(open_win: float, open_draw: float, open_loss: float,
     league 非空时同联赛软加成(×1.12)并入相似度; exclude_match_id 剔除预测比赛自身。
     require_direction=False: 预测场仅有1条spf快照(无真实变动)时放弃方向过滤。
     japan_mode=True: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 与默认同结构)。
-    same_league_mode=True: 仅匹配 league 同赛事(+改名别名) + 同上放宽容差(与 japan_mode 互斥, 日本场不用)。
+    same_league_mode=True: 仅匹配 league 同赛事(+改名别名) + 低赔±0.04/高赔±0.12(与 japan_mode 互斥, 日本场不用)。
     Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
     """
     if japan_mode:
