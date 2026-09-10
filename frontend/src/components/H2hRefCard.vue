@@ -302,10 +302,9 @@ function parseMatch(row) {
 const visibleParsed = computed(() => visible.value.map((row) => {
   const p = parseMatch(row)
   let homeClass = 'team-draw'
-  let awayClass = 'team-draw'
+  const awayClass = 'team-muted'
   if (p.homeScore != null && p.homeScore !== p.awayScore) {
     homeClass = p.homeScore > p.awayScore ? 'team-win' : 'team-lose'
-    awayClass = p.awayScore > p.homeScore ? 'team-win' : 'team-lose'
   }
   const asianResult = (row.asianResult || '').trim()
   const ouResult = (row.ouResult || '').trim()
@@ -551,9 +550,12 @@ const visibleParsed = computed(() => visible.value.map((row) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  &.team-win { color: #ef4444; }
-  &.team-lose { color: #10b981; }
-  &.team-draw { color: #374151; }
+  color: #3f3f46;
+  font-weight: 400;
+  &.team-win { color: #dc2626; font-weight: 600; }
+  &.team-lose { color: #059669; font-weight: 600; }
+  &.team-draw,
+  &.team-muted { color: #3f3f46; font-weight: 400; }
 }
 .score-wrap {
   width: 80rpx;

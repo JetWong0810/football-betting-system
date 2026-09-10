@@ -41,14 +41,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="teamClass(row, 'home')">{{ row.homeTeam }}</text>
+                    <text class="team-name" :class="teamClass(row, 'home', homeName)">{{ row.homeTeam }}</text>
                   </view>
                   <view class="score-wrap">
                     <text class="match-score">{{ row.score }}</text>
                     <text v-if="row.halftimeScore" class="halftime-score">{{ row.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="teamClass(row, 'away')">{{ row.awayTeam }}</text>
+                    <text class="team-name" :class="teamClass(row, 'away', homeName)">{{ row.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -93,14 +93,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="teamClass(row, 'home')">{{ row.homeTeam }}</text>
+                    <text class="team-name" :class="teamClass(row, 'home', awayName)">{{ row.homeTeam }}</text>
                   </view>
                   <view class="score-wrap">
                     <text class="match-score">{{ row.score }}</text>
                     <text v-if="row.halftimeScore" class="halftime-score">{{ row.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="teamClass(row, 'away')">{{ row.awayTeam }}</text>
+                    <text class="team-name" :class="teamClass(row, 'away', awayName)">{{ row.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -147,10 +147,19 @@ watch(() => props.open, (v) => {
   awayFilters.count = 10
 })
 
-function teamClass(row, side) {
+function sameTeam(a, b) {
+  const x = (a || '').trim()
+  const y = (b || '').trim()
+  if (!x || !y) return false
+  return x === y || x.includes(y) || y.includes(x)
+}
+
+function teamClass(row, side, focusName) {
+  const name = side === 'home' ? row.homeTeam : row.awayTeam
+  if (!sameTeam(name, focusName)) return 'team-muted'
   if (row.homeScore === row.awayScore) return 'team-draw'
-  if (side === 'home') return row.homeScore > row.awayScore ? 'team-win' : 'team-lose'
-  return row.awayScore > row.homeScore ? 'team-win' : 'team-lose'
+  const won = side === 'home' ? row.homeScore > row.awayScore : row.awayScore > row.homeScore
+  return won ? 'team-win' : 'team-lose'
 }
 
 function formatRecent(m, i) {
@@ -166,8 +175,8 @@ function formatRecent(m, i) {
     id: i,
     dateShort: m.date,
     competition: m.competition || '-',
-    homeTeam: teams[0] || '',
-    awayTeam: teams[1] || '',
+    homeTeam: (teams[0] || '').trim(),
+    awayTeam: (teams[1] || '').trim(),
     score: scoreMatch ? `${homeScore}:${awayScore}` : '-',
     halftimeScore: half && half !== 'VS' ? `(${half})` : '',
     homeScore,
@@ -365,9 +374,12 @@ const awayVisible = computed(() => applyFilters(awayFormatted.value, props.awayN
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.2;
-  &.team-win { color: #ef4444; }
-  &.team-lose { color: #10b981; }
-  &.team-draw { color: #374151; }
+  color: #3f3f46;
+  font-weight: 400;
+  &.team-win { color: #dc2626; font-weight: 600; }
+  &.team-lose { color: #059669; font-weight: 600; }
+  &.team-draw,
+  &.team-muted { color: #3f3f46; font-weight: 400; }
 }
 .score-wrap {
   width: 80rpx;

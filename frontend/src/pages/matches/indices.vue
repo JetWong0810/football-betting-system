@@ -346,14 +346,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'home', matchInfo.homeTeam)">{{ match.homeTeam }}</text>
                   </view>
                   <view class="score-wrapper">
                     <text class="match-score">{{ match.score }}</text>
                     <text class="halftime-score">{{ match.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'away', matchInfo.homeTeam)">{{ match.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -407,14 +407,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'home', matchInfo.awayTeam)">{{ match.homeTeam }}</text>
                   </view>
                   <view class="score-wrapper">
                     <text class="match-score">{{ match.score }}</text>
                     <text class="halftime-score">{{ match.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'away', matchInfo.awayTeam)">{{ match.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -864,16 +864,29 @@ function _formatH2h(m, i) {
   };
 }
 
-// 获取队伍颜色样式
-function getTeamColorClass(match, side) {
+function sameTeamName(a, b) {
+  const x = (a || "").trim();
+  const y = (b || "").trim();
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+// 近期战绩传 focusName: 只给焦点队上色(胜红/负绿/平浅黑), 对手一律浅黑。
+// 历史交锋不传 focusName: 只给当场主队上色, 客队一律浅黑。
+function getTeamColorClass(match, side, focusName) {
+  if (focusName) {
+    const name = side === "home" ? match.homeTeam : match.awayTeam;
+    if (!sameTeamName(name, focusName)) return "team-muted";
+  } else if (side === "away") {
+    return "team-muted";
+  }
   if (match.homeScore === match.awayScore) {
     return "team-draw";
   }
   if (side === "home") {
     return match.homeScore > match.awayScore ? "team-win" : "team-lose";
-  } else {
-    return match.awayScore > match.homeScore ? "team-win" : "team-lose";
   }
+  return match.awayScore > match.homeScore ? "team-win" : "team-lose";
 }
 
 // 切换一级 Tab
@@ -1961,17 +1974,23 @@ function setAwayMatchCount(count) {
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.2;
+    color: #3f3f46;
+    font-weight: 400;
 
-    &.team-draw {
-      color: #374151;
+    &.team-draw,
+    &.team-muted {
+      color: #3f3f46;
+      font-weight: 400;
     }
 
     &.team-win {
-      color: #ef4444;
+      color: #dc2626;
+      font-weight: 600;
     }
 
     &.team-lose {
-      color: #10b981;
+      color: #059669;
+      font-weight: 600;
     }
   }
 
