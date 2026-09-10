@@ -67,7 +67,7 @@
         <view class="stats-row">
           <text class="stats-label">盘路</text>
           <template v-if="stats.ahTotal > 0">
-            <text class="stats-item ah-upper">上盘 {{ stats.upper }}({{ stats.upperPct }}%){{ stats.halfUp ? ` 含半${stats.halfUp}` : '' }}</text>
+            <text class="stats-item ah-upper">上盘 {{ stats.upper }}({{ stats.upperPct }}%){{ stats.halfUp ? ` 含半${stats.halfUp}` : '' }}{{ stats.upperByOne ? ` 净胜1球${stats.upperByOne}` : '' }}</text>
             <text class="stats-item ah-push">走水 {{ stats.push }}({{ stats.pushPct }}%)</text>
             <text class="stats-item ah-lower">下盘 {{ stats.lower }}({{ stats.lowerPct }}%){{ stats.halfDown ? ` 含半${stats.halfDown}` : '' }}</text>
             <text class="stats-n">{{ stats.ahTotal }}场</text>
