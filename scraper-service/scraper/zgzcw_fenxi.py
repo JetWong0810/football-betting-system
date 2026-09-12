@@ -567,6 +567,7 @@ class FenxiSession:
         self.opened = 0
         self.skipped = 0
         self.aborted = False
+        self.block_streak = 0
         self._pw = None
         self._browser = None
         self._ctx = None
@@ -642,8 +643,7 @@ class FenxiSession:
             except Exception:
                 pass
             if is_blocked(html):
-                self.aborted = True
-                logger.warning("fenxi 二次验证, 中止本轮")
+                return self._note_blocked(label)
             return None
         html = self._page.content()
         title = ""
@@ -652,10 +652,18 @@ class FenxiSession:
         except Exception:
             pass
         if is_blocked(html, title):
-            self.aborted = True
-            logger.warning("fenxi 二次验证, 中止本轮")
-            return None
+            return self._note_blocked(label)
+        self.block_streak = 0
         return html
+
+    def _note_blocked(self, label: str) -> None:
+        """单场盾只跳过, 连续两场才中止, 避免毒页面卡住后面整轮。"""
+        self.block_streak += 1
+        logger.warning(f"fenxi 二次验证 {label} streak={self.block_streak}")
+        if self.block_streak >= 2:
+            self.aborted = True
+            logger.warning("fenxi 连续二次验证, 中止本轮")
+        return None
 
     def fetch_ypdb(self, fid: str) -> Optional[dict]:
         html = self._open(YPDB_URL.format(fid=fid), f"ypdb fid={fid}")

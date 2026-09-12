@@ -100,18 +100,24 @@ def _asian_close_unchanged(match: Dict, line: Dict) -> bool:
 
 
 def _is_stale(ts, ttl_sec: int) -> bool:
+    """按 UTC 算缓存年龄。
+
+    football-mysql 容器时区是 UTC, `NOW()` 写入的 fetched_at 也是 UTC;
+    scraper 进程是 CST。用本地 now() 会把刚写入的缓存判成过期 8 小时,
+    周末 40+ 场就会每轮先重抓基本面, 亚盘预算被吃光。
+    """
     if ts is None:
         return True
     if isinstance(ts, str):
-        raw = ts.replace("Z", "")
+        raw = ts.replace("Z", "+00:00")
         try:
             ts = datetime.fromisoformat(raw)
         except ValueError:
             return True
     if getattr(ts, "tzinfo", None):
-        ts = ts.replace(tzinfo=None)
+        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
     try:
-        return (datetime.now() - ts).total_seconds() > ttl_sec
+        return (datetime.utcnow() - ts).total_seconds() > ttl_sec
     except TypeError:
         return True
 
@@ -137,7 +143,7 @@ def need_asian_fetch(
     ttl: int = ASIAN_TTL_SEC,
     force: bool = False,
 ) -> bool:
-    """亚盘已新则跳过 /ypdb, 把预算让给基本面。"""
+    """亚盘已新则跳过 /ypdb, 把预算让给过期刷新。"""
     if force:
         return True
     if _cache_empty(meta, "asian_len"):
@@ -353,10 +359,11 @@ class SportterySyncService:
         return updated
 
     def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
-        """在售场刷新亚盘/欧赔/基本面/指数。缺基本面优先, 亚盘已新则跳过 ypdb。
+        """在售场刷新亚盘/欧赔/基本面/指数。缺亚盘优先, 基本面已新则跳过。
 
-        顺序: /bsls → /ypdb → /bjop → /dxdb+ticks。Playwright 有页数预算,
-        先补近期/交锋, 再刷新过期亚盘。max_workers 保留签名, 足彩网路径忽略。
+        顺序: /ypdb → /bsls → /bjop → /dxdb+ticks。Playwright 有页数预算,
+        周末 40+ 场时先补同赔页要的 Bet365 亚盘, 再补近期/交锋。
+        max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
         from scraper.zgzcw_live import resolve_zgzcw_fids
@@ -399,28 +406,6 @@ class SportterySyncService:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
-                if not need_form_fetch(meta.get(mid)):
-                    continue
-                form = sess.fetch_bsls(fid)
-                if form and (form.get("homeRecent") or form.get("awayRecent")):
-                    try:
-                        self.repository.upsert_fenxi_cache(mid, form=form)
-                        row = meta.setdefault(mid, {})
-                        row["form_fetched_at"] = datetime.now()
-                        row["form_len"] = 99
-                        logger.info(
-                            f"  基本面 {m.get('match_code')} "
-                            f"近{len(form.get('homeRecent') or [])}/"
-                            f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"基本面缓存失败 {mid}: {e}")
-
-            for m in targets:
-                if sess.aborted or sess.remaining <= 0:
-                    break
-                mid = m.get("match_id")
-                fid = m.get("fid_zgzcw")
                 if not need_asian_fetch(meta.get(mid), force=overwrite_open):
                     continue
                 pack = sess.fetch_ypdb(fid)
@@ -432,7 +417,7 @@ class SportterySyncService:
                     try:
                         self.repository.upsert_fenxi_cache(mid, asian=companies)
                         row = meta.setdefault(mid, {})
-                        row["asian_fetched_at"] = datetime.now()
+                        row["asian_fetched_at"] = datetime.utcnow()
                         row["asian_len"] = max(len(companies) * 40, _CACHE_MIN_LEN)
                     except Exception as e:
                         logger.warning(f"亚盘缓存失败 {mid}: {e}")
@@ -463,6 +448,28 @@ class SportterySyncService:
                     f"  亚盘 {m.get('match_code')} cid={line.get('cid')} "
                     f"{line.get('open_hc')}→{line.get('close_hc')} {line.get('name')}"
                 )
+
+            for m in targets:
+                if sess.aborted or sess.remaining <= 0:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
+                if not need_form_fetch(meta.get(mid)):
+                    continue
+                form = sess.fetch_bsls(fid)
+                if form and (form.get("homeRecent") or form.get("awayRecent")):
+                    try:
+                        self.repository.upsert_fenxi_cache(mid, form=form)
+                        row = meta.setdefault(mid, {})
+                        row["form_fetched_at"] = datetime.utcnow()
+                        row["form_len"] = 99
+                        logger.info(
+                            f"  基本面 {m.get('match_code')} "
+                            f"近{len(form.get('homeRecent') or [])}/"
+                            f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"基本面缓存失败 {mid}: {e}")
 
             for m in targets:
                 if sess.aborted or sess.remaining <= 0:
