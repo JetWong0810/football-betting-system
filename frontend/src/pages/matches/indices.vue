@@ -540,7 +540,7 @@ import { onLoad } from "@dcloudio/uni-app";
 import dayjs from "dayjs";
 import { request } from "@/utils/http";
 import { collectAliases, inferFocusVenue, namesMatch, teamResultClass } from "@/utils/formTeamColor";
-import { formatAh500 } from "@/utils/formatters";
+import { formatAh500, formatAhStd } from "@/utils/formatters";
 
 // 比赛信息
 const matchInfo = ref({
@@ -849,7 +849,7 @@ function _formatRecent(m, i) {
     halftimeScore: m.halfScore ? `(${m.halfScore})` : "",
     homeScore,
     awayScore,
-    asian: formatAh500(m.handicap) || "-",
+    asian: formatAhStd(m.handicap) || "-",
     asianClass: m.asianResult === "赢" ? "win" : m.asianResult === "输" ? "lose" : "draw",
     asianLabel: m.asianResult || "",
     ou: "",

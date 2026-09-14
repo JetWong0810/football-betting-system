@@ -122,7 +122,7 @@
 <script setup>
 import { computed, reactive, watch } from 'vue'
 import { namesMatch, teamResultClass } from '@/utils/formTeamColor'
-import { formatAh500 } from '@/utils/formatters'
+import { formatAhStd } from '@/utils/formatters'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -175,7 +175,7 @@ function formatRecent(m, i) {
     homeScore,
     awayScore,
     isSingle: !!(m.isSingle || m.is_single),
-    asian: formatAh500(m.handicap) || '-',
+    asian: formatAhStd(m.handicap) || '-',
     asianClass: asianResult === '赢' || asianResult === '赢半' ? 'win'
       : asianResult === '输' || asianResult === '输半' ? 'lose' : 'draw',
     asianLabel: asianResult,
