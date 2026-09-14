@@ -285,14 +285,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home')">{{ match.homeTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'home', homeAliases, match.venue)">{{ match.homeTeam }}</text>
                   </view>
                   <view class="score-wrapper">
                     <text class="match-score">{{ match.score }}</text>
                     <text class="halftime-score">{{ match.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away')">{{ match.awayTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'away', homeAliases, match.venue)">{{ match.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -346,14 +346,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home', matchInfo.homeTeam)">{{ match.homeTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'home', homeAliases)">{{ match.homeTeam }}</text>
                   </view>
                   <view class="score-wrapper">
                     <text class="match-score">{{ match.score }}</text>
                     <text class="halftime-score">{{ match.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away', matchInfo.homeTeam)">{{ match.awayTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'away', homeAliases)">{{ match.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -407,14 +407,14 @@
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
-                    <text class="team-name" :class="getTeamColorClass(match, 'home', matchInfo.awayTeam)">{{ match.homeTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'home', awayAliases)">{{ match.homeTeam }}</text>
                   </view>
                   <view class="score-wrapper">
                     <text class="match-score">{{ match.score }}</text>
                     <text class="halftime-score">{{ match.halftimeScore }}</text>
                   </view>
                   <view class="team-right">
-                    <text class="team-name" :class="getTeamColorClass(match, 'away', matchInfo.awayTeam)">{{ match.awayTeam }}</text>
+                    <text class="team-name" :class="getTeamColorClass(match, 'away', awayAliases)">{{ match.awayTeam }}</text>
                   </view>
                 </view>
                 <view class="col-asian">
@@ -537,6 +537,8 @@ import { ref, computed, reactive } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import dayjs from "dayjs";
 import { request } from "@/utils/http";
+import { collectAliases, inferFocusVenue, namesMatch, teamResultClass } from "@/utils/formTeamColor";
+import { formatAh500 } from "@/utils/formatters";
 
 // 比赛信息
 const matchInfo = ref({
@@ -756,8 +758,7 @@ function _findMostCommonComp(list) {
 const filteredHomeRecent = computed(() => {
   let list = recentMatches.value.home;
   if (homeFilters.homeOnly) {
-    const team = matchInfo.value.homeTeam;
-    list = list.filter((m) => m.homeTeam && m.homeTeam.includes(team));
+    list = list.filter((m) => namesMatch(m.homeTeam, homeAliases.value));
   }
   if (homeFilters.sameCompetition) {
     const comp = _findMostCommonComp(list);
@@ -769,8 +770,7 @@ const filteredHomeRecent = computed(() => {
 const filteredAwayRecent = computed(() => {
   let list = recentMatches.value.away;
   if (awayFilters.awayOnly) {
-    const team = matchInfo.value.awayTeam;
-    list = list.filter((m) => m.awayTeam && m.awayTeam.includes(team));
+    list = list.filter((m) => namesMatch(m.awayTeam, awayAliases.value));
   }
   if (awayFilters.sameCompetition) {
     const comp = _findMostCommonComp(list);
@@ -782,6 +782,9 @@ const h2hStats = ref({ homeWins: 0, draws: 0, awayWins: 0 });
 const h2hMatches = ref([]);
 const futureSchedule = ref({ home: [], away: [] });
 const dataLoading = ref(false);
+const teamAliases = ref({ home: [], away: [] });
+const homeAliases = computed(() => teamAliases.value.home);
+const awayAliases = computed(() => teamAliases.value.away);
 
 async function loadMatchData() {
   if (!matchId.value) return;
@@ -789,6 +792,17 @@ async function loadMatchData() {
   try {
     const res = await request({ url: `/api/matches/${matchId.value}/data` });
     const d = res.data || {};
+    const homeFocus = collectAliases(
+      matchInfo.value.homeTeam,
+      d.homeTeamName,
+      d.homeTeamAliases,
+    );
+    const awayFocus = collectAliases(
+      matchInfo.value.awayTeam,
+      d.awayTeamName,
+      d.awayTeamAliases,
+    );
+    teamAliases.value = { home: homeFocus, away: awayFocus };
 
     // 近期战绩
     recentMatches.value = {
@@ -799,7 +813,11 @@ async function loadMatchData() {
     // 交锋历史
     h2hMatches.value = (d.h2h || [])
       .filter((m) => m.halfScore !== "VS")
-      .map((m, i) => _formatH2h(m, i));
+      .map((m, i) => {
+        const row = _formatH2h(m, i);
+        row.venue = inferFocusVenue(row, homeFocus);
+        return row;
+      });
 
     // 未来赛程
     futureSchedule.value = {
@@ -814,22 +832,22 @@ async function loadMatchData() {
 }
 
 function _formatRecent(m, i) {
-  const matchText = m.match || "";
+  const matchText = (m.match || "").replace(/\[[^\]]*\]/g, "");
   const scoreMatch = matchText.match(/(\d+):(\d+)/);
-  const homeScore = scoreMatch ? parseInt(scoreMatch[1]) : 0;
-  const awayScore = scoreMatch ? parseInt(scoreMatch[2]) : 0;
+  const homeScore = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+  const awayScore = scoreMatch ? parseInt(scoreMatch[2], 10) : null;
   const teams = matchText.replace(/\d+:\d+/, "|").split("|");
   return {
     id: i,
     dateShort: m.date,
     competition: m.competition,
-    homeTeam: teams[0] || "",
-    awayTeam: teams[1] || "",
+    homeTeam: (teams[0] || "").trim(),
+    awayTeam: (teams[1] || "").trim(),
     score: scoreMatch ? `${homeScore}:${awayScore}` : "-",
     halftimeScore: m.halfScore ? `(${m.halfScore})` : "",
     homeScore,
     awayScore,
-    asian: m.handicap || "",
+    asian: formatAh500(m.handicap) || "-",
     asianClass: m.asianResult === "赢" ? "win" : m.asianResult === "输" ? "lose" : "draw",
     asianLabel: m.asianResult || "",
     ou: "",
@@ -839,23 +857,23 @@ function _formatRecent(m, i) {
 }
 
 function _formatH2h(m, i) {
-  const matchText = m.match || "";
+  const matchText = (m.match || "").replace(/\[[^\]]*\]/g, "");
   const scoreMatch = matchText.match(/(\d+):(\d+)/);
-  const homeScore = scoreMatch ? parseInt(scoreMatch[1]) : 0;
-  const awayScore = scoreMatch ? parseInt(scoreMatch[2]) : 0;
-  const teams = matchText.replace(/\[.*?\]/g, "").replace(/\d+:\d+/, "|").split("|");
+  const homeScore = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+  const awayScore = scoreMatch ? parseInt(scoreMatch[2], 10) : null;
+  const teams = matchText.replace(/\d+:\d+/, "|").split("|");
 
   return {
     id: i,
     dateShort: m.date,
     competition: m.competition,
-    homeTeam: teams[0] || "",
-    awayTeam: teams[1] || "",
+    homeTeam: (teams[0] || "").trim(),
+    awayTeam: (teams[1] || "").trim(),
     score: scoreMatch ? `${homeScore}:${awayScore}` : "-",
     halftimeScore: m.halfScore ? `(${m.halfScore})` : "",
     homeScore,
     awayScore,
-    asian: m.handicap || "",
+    asian: formatAh500(m.handicap) || "-",
     asianClass: m.asianResult === "赢" ? "win" : m.asianResult === "输" ? "lose" : "draw",
     asianLabel: m.asianResult || "",
     ou: "",
@@ -864,29 +882,8 @@ function _formatH2h(m, i) {
   };
 }
 
-function sameTeamName(a, b) {
-  const x = (a || "").trim();
-  const y = (b || "").trim();
-  if (!x || !y) return false;
-  return x === y || x.includes(y) || y.includes(x);
-}
-
-// 近期战绩传 focusName: 只给焦点队上色(胜红/负绿/平浅黑), 对手一律浅黑。
-// 历史交锋不传 focusName: 只给当场主队上色, 客队一律浅黑。
-function getTeamColorClass(match, side, focusName) {
-  if (focusName) {
-    const name = side === "home" ? match.homeTeam : match.awayTeam;
-    if (!sameTeamName(name, focusName)) return "team-muted";
-  } else if (side === "away") {
-    return "team-muted";
-  }
-  if (match.homeScore === match.awayScore) {
-    return "team-draw";
-  }
-  if (side === "home") {
-    return match.homeScore > match.awayScore ? "team-win" : "team-lose";
-  }
-  return match.awayScore > match.homeScore ? "team-win" : "team-lose";
+function getTeamColorClass(match, side, focus, venue) {
+  return teamResultClass(match, side, focus, venue);
 }
 
 // 切换一级 Tab

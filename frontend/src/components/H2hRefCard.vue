@@ -36,14 +36,14 @@
             </view>
             <view class="col-teams">
               <view class="team-left">
-                <text class="team-name" :class="row.homeClass">{{ row.homeTeam }}</text>
+                <text class="team-name" :class="teamClass(row, 'home')">{{ row.homeTeam }}</text>
               </view>
               <view class="score-wrap">
                 <text class="match-score">{{ row.score }}</text>
                 <text v-if="row.halftimeScore" class="halftime-score">{{ row.halftimeScore }}</text>
               </view>
               <view class="team-right">
-                <text class="team-name" :class="row.awayClass">{{ row.awayTeam }}</text>
+                <text class="team-name" :class="teamClass(row, 'away')">{{ row.awayTeam }}</text>
               </view>
             </view>
             <view class="col-asian">
@@ -66,6 +66,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { teamResultClass } from '@/utils/formTeamColor'
+import { formatAh500 } from '@/utils/formatters'
 
 const props = defineProps({
   data: { type: Object, default: null },
@@ -279,6 +281,10 @@ const verdict = computed(() => {
   return { text: parts.join('，'), side }
 })
 
+function teamClass(row, side) {
+  return teamResultClass(row, side, props.homeName, row.venue)
+}
+
 function dateShort(date) {
   const s = String(date || '').trim()
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
@@ -301,11 +307,6 @@ function parseMatch(row) {
 
 const visibleParsed = computed(() => visible.value.map((row) => {
   const p = parseMatch(row)
-  let homeClass = 'team-draw'
-  const awayClass = 'team-muted'
-  if (p.homeScore != null && p.homeScore !== p.awayScore) {
-    homeClass = p.homeScore > p.awayScore ? 'team-win' : 'team-lose'
-  }
   const asianResult = (row.asianResult || '').trim()
   const ouResult = (row.ouResult || '').trim()
   const half = (row.halfScore || '').trim()
@@ -314,9 +315,7 @@ const visibleParsed = computed(() => visible.value.map((row) => {
     ...p,
     dateShort: dateShort(row.date),
     competition: row.competition || '-',
-    homeClass,
-    awayClass,
-    asian: row.asian || '',
+    asian: row.histHcText || formatAh500(row.asian) || '-',
     asianLabel: asianResult,
     asianClass: asianResult === '赢' || asianResult === '赢半' ? 'win'
       : asianResult === '输' || asianResult === '输半' ? 'lose' : 'draw',

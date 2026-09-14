@@ -119,6 +119,8 @@
 
 <script setup>
 import { computed, reactive, watch } from 'vue'
+import { namesMatch, teamResultClass } from '@/utils/formTeamColor'
+import { formatAh500 } from '@/utils/formatters'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -147,19 +149,8 @@ watch(() => props.open, (v) => {
   awayFilters.count = 10
 })
 
-function sameTeam(a, b) {
-  const x = (a || '').trim()
-  const y = (b || '').trim()
-  if (!x || !y) return false
-  return x === y || x.includes(y) || y.includes(x)
-}
-
 function teamClass(row, side, focusName) {
-  const name = side === 'home' ? row.homeTeam : row.awayTeam
-  if (!sameTeam(name, focusName)) return 'team-muted'
-  if (row.homeScore === row.awayScore) return 'team-draw'
-  const won = side === 'home' ? row.homeScore > row.awayScore : row.awayScore > row.homeScore
-  return won ? 'team-win' : 'team-lose'
+  return teamResultClass(row, side, focusName)
 }
 
 function formatRecent(m, i) {
@@ -181,7 +172,7 @@ function formatRecent(m, i) {
     halftimeScore: half && half !== 'VS' ? `(${half})` : '',
     homeScore,
     awayScore,
-    asian: m.handicap || '',
+    asian: formatAh500(m.handicap) || '-',
     asianClass: asianResult === '赢' || asianResult === '赢半' ? 'win'
       : asianResult === '输' || asianResult === '输半' ? 'lose' : 'draw',
     asianLabel: asianResult,
@@ -210,8 +201,8 @@ function applyFilters(list, teamName, side, filters) {
   let rows = list
   if (filters.venueOnly && teamName) {
     rows = side === 'home'
-      ? rows.filter((m) => m.homeTeam && m.homeTeam.includes(teamName))
-      : rows.filter((m) => m.awayTeam && m.awayTeam.includes(teamName))
+      ? rows.filter((m) => namesMatch(m.homeTeam, teamName))
+      : rows.filter((m) => namesMatch(m.awayTeam, teamName))
   }
   if (filters.sameComp) {
     const comp = mostCommonComp(rows)
