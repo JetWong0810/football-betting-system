@@ -339,10 +339,11 @@
               </view>
 
               <!-- 数据行 -->
-              <view v-for="(match, index) in filteredHomeRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
+              <view v-for="(match, index) in filteredHomeRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0, 'is-single': match.isSingle }">
                 <view class="col-event">
                   <text class="event-date">{{ match.dateShort }}</text>
                   <text class="event-name">{{ match.competition }}</text>
+                  <text v-if="match.isSingle" class="single-mark">单</text>
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
@@ -400,10 +401,11 @@
               </view>
 
               <!-- 数据行 -->
-              <view v-for="(match, index) in filteredAwayRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0 }">
+              <view v-for="(match, index) in filteredAwayRecent" :key="match.id" class="h2h-table-row" :class="{ 'row-alt': index % 2 === 0, 'is-single': match.isSingle }">
                 <view class="col-event">
                   <text class="event-date">{{ match.dateShort }}</text>
                   <text class="event-name">{{ match.competition }}</text>
+                  <text v-if="match.isSingle" class="single-mark">单</text>
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
@@ -853,6 +855,7 @@ function _formatRecent(m, i) {
     ou: "",
     ouClass: m.ouResult === "大" ? "big" : m.ouResult === "小" ? "small" : "",
     ouLabel: m.ouResult || "",
+    isSingle: !!(m.isSingle || m.is_single),
   };
 }
 
@@ -1910,10 +1913,27 @@ function setAwayMatchCount(count) {
     background: transparent;
   }
 
+  &.is-single {
+    background: #fff7f7;
+  }
+
   &:last-child {
     border-bottom: none;
     margin-bottom: 0;
   }
+}
+
+.single-mark {
+  margin-top: 2rpx;
+  width: 28rpx;
+  height: 28rpx;
+  font-size: 16rpx;
+  font-weight: 700;
+  color: #dc2626;
+  text-align: center;
+  border: 1rpx solid #dc2626;
+  border-radius: 6rpx;
+  line-height: 26rpx;
 }
 
 .col-event {

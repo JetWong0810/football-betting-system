@@ -34,10 +34,11 @@
                 </view>
                 <view class="col-asian">亚指</view>
               </view>
-              <view v-for="(row, i) in homeVisible" :key="'h' + i" class="h2h-tr">
+              <view v-for="(row, i) in homeVisible" :key="'h' + i" class="h2h-tr" :class="{ 'is-single': row.isSingle }">
                 <view class="col-event">
                   <text class="event-date">{{ row.dateShort }}</text>
                   <text class="event-name">{{ row.competition }}</text>
+                  <text v-if="row.isSingle" class="single-mark">单</text>
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
@@ -86,10 +87,11 @@
                 </view>
                 <view class="col-asian">亚指</view>
               </view>
-              <view v-for="(row, i) in awayVisible" :key="'a' + i" class="h2h-tr">
+              <view v-for="(row, i) in awayVisible" :key="'a' + i" class="h2h-tr" :class="{ 'is-single': row.isSingle }">
                 <view class="col-event">
                   <text class="event-date">{{ row.dateShort }}</text>
                   <text class="event-name">{{ row.competition }}</text>
+                  <text v-if="row.isSingle" class="single-mark">单</text>
                 </view>
                 <view class="col-teams">
                   <view class="team-left">
@@ -172,6 +174,7 @@ function formatRecent(m, i) {
     halftimeScore: half && half !== 'VS' ? `(${half})` : '',
     homeScore,
     awayScore,
+    isSingle: !!(m.isSingle || m.is_single),
     asian: formatAh500(m.handicap) || '-',
     asianClass: asianResult === '赢' || asianResult === '赢半' ? 'win'
       : asianResult === '输' || asianResult === '输半' ? 'lose' : 'draw',
@@ -313,7 +316,22 @@ const awayVisible = computed(() => applyFilters(awayFormatted.value, props.awayN
   font-size: 20rpx;
   color: #9ca3af;
 }
-.h2h-tr { font-size: 22rpx; }
+.h2h-tr {
+  font-size: 22rpx;
+  &.is-single { background: #fff7f7; }
+}
+.single-mark {
+  margin-top: 2rpx;
+  width: 28rpx;
+  height: 28rpx;
+  font-size: 16rpx;
+  font-weight: 700;
+  color: #dc2626;
+  text-align: center;
+  border: 1rpx solid #dc2626;
+  border-radius: 6rpx;
+  line-height: 26rpx;
+}
 .col-event {
   width: 90rpx;
   flex-shrink: 0;

@@ -1526,15 +1526,17 @@ def build_recent_ref(match_data: Optional[Dict]) -> Dict[str, Any]:
                 "handicap": r.get("handicap") or "",
                 "asianResult": (r.get("asianResult") or "").strip(),
                 "ouResult": (r.get("ouResult") or "").strip(),
+                "isSingle": bool(r.get("isSingle") or r.get("is_single")),
             })
         return out[:15]
 
     if not match_data:
         return {"home": [], "away": []}
-    return {
-        "home": _clean(match_data.get("homeRecent")),
-        "away": _clean(match_data.get("awayRecent")),
-    }
+    home = _clean(match_data.get("homeRecent"))
+    away = _clean(match_data.get("awayRecent"))
+    from form_single import annotate_form_singles
+    annotate_form_singles(home, away)
+    return {"home": home, "away": away}
 
 
 def _empty_h2h_ref() -> Dict[str, Any]:

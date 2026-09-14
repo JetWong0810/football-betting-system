@@ -529,7 +529,10 @@ def get_match_data(match_id: str):
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
     from zgzcw_cache import load_match_form
+    from form_single import annotate_form_singles
     data = load_match_form(match)
+    if data:
+        annotate_form_singles(data.get("homeRecent"), data.get("awayRecent"))
     return {"match": format_match(match), "data": data}
 
 
