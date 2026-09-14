@@ -977,6 +977,17 @@ def _build_role_cover_metrics(records: List[Dict], team: str) -> Dict[str, Any]:
     }
 
 
+def _ppg_pct(ppg: Optional[float]) -> Optional[int]:
+    """场均积分(0–3)转百分制。全胜=100，全平≈33，全负=0。"""
+    if ppg is None:
+        return None
+    try:
+        v = float(ppg)
+    except (TypeError, ValueError):
+        return None
+    return int(round(max(0.0, min(3.0, v)) / 3.0 * 100))
+
+
 def _weighted_ppg(records: List[Dict], team: str,
                   home_only: Optional[bool] = None) -> Dict[str, Any]:
     """带时间衰减 + 赛事降权的场均积分。
@@ -984,10 +995,12 @@ def _weighted_ppg(records: List[Dict], team: str,
     不硬删场次：友谊赛/无盘场降权后仍可填充样本。
     home_only 非空时为「主客场匹配」模式：无盘降权更轻、有效权重门槛更低
     （场地切片本身样本更少，联赛无盘仍有主客信息量）。
+    主客切片的时间衰减按「该场地最近第N场」计，不按全部战绩下标
+    （否则中间夹客场会把主场权重大幅打穿，条形图只剩一边）。
 
     Returns:
-        {ppg, weight, n, friendly_share}
-        ppg 为 None 表示有效权重不足。
+        {ppg, weight, n, friendly_share, sufficient}
+        ppg 有场次就算；sufficient=有效权重是否够投票。
     """
     venue_mode = home_only is not None
     min_weight = 0.9 if venue_mode else 2.0
@@ -995,6 +1008,7 @@ def _weighted_ppg(records: List[Dict], team: str,
     total_weight = 0.0
     friendly_weight = 0.0
     n = 0
+    venue_i = 0
 
     for i, r in enumerate(records):
         if home_only is not None:
@@ -1005,8 +1019,12 @@ def _weighted_ppg(records: List[Dict], team: str,
                 continue
             if not home_only and is_home:
                 continue
+            decay_idx = venue_i
+            venue_i += 1
+        else:
+            decay_idx = i
 
-        decay = _PPG_TIME_DECAY[i] if i < len(_PPG_TIME_DECAY) else 0.05
+        decay = _PPG_TIME_DECAY[decay_idx] if decay_idx < len(_PPG_TIME_DECAY) else 0.05
         comp_w = _competition_form_weight(r.get("competition"))
         # 无亚盘场：综合状态降权更多；主客切片保留更多联赛信息
         hcap = (r.get("handicap") or "").strip()
@@ -1028,13 +1046,14 @@ def _weighted_ppg(records: List[Dict], team: str,
         if comp_w <= 0.25:
             friendly_weight += w
 
-    ppg = total_pts / total_weight if total_weight >= min_weight else None
+    ppg = total_pts / total_weight if total_weight > 0 else None
     friendly_share = (friendly_weight / total_weight) if total_weight > 0 else 0.0
     return {
         "ppg": round(ppg, 2) if ppg is not None else None,
         "weight": round(total_weight, 2),
         "n": n,
         "friendly_share": round(friendly_share, 2),
+        "sufficient": total_weight >= min_weight,
     }
 
 
@@ -1044,8 +1063,10 @@ def _ppg_direction(upper: Dict[str, Any], lower: Dict[str, Any],
     u_ppg, l_ppg = upper.get("ppg"), lower.get("ppg")
     u_w, l_w = float(upper.get("weight") or 0), float(lower.get("weight") or 0)
     min_need = 0.9 if venue_mode else 2.0
+    u_ok = bool(upper.get("sufficient", u_ppg is not None and u_w >= min_need))
+    l_ok = bool(lower.get("sufficient", l_ppg is not None and l_w >= min_need))
 
-    if u_ppg is None or l_ppg is None:
+    if not u_ok or not l_ok or u_ppg is None or l_ppg is None:
         return "neutral", (
             f"有效样本不足(上盘权{u_w:.1f}/下盘权{l_w:.1f}，需≥{min_need:g})"
         )
@@ -1235,22 +1256,24 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
     u_ppg = u_metrics["ppg"]
     l_ppg = l_metrics["ppg"]
 
-    if u_ppg is not None and l_ppg is not None:
+    u_pct = _ppg_pct(u_ppg)
+    l_pct = _ppg_pct(l_ppg)
+    if u_pct is not None and l_pct is not None:
         if sub1_dir == "upper":
-            sub1_desc = f"{upper_name}场均{u_ppg}分，高于{lower_name}的{l_ppg}分（近{min(u_total, l_total)}场）"
+            sub1_desc = f"{upper_name}场均{u_pct}分，高于{lower_name}的{l_pct}分（近{min(u_total, l_total)}场）"
         elif sub1_dir == "lower":
-            sub1_desc = f"{lower_name}场均{l_ppg}分，高于{upper_name}的{u_ppg}分（近{min(u_total, l_total)}场）"
+            sub1_desc = f"{lower_name}场均{l_pct}分，高于{upper_name}的{u_pct}分（近{min(u_total, l_total)}场）"
         else:
-            sub1_desc = f"{upper_name}场均{u_ppg}分，{lower_name}场均{l_ppg}分，双方接近"
-    elif u_ppg is not None:
-        sub1_desc = f"{upper_name}场均{u_ppg}分（近{u_total}场），{lower_name}数据不足"
-    elif l_ppg is not None:
-        sub1_desc = f"{lower_name}场均{l_ppg}分（近{l_total}场），{upper_name}数据不足"
+            sub1_desc = f"{upper_name}场均{u_pct}分，{lower_name}场均{l_pct}分，双方接近"
+    elif u_pct is not None:
+        sub1_desc = f"{upper_name}场均{u_pct}分（近{u_total}场），{lower_name}数据不足"
+    elif l_pct is not None:
+        sub1_desc = f"{lower_name}场均{l_pct}分（近{l_total}场），{upper_name}数据不足"
     else:
         sub1_desc = "双方近期样本均不足"
     details.append({
         "name": "近期战绩", "direction": sub1_dir, "desc": sub1_desc,
-        "chart": _compare_chart(upper_name, lower_name, u_ppg, l_ppg, unit="分", vmax=3),
+        "chart": _compare_chart(upper_name, lower_name, u_pct, l_pct, unit="分", vmax=100),
     })
 
     # --- 子因素2: 近期走势（近5场 vs 前5场趋势） ---
@@ -1268,8 +1291,8 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
             sub2_dir = "lower"
 
     # 构建展示文案：趋向同步时合并显示
-    u_ppg_s = f"{u_last_ppg:.2f}" if u_last_ppg is not None else "-"
-    l_ppg_s = f"{l_last_ppg:.2f}" if l_last_ppg is not None else "-"
+    u_ppg_s = str(_ppg_pct(u_last_ppg)) if u_last_ppg is not None else "-"
+    l_ppg_s = str(_ppg_pct(l_last_ppg)) if l_last_ppg is not None else "-"
     u_trend_s = u_trend or u_trend_err or "无数据"
     l_trend_s = l_trend or l_trend_err or "无数据"
     if u_trend and l_trend and u_trend == l_trend and sub2_dir == "neutral":
@@ -1281,7 +1304,8 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
     details.append({
         "name": "近期走势", "direction": sub2_dir, "desc": sub2_desc,
         "chart": _compare_chart(
-            upper_name, lower_name, u_last_ppg, l_last_ppg, unit="分", vmax=3,
+            upper_name, lower_name, _ppg_pct(u_last_ppg), _ppg_pct(l_last_ppg),
+            unit="分", vmax=100,
             u_suffix=u_trend or "", l_suffix=l_trend or ""),
     })
 
@@ -1301,14 +1325,16 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
         l_n = int(lower_matched.get("n", 0))
         u_g = f"{u_n}场" if u_n >= 3 else f"{u_n}场(少)"
         l_g = f"{l_n}场" if l_n >= 3 else f"{l_n}场(少)"
+        u_show = _ppg_pct(upper_matched["ppg"])
+        l_show = _ppg_pct(lower_matched["ppg"])
         if "样本不对称" in sub3_raw:
             sub3_dir = "neutral"
-            sub3_desc = f"{u_venue}{upper_matched['ppg']:.2f}分({u_g}) vs {l_venue}{lower_matched['ppg']:.2f}分({l_g})，样本不对称"
+            sub3_desc = f"{u_venue}{u_show}分({u_g}) vs {l_venue}{l_show}分({l_g})，样本不对称"
         elif "有效样本不足" in sub3_raw:
             sub3_dir = "neutral"
             sub3_desc = f"{u_venue}{u_g}、{l_venue}{l_g}，样本不足"
         else:
-            sub3_desc = f"{u_venue}{upper_matched['ppg']:.2f}分({u_g}) | {l_venue}{lower_matched['ppg']:.2f}分({l_g})"
+            sub3_desc = f"{u_venue}{u_show}分({u_g}) | {l_venue}{l_show}分({l_g})"
     else:
         u_n = int(upper_matched.get("n", 0))
         l_n = int(lower_matched.get("n", 0))
@@ -1321,7 +1347,8 @@ def calc_factor1(match_data: Optional[Dict], match_info: Dict,
         "name": "主客场", "direction": sub3_dir, "desc": sub3_desc,
         "chart": _compare_chart(
             f"{upper_name}{u_label}", f"{lower_name}{l_label}",
-            upper_matched.get("ppg"), lower_matched.get("ppg"), unit="分", vmax=3),
+            _ppg_pct(upper_matched.get("ppg")), _ppg_pct(lower_matched.get("ppg")),
+            unit="分", vmax=100),
     })
 
     # --- 子因素4: AI分析 ---
