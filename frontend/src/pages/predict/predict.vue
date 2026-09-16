@@ -372,6 +372,7 @@
       :initial-matches="similarDefaultMatches"
       :initial-ref-score="similarDefaultRef"
       :initial-snapshots="similarDefaultSnapshots"
+      :odds-kind="similarDefaultOddsKind"
       @close="closeSimilarModal"
     />
 
@@ -506,15 +507,16 @@ const factorHelpMap = {
       {
         title: '同盘口指什么',
         paras: [
-          '必须跟本场亚盘同一根盘，并且这家自己初盘=终盘。水位只能在同一根盘上比。',
-          '立博挂着 -0.50、本场是 0，标「异盘」，升水也不进热度。',
+          '精确同盘：初盘和终盘都跟本场同一根盘，且这家自己没调盘。',
+          '近盘也可投：终盘距本场不超过 0.25、同样没调盘。例如本场 +1.50、立博一直 +1.50 降水，Bet365 一直 +1.25 也降水，两家都算热度。',
+          '终盘差超过 0.25 才标「异盘」，不进票。',
         ],
       },
       {
         title: '诱下、降盘为何不算',
         paras: [
-          '盘口动了，水位已经不是同一根盘，不能拿来比热度。诱盘、升盘、降盘记在市场信号里，这里再算会重复。',
-          '水位变动不到 0.03 当噪声，两边都不计。',
+          '盘口动了（升盘、降盘、诱盘）记在市场信号里，这里再算会重复。',
+          '水位变动不到 0.03 当噪声。有效降水/升水满 2 家且同向即可出热度；仍不够时，用同盘未调盘的终盘水位高低兜底。',
         ],
       },
       {
@@ -566,12 +568,15 @@ const showSimilarModal = ref(false)
 const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const similarDefaultSnapshots = ref([])
+const similarDefaultOddsKind = ref('spf')
 const japanContext = ref(null)
 const japanContextLoading = ref(false)
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
 
 function applyPredictSimilarList(list) {
-  return filterSimilarWithAh(list || [])
+  const rows = list || []
+  if (similarDefaultOddsKind.value === 'nspf') return rows
+  return filterSimilarWithAh(rows)
 }
 
 const openSimilarModal = () => {
@@ -715,6 +720,7 @@ onLoad((query) => {
   similarDefaultMatches.value = []
   similarDefaultRef.value = null
   similarDefaultSnapshots.value = []
+  similarDefaultOddsKind.value = 'spf'
 
   if (query?.matchId) {
     pendingMatchId.value = query.matchId
@@ -1025,6 +1031,7 @@ function selectMatch(match) {
   similarDefaultMatches.value = []
   similarDefaultRef.value = null
   similarDefaultSnapshots.value = []
+  similarDefaultOddsKind.value = 'spf'
   uni.removeStorageSync('predict-last-result')
   loadJapanContext(match?.matchId)
 }
@@ -1051,6 +1058,7 @@ async function startAnalysis() {
   similarDefaultMatches.value = []
   similarDefaultRef.value = null
   similarDefaultSnapshots.value = []
+  similarDefaultOddsKind.value = 'spf'
 
   // 初始化步骤为 pending 状态
   analysisSteps.value = factorNames.map(name => ({
@@ -1100,6 +1108,7 @@ async function startAnalysis() {
       analysisSteps.value[i].details = factor.details || []
       analysisSteps.value[i].matches = factor.matches || []
       if (factor.name === '历史同赔') {
+        similarDefaultOddsKind.value = factor.oddsKind === 'nspf' ? 'nspf' : 'spf'
         similarDefaultMatches.value = applyPredictSimilarList(factor.matches || [])
         similarDefaultRef.value = factor.refScore != null ? factor.refScore : null
         similarDefaultSnapshots.value = Array.isArray(factor.snapshots) ? factor.snapshots : []

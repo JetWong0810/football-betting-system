@@ -13,9 +13,11 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 - `calc_factor2`(交锋)保留供 backtest_factors,不进 live。
 
 ## 历史同赔(F6)— `jczq_similar_odds.py`
-**口径 spf(胜平负 raw 1x2)**。池 `get_spf_pool()`:45038 场已完赛(2018-2026,world-cup 经 readpl `wtype=nspf` 抓取)+ spf 变动≥2 + 有比分 + LEFT JOIN jczq_ah_history 取 close_handicap。结果按 raw 比分算(主胜/平/客胜)。进程内缓存。
+**默认口径 spf(胜平负 raw 1x2)**。池 `get_spf_pool()`:已完赛 + spf 变动≥2 + 有比分 + LEFT JOIN jczq_ah_history 取 close_handicap。结果按 raw 比分算(主胜/平/客胜)。进程内缓存。
 
 `get_match_spf_odds(match_id)`:初盘=history 最早行;终盘优先 `odds_win_draw_lose.had`(与赛事列表同步),缺则回退 history 最晚行。无 history 有 had 时 initial==current。
+
+**nspf 兜底(只开让球胜平负、未开胜平负)**:`get_match_nspf_odds` + `get_nspf_pool()`。池=已完赛且**未开胜平负**(had 空或赔率≤0)的 hhad。硬条件:**同档竞彩让球** + 同侧 + 变动方向一致。赔率结构(低赔±0.03/高赔±0.05)只打分,取相似度最高 **10** 场。历史结果按该场让球结算让胜/让平/让负;盘路仍用 Bet365 亚盘。前端 `oddsKind=nspf`。
 
 ### 匹配过滤(`_find_similar`,find_similar_spf 共用)
 1. 剔除自身(`exclude_match_id`,避免回溯预测自匹配)。

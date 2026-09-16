@@ -23,6 +23,11 @@ HIGH_TOLERANCE = 0.1
 # 高赔≥该阈值时放宽容差(高赔区间稀疏, ±0.1 样本过少); 初盘/终盘同规则
 HIGH_ODDS_WIDE_THRESHOLD = 6.0
 HIGH_TOLERANCE_WIDE = 0.15
+# nspf 打分容差(不硬滤): 同档内拉开远近, 取前10
+NSPF_TOLERANCE = 0.3
+NSPF_CLOSE_TOLERANCE = 0.3
+NSPF_HIGH_TOLERANCE = 0.6
+NSPF_RETURN_LIMIT = 10
 LOW_LABEL = {"win": "胜", "draw": "平", "loss": "负"}
 RESULT_MAP = {"win": "H", "draw": "D", "loss": "A"}
 
@@ -121,9 +126,10 @@ def _high_odds_tolerance(odds: Optional[float], base: float = HIGH_TOLERANCE,
     return base
 
 # 历史池缓存: 2018-2025 静态数据，进程内只加载一次
-_pool_cache: Optional[List[Dict]] = None
 _spf_pool_cache: Optional[List[Dict]] = None
 _spf_pool_lock = threading.Lock()
+_nspf_pool_cache: Optional[List[Dict]] = None
+_nspf_pool_lock = threading.Lock()
 
 
 def _get_conn():
@@ -168,71 +174,115 @@ def _side_high_odds(win, loss):
     return max(cands)
 
 
-def get_nspf_pool() -> List[Dict]:
-    """加载竞彩 nspf 历史同赔池: 每场初盘(最早)+终盘(最晚)+比分+盘口+推导结果。
-
-    过滤: nspf 变动≥2(有初终盘) + 已完赛(有比分) + hhad 盘口存在。
-    """
-    global _pool_cache
-    if _pool_cache is not None:
-        return _pool_cache
-    sql = """
-        SELECT
-            m.match_id, m.match_date, m.league_name,
-            m.home_team_name, m.away_team_name,
-            m.home_score, m.away_score,
-            COALESCE(o.handicap, 0) AS handicap,
-            f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
-            l.odds_win  AS close_win, l.odds_draw  AS close_draw, l.odds_loss  AS close_loss
-        FROM (
-            SELECT match_id, MIN(change_time) mn, MAX(change_time) mx
-            FROM jczq_odds_history
-            WHERE odds_type = 'nspf'
-            GROUP BY match_id
-            HAVING COUNT(*) >= 2
-        ) t
-        JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'nspf' AND f.change_time = t.mn
-        JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'nspf' AND l.change_time = t.mx
-        JOIN matches m ON m.match_id = t.match_id
-        LEFT JOIN odds_win_draw_lose o ON o.match_id = t.match_id AND o.odds_type = 'hhad'
-        WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
-    """
-    conn = _get_conn()
+def _odds_triple(win, draw, loss) -> Optional[Tuple[float, float, float]]:
     try:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            rows = cur.fetchall()
-    finally:
-        conn.close()
+        w, d, l = float(win), float(draw), float(loss)
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or d <= 0 or l <= 0:
+        return None
+    return w, d, l
 
-    pool = []
-    for r in rows:
-        # 推导让球胜平负结果: (主队净胜 + 让球数) 符号
+
+def _same_jc_hc(a, b) -> bool:
+    """竞彩让球(hhad 整数)是否同一档。"""
+    if a is None or b is None:
+        return False
+    try:
+        return abs(float(a) - float(b)) < 0.01
+    except (TypeError, ValueError):
+        return False
+
+
+def get_nspf_pool() -> List[Dict]:
+    """只开让球胜平负的历史同赔池: 已完赛、有 hhad、未开胜平负(had 空或赔率≤0)。
+
+    终盘用 hhad; 有 nspf 变动则初盘取 history 最早行, 否则初=终。
+    result=让球胜平负(按该场自己的 jc_handicap 结算)。
+    """
+    global _nspf_pool_cache
+    if _nspf_pool_cache is not None:
+        return _nspf_pool_cache
+    with _nspf_pool_lock:
+        if _nspf_pool_cache is not None:
+            return _nspf_pool_cache
+        sql = """
+            SELECT
+                m.match_id, m.match_date, m.league_name,
+                m.home_team_name, m.away_team_name,
+                m.home_score, m.away_score,
+                m.is_single,
+                o.handicap AS jc_handicap,
+                ah.open_handicap AS open_handicap,
+                ah.close_handicap AS handicap,
+                o.win_odds  AS wdl_win,  o.draw_odds  AS wdl_draw,  o.lose_odds  AS wdl_loss,
+                f.odds_win  AS open_win,  f.odds_draw  AS open_draw,  f.odds_loss  AS open_loss,
+                l.odds_win  AS hist_close_win, l.odds_draw AS hist_close_draw, l.odds_loss AS hist_close_loss
+            FROM matches m
+            JOIN odds_win_draw_lose o ON o.match_id = m.match_id AND o.odds_type = 'hhad'
+            LEFT JOIN odds_win_draw_lose had ON had.match_id = m.match_id AND had.odds_type = 'had'
+            LEFT JOIN (
+                SELECT match_id, MIN(change_time) mn, MAX(change_time) mx
+                FROM jczq_odds_history
+                WHERE odds_type = 'nspf'
+                GROUP BY match_id
+            ) t ON t.match_id = m.match_id
+            LEFT JOIN jczq_odds_history f ON f.match_id = t.match_id AND f.odds_type = 'nspf' AND f.change_time = t.mn
+            LEFT JOIN jczq_odds_history l ON l.match_id = t.match_id AND l.odds_type = 'nspf' AND l.change_time = t.mx
+            LEFT JOIN jczq_ah_history ah ON ah.match_id = m.match_id AND ah.company LIKE 'Bet365%'
+            WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+              AND o.handicap IS NOT NULL
+              AND (had.match_id IS NULL OR had.win_odds IS NULL OR had.win_odds <= 0)
+        """
+        conn = _get_conn()
         try:
-            adj = (int(r["home_score"]) - int(r["away_score"])) + float(r["handicap"])
-        except (TypeError, ValueError):
-            continue
-        if adj > 0:
-            result = "H"
-        elif adj == 0:
-            result = "D"
-        else:
-            result = "A"
-        pool.append({
-            "match_id": r["match_id"],
-            "match_date": str(r["match_date"]) if r["match_date"] else "",
-            "league_name": r["league_name"] or "",
-            "home_team": r["home_team_name"] or "",
-            "away_team": r["away_team_name"] or "",
-            "home_score": int(r["home_score"]),
-            "away_score": int(r["away_score"]),
-            "handicap": float(r["handicap"]),
-            "result": result,
-            "open_win": float(r["open_win"]), "open_draw": float(r["open_draw"]), "open_loss": float(r["open_loss"]),
-            "close_win": float(r["close_win"]), "close_draw": float(r["close_draw"]), "close_loss": float(r["close_loss"]),
-        })
-    _pool_cache = pool
-    return pool
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        pool = []
+        for r in rows:
+            try:
+                hs, aws = int(r["home_score"]), int(r["away_score"])
+                jc_hc = float(r["jc_handicap"])
+                adj = (hs - aws) + jc_hc
+            except (TypeError, ValueError):
+                continue
+            close = _odds_triple(r.get("hist_close_win"), r.get("hist_close_draw"), r.get("hist_close_loss"))
+            if close is None:
+                close = _odds_triple(r.get("wdl_win"), r.get("wdl_draw"), r.get("wdl_loss"))
+            if close is None:
+                continue
+            open_t = _odds_triple(r.get("open_win"), r.get("open_draw"), r.get("open_loss")) or close
+            if adj > 0:
+                result = "H"
+            elif adj == 0:
+                result = "D"
+            else:
+                result = "A"
+            hc = r["handicap"]
+            oh = r.get("open_handicap")
+            pool.append({
+                "match_id": r["match_id"],
+                "match_date": str(r["match_date"]) if r["match_date"] else "",
+                "league_name": r["league_name"] or "",
+                "home_team": r["home_team_name"] or "",
+                "away_team": r["away_team_name"] or "",
+                "home_score": hs,
+                "away_score": aws,
+                "is_single": 1 if int(r.get("is_single") or 0) == 1 else 0,
+                "jc_handicap": jc_hc,
+                "open_handicap": float(oh) if oh is not None else None,
+                "handicap": float(hc) if hc is not None else None,
+                "result": result,
+                "open_win": open_t[0], "open_draw": open_t[1], "open_loss": open_t[2],
+                "close_win": close[0], "close_draw": close[1], "close_loss": close[2],
+            })
+        _nspf_pool_cache = pool
+        logger.info(f"nspf 同赔池 {len(pool)} 场")
+        return pool
 
 
 def _ah_outcome(home_score: int, away_score: int, hc: Optional[float],
@@ -470,13 +520,13 @@ def get_match_jczq_odds(match_id: str, odds_type: str = "nspf") -> Optional[Dict
     return None
 
 
-def list_spf_snapshots(match_id: str) -> List[Dict]:
-    """本场 spf 赔率轴: 初盘 + 每次变动 + 最新(即时 had, 若与末条不同则多一格)。
+def list_odds_snapshots(match_id: str, odds_type: str = "spf") -> List[Dict]:
+    """本场赔率轴: 初盘 + 每次变动 + 最新(即时 had/hhad, 若与末条不同则多一格)。
 
-    id=latest 表示用即时终盘; 其余 id 为 change_time(ISO)。
+    odds_type: 'spf' 或 'nspf'。id=latest 表示用即时终盘; 其余 id 为 change_time(ISO)。
     不足 2 格时前端不展示切换条。
     """
-    rows, live_current = _load_odds_series(match_id, "spf")
+    rows, live_current = _load_odds_series(match_id, odds_type)
     snaps: List[Dict] = []
     prev_low = None
     for i, row in enumerate(rows):
@@ -536,6 +586,10 @@ def list_spf_snapshots(match_id: str) -> List[Dict]:
     return snaps
 
 
+def list_spf_snapshots(match_id: str) -> List[Dict]:
+    return list_odds_snapshots(match_id, "spf")
+
+
 def apply_spf_snapshot(spf: Dict, snapshots: List[Dict], snapshot_id: Optional[str]) -> Tuple[Dict, bool]:
     """用快照替换 spf['current']; 返回 (spf, is_historical)。
 
@@ -569,17 +623,66 @@ def find_similar_nspf(open_win: float, open_draw: float, open_loss: float,
                       tolerance: float = TOLERANCE, league: Optional[str] = None,
                       exclude_match_id: Optional[str] = None,
                       require_direction: bool = True,
-                      high_tolerance: float = HIGH_TOLERANCE) -> Dict:
-    """核心匹配(让球胜平负 nspf 口径): 初/终盘低赔±tolerance+高赔±high_tolerance + 低赔方同侧 + 变动方向一致。
+                      high_tolerance: float = HIGH_TOLERANCE,
+                      ah_open: Optional[float] = None,
+                      ah_close: Optional[float] = None,
+                      close_tolerance: Optional[float] = None,
+                      league_filter: Optional[frozenset] = None,
+                      soft_high: bool = False,
+                      high_tolerance_wide: float = HIGH_TOLERANCE_WIDE,
+                      japan_mode: bool = False,
+                      same_league_mode: bool = False,
+                      is_single: bool = False,
+                      nspf_handicap: Optional[float] = None) -> Dict:
+    """核心匹配(让球胜平负 nspf 口径): 同档让球 + 同侧 + 变动方向一致; 赔率结构按相似度取前10。
 
-    league 非空时同联赛优先排序; exclude_match_id 剔除预测比赛自身。
-    Returns: {query, matches, stats} 与 wc_similar_odds.find_similar 同构。
+    池仅「只开让球胜平负」历史场。nspf_handicap 缺则无法匹配。
     """
+    if nspf_handicap is None:
+        return {"query": {}, "matches": [], "stats": {}}
+    require_direction = True
+    soft_odds = True
+    if japan_mode:
+        tolerance = JP_TOLERANCE
+        close_tolerance = JP_TOLERANCE
+        high_tolerance = JP_HIGH_TOLERANCE
+        high_tolerance_wide = JP_HIGH_TOLERANCE
+        league_filter = JP_LEAGUES
+        soft_high = False
+        soft_odds = False
+    elif same_league_mode:
+        league_name = (league or "").strip()
+        if not league_name:
+            return {"query": {}, "matches": [], "stats": {}}
+        tolerance = SAME_LEAGUE_TOLERANCE
+        close_tolerance = SAME_LEAGUE_TOLERANCE
+        high_tolerance = SAME_LEAGUE_HIGH_TOLERANCE
+        high_tolerance_wide = SAME_LEAGUE_HIGH_TOLERANCE
+        league_filter = same_league_name_set(league_name)
+        soft_high = False
+        soft_odds = False
+    else:
+        tolerance = NSPF_TOLERANCE
+        close_tolerance = NSPF_CLOSE_TOLERANCE
+        high_tolerance = NSPF_HIGH_TOLERANCE
+        high_tolerance_wide = NSPF_HIGH_TOLERANCE
+        soft_high = True
+        soft_odds = True
     return _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
                          tolerance, pool_loader=get_nspf_pool, league=league,
                          exclude_match_id=exclude_match_id,
                          require_direction=require_direction,
-                         high_tolerance=high_tolerance)
+                         high_tolerance=high_tolerance,
+                         ah_open=ah_open, ah_close=ah_close,
+                         close_tolerance=close_tolerance,
+                         league_filter=league_filter,
+                         soft_high=soft_high,
+                         high_tolerance_wide=high_tolerance_wide,
+                         is_single=is_single,
+                         nspf_handicap=nspf_handicap,
+                         soft_odds=soft_odds,
+                         require_ah=False,
+                         result_limit=NSPF_RETURN_LIMIT)
 
 
 def get_spf_pool() -> List[Dict]:
@@ -785,7 +888,11 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
                   league_filter: Optional[frozenset] = None,
                   soft_high: bool = False,
                   high_tolerance_wide: float = HIGH_TOLERANCE_WIDE,
-                  is_single: bool = False) -> Dict:
+                  is_single: bool = False,
+                  nspf_handicap: Optional[float] = None,
+                  soft_odds: bool = False,
+                  require_ah: bool = True,
+                  result_limit: Optional[int] = None) -> Dict:
     """共享匹配逻辑: 初盘低赔±tolerance+高赔±high_tolerance, 终盘同理, + 低赔方同侧 + 变动方向一致。
 
     "上盘球队"(低赔方)必须与预测比赛同一侧(同为胜/平/负的某一项), 初盘与终盘的低赔都在
@@ -831,6 +938,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         # 剔除预测比赛自身
         if exclude_match_id and m.get("match_id") == exclude_match_id:
             continue
+        if nspf_handicap is not None and not _same_jc_hc(m.get("jc_handicap"), nspf_handicap):
+            continue
         # 联赛硬过滤(日本模式等)
         if league_filter is not None:
             hist_lg = (m.get("league_name") or "").strip()
@@ -846,10 +955,10 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
         if hist_low_key != input_low_key:
             continue
         # 初盘低赔 ±tolerance
-        if abs(hist_low_open - input_low_open) > tolerance:
+        if not soft_odds and abs(hist_low_open - input_low_open) > tolerance:
             continue
         # 终盘低赔 ±close_tol
-        if input_low_close is not None and hist_low_close is not None:
+        if not soft_odds and input_low_close is not None and hist_low_close is not None:
             if abs(hist_low_close - input_low_close) > close_tol:
                 continue
         # 高赔方: 初/终各自按赔率档位自适应; soft_high 时跳过硬过滤
@@ -919,8 +1028,11 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
     # 综合相似度降序; 展示封顶100, 排序用未封顶 rank_score(同单关/升降在满分时仍能分先后)
     matched.sort(key=lambda x: -x["rank_score"])
 
-    # 缺亚盘终盘: 不进弹窗、不进盘路/胜平负统计(避免无盘样本稀释或用本场盘口硬填)
-    matched = [m for m in matched if m.get("handicap") is not None]
+    # 缺亚盘终盘: spf 不进弹窗/统计; nspf 让胜平负仍可算, 保留无亚盘场
+    if require_ah:
+        matched = [m for m in matched if m.get("handicap") is not None]
+    if result_limit and result_limit > 0 and len(matched) > result_limit:
+        matched = matched[:result_limit]
 
     stats = _calc_stats(matched)
 
@@ -936,6 +1048,8 @@ def _find_similar(open_win, open_draw, open_loss, close_win, close_draw, close_l
             "high_tolerance_open": open_high_tol,
             "high_tolerance_close": close_high_tol,
             "soft_high": soft_high,
+            "soft_odds": soft_odds,
+            "nspf_handicap": nspf_handicap,
             "ah_open": ah_open, "ah_close": ah_close,
             "is_single": bool(is_single),
             "league": league_norm or None,

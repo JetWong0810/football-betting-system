@@ -233,6 +233,15 @@ page {
   .note-modal.show {
     transform: translate(-50%, -50%) scale(1);
   }
+  .pin-sheet {
+    left: 50% !important;
+    right: auto !important;
+    width: min(320px, calc(100vw - 40px)) !important;
+    transform: translate(-50%, -50%);
+  }
+  .pin-sheet.show {
+    transform: translate(-50%, -50%) scale(1);
+  }
 
   .float-button {
     right: calc(var(--app-gutter) + 28rpx) !important;

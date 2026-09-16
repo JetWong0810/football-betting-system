@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
-from jczq_similar_odds import find_similar_spf, get_match_nspf_odds, get_match_spf_odds, _ah_outcome
+from jczq_similar_odds import find_similar_spf, find_similar_nspf, get_match_nspf_odds, get_match_spf_odds, _ah_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -734,15 +734,19 @@ def _resolve_match_ah(asian_data: List[Dict], match_hc: Optional[float]) -> Opti
     return vals[len(vals) // 2]
 
 
+_HEAT_NEAR = 0.25  # 终盘与本场差≤0.25 且未调盘, 仍算近盘水位
+
+
 def calc_factor5(asian_data: List[Dict], is_home_let: bool,
                  market_heat_desc: Optional[str] = None,
                  match_hc: Optional[float] = None) -> Dict[str, Any]:
-    """F4 市场热度: 本场亚盘同盘口水位共识(资金流向) + 用户手动输入
+    """F4 市场热度: 同盘/近盘未调盘的水位共识(资金流向) + 终盘水位兜底
 
-    与市场信号划界: 本因子只看「终盘=本场亚盘 且 自己没调盘」的水位;
-    诱盘/升盘/降盘归市场信号。calc_prediction 中逆向解读。
-
-    逆向解读: 上盘热→偏下盘, 上盘冷→偏上盘
+    与市场信号划界: 诱盘/升盘/降盘仍归市场信号, 不进热度票。
+    热度只看没动盘口的水位: 精确同盘优先, 终盘距本场≤0.25 的近盘也可投。
+    变动家数≥2 即可出方向(旧门槛≥3, 盘口一动就全中性)。
+    变动仍不够时, 用「精确同盘且未调盘」的终盘水位中位数兜底。
+    calc_prediction 中逆向解读: 上盘热→偏下盘, 上盘冷→偏上盘。
     """
     manual = _parse_manual_heat(market_heat_desc, is_home_let)
     if manual:
@@ -759,6 +763,7 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
     traps = 0
     line_moves = 0
     total = 0
+    level_ws: List[float] = []
     books = []
     seen = set()
 
@@ -787,10 +792,12 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
         init_depth = abs(float(ih))
         curr_depth = abs(float(ch))
         water_change = float(cv) - float(iv)
-        on_match = (
+        exact_open = match_ah is not None and abs(open_std - match_ah) <= 0.01
+        exact_close = match_ah is not None and abs(close_std - match_ah) <= 0.01
+        on_match = exact_open and exact_close
+        near_close = (
             match_ah is not None
-            and abs(open_std - match_ah) <= 0.01
-            and abs(close_std - match_ah) <= 0.01
+            and abs(close_std - match_ah) <= _HEAT_NEAR + 0.001
         )
 
         hcap_dir = NEU
@@ -801,6 +808,7 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
 
         is_trap_upper = hcap_dir == UP and water_change >= 0.03
         is_trap_lower = hcap_dir == DOWN and water_change <= -0.03
+        heat_ok = hcap_dir == NEU and (on_match or near_close)
 
         tag, bside = "", NEU
         if is_trap_upper:
@@ -815,18 +823,20 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
         elif hcap_dir == DOWN:
             line_moves += 1
             tag, bside = "降盘", DOWN
-        elif on_match and water_change <= -0.03:
+        elif heat_ok and water_change <= -0.03:
             same_drops += 1
-            tag, bside = "降水", UP
-        elif on_match and water_change >= 0.03:
+            tag, bside = ("降水" if on_match else "近盘降水"), UP
+        elif heat_ok and water_change >= 0.03:
             same_rises += 1
-            tag, bside = "升水", DOWN
-        elif not on_match:
+            tag, bside = ("升水" if on_match else "近盘升水"), DOWN
+        elif not near_close:
             tag, bside = "异盘", NEU
 
         if on_match:
             on_match_n += 1
-        else:
+            if heat_ok:
+                level_ws.append(float(cv))
+        elif not near_close:
             off_match_n += 1
 
         books.append({
@@ -841,7 +851,7 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
         })
 
     books.sort(key=lambda b: (
-        0 if b["tag"] in ("升水", "降水") else 1 if b["tag"] != "异盘" else 2,
+        0 if b["tag"] in ("升水", "降水", "近盘升水", "近盘降水") else 1 if b["tag"] != "异盘" else 2,
         _HEAT_PRIORITY.index(b["label"]) if b["label"] in _HEAT_PRIORITY else 100,
         b["label"],
     ))
@@ -852,25 +862,48 @@ def calc_factor5(asian_data: List[Dict], is_home_let: bool,
 
     same_moved = same_drops + same_rises
     prefix = f"本场盘{line_txt}，"
-    if same_moved >= 3:
+    tail = f"（水位变动{same_moved}家，同盘{on_match_n}家，共{total}家）"
+
+    def _heat_from_moves() -> Optional[Dict[str, Any]]:
+        if same_moved < 2:
+            return None
         drop_ratio = same_drops / same_moved
         rise_ratio = same_rises / same_moved
-        tail = f"（同盘变动{same_moved}家，同盘{on_match_n}家，共{total}家）"
-
+        # 2家须同向; ≥3家沿用 75%/60%
+        if same_moved == 2:
+            if same_drops == 2:
+                return _pack_heat(6, "upper", f"{prefix}同盘/近盘降水{same_drops}家{tail}，上盘略热", books)
+            if same_rises == 2:
+                return _pack_heat(6, "lower", f"{prefix}同盘/近盘升水{same_rises}家{tail}，下盘略热", books)
+            return None
         if drop_ratio >= 0.75:
-            return _pack_heat(7, "upper", f"{prefix}同盘降水{same_drops}家{tail}，上盘热", books)
+            return _pack_heat(7, "upper", f"{prefix}同盘/近盘降水{same_drops}家{tail}，上盘热", books)
         if drop_ratio >= 0.6:
-            return _pack_heat(6, "upper", f"{prefix}同盘降水{same_drops}家{tail}，上盘略热", books)
+            return _pack_heat(6, "upper", f"{prefix}同盘/近盘降水{same_drops}家{tail}，上盘略热", books)
         if rise_ratio >= 0.75:
-            return _pack_heat(7, "lower", f"{prefix}同盘升水{same_rises}家{tail}，下盘热", books)
+            return _pack_heat(7, "lower", f"{prefix}同盘/近盘升水{same_rises}家{tail}，下盘热", books)
         if rise_ratio >= 0.6:
-            return _pack_heat(6, "lower", f"{prefix}同盘升水{same_rises}家{tail}，下盘略热", books)
+            return _pack_heat(6, "lower", f"{prefix}同盘/近盘升水{same_rises}家{tail}，下盘略热", books)
+        return None
+
+    moved = _heat_from_moves()
+    if moved:
+        return moved
+
+    # 兜底: 精确同盘且未调盘的终盘水位(不含诱盘/升盘, 避免与市场信号重复)
+    if len(level_ws) >= 2:
+        mid = sorted(level_ws)[len(level_ws) // 2]
+        lv_tail = f"（同盘未调盘{len(level_ws)}家终盘水{mid:.2f}）"
+        if mid <= 0.85:
+            return _pack_heat(6, "upper", f"{prefix}终盘低水{lv_tail}，上盘略热", books)
+        if mid >= 1.00:
+            return _pack_heat(6, "lower", f"{prefix}终盘高水{lv_tail}，下盘略热", books)
 
     parts = []
     if same_drops:
-        parts.append(f"{same_drops}家同盘降水")
+        parts.append(f"{same_drops}家同盘/近盘降水")
     if same_rises:
-        parts.append(f"{same_rises}家同盘升水")
+        parts.append(f"{same_rises}家同盘/近盘升水")
     if traps:
         parts.append(f"{traps}家诱盘不计")
     if line_moves:
@@ -3494,10 +3527,15 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                                   ah_open: Optional[float] = None,
                                   japan_mode: bool = False,
                                   same_league_mode: bool = False,
-                                  is_single: bool = False) -> Dict[str, Any]:
-    """F6 历史同赔: 匹配竞彩历史 spf(胜平负)中赔率相近且变动方向一致的比赛
+                                  is_single: bool = False,
+                                  odds_kind: str = "spf",
+                                  jc_handicap: Optional[float] = None) -> Dict[str, Any]:
+    """F6 历史同赔: 默认匹配历史 spf; 无胜平负时用 nspf(让球胜平负赔率+变动)。
 
-    匹配条件: 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧(同为胜/平/负) + 低赔变动方向一致
+    odds_kind='nspf' 时匹配历史让球胜平负(不限是否同时开了胜平负):
+    同侧 + 同档竞彩让球 + 变动方向一致; 赔率结构按相似度取前10。
+    池仅未开胜平负的已完赛 hhad。jc_handicap 缺则无法匹配。
+    匹配条件(spf): 初盘低赔±0.03 + 终盘低赔±0.03 + 低赔方同一侧 + 低赔变动方向一致
     japan_mode: 仅匹配日职/日乙/天皇杯等 + 低赔±0.05/高赔±0.15(初终对称, 弹窗开关, 不改默认F6)
     same_league_mode: 仅匹配本场 league 完全同名 + 低赔±0.04/高赔±0.12(弹窗「同赛事」, 与日本模式独立)
     ah_handicap=终盘亚盘, ah_open=初盘亚盘(标准负=主让); 相似度=低赔+高赔结构 + 亚盘分档 + 同联赛/时效/盘口(弱)/同单关/升降同向。
@@ -3510,16 +3548,25 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
 
     另返回 refScore(0–100 多维证据强度) + refBreakdown, 不并入因子 score。
     """
+    odds_kind = "nspf" if odds_kind == "nspf" else "spf"
     _empty_ref = {"refScore": 0, "refBreakdown": {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}}
     # 日本模式优先; 二者勿同时开
     if japan_mode:
         same_league_mode = False
     _mode = {"japanMode": japan_mode, "sameLeagueMode": same_league_mode}
+    _meta = {"oddsKind": odds_kind, "jcHandicap": jc_handicap}
+
+    if odds_kind == "nspf" and jc_handicap is None:
+        return {"name": "历史同赔", "score": 5, "direction": "neutral",
+                "reason": "让球胜平负无让球盘口，无法匹配", "details": [], "matches": [],
+                **_mode, **_empty_ref, **_meta}
 
     if not jczq_company:
+        reason = ("无竞彩让球胜平负赔率，无法匹配历史同赔"
+                  if odds_kind == "nspf" else "无竞彩spf赔率，无法匹配历史同赔")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
-                **_mode, **_empty_ref}
+                "reason": reason, "details": [], "matches": [],
+                **_mode, **_empty_ref, **_meta}
 
     initial = jczq_company.get("initial", {})
     current = jczq_company.get("current", {})
@@ -3532,28 +3579,32 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     close_loss = current.get("lose")
 
     if not all([open_win, open_draw, open_loss, close_win, close_draw, close_loss]):
+        reason = ("竞彩让球胜平负赔率不完整，无法匹配"
+                  if odds_kind == "nspf" else "竞彩spf赔率不完整，无法匹配")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
-                "reason": "竞彩spf赔率不完整，无法匹配", "details": [], "matches": [],
-                **_mode, **_empty_ref}
+                "reason": reason, "details": [], "matches": [],
+                **_mode, **_empty_ref, **_meta}
 
-    # 预测场仅有1条spf快照(open==current)时, 无真实变动, 方向恒"平"是数据缺失而非真稳定。
+    # 预测场仅有1条快照(open==current)时, 无真实变动, 方向恒"平"是数据缺失而非真稳定。
     # 此时放弃"变动方向一致"过滤, 仅按初/终盘接近+同侧匹配(方向降级)。
     has_move = initial != current
     query_degraded = not has_move
 
+    finder = find_similar_nspf if odds_kind == "nspf" else find_similar_spf
+    extra = {"nspf_handicap": jc_handicap} if odds_kind == "nspf" else {}
     try:
-        result = find_similar_spf(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
-                                  league=league, exclude_match_id=exclude_match_id,
-                                  require_direction=has_move,
-                                  ah_open=ah_open, ah_close=ah_handicap,
-                                  japan_mode=japan_mode,
-                                  same_league_mode=same_league_mode,
-                                  is_single=is_single)
+        result = finder(open_win, open_draw, open_loss, close_win, close_draw, close_loss,
+                        league=league, exclude_match_id=exclude_match_id,
+                        require_direction=has_move,
+                        ah_open=ah_open, ah_close=ah_handicap,
+                        japan_mode=japan_mode,
+                        same_league_mode=same_league_mode,
+                        is_single=is_single, **extra)
     except Exception as e:
         logger.warning(f"历史同赔查询失败: {e}")
         return {"name": "历史同赔", "score": 5, "direction": "neutral",
                 "reason": f"查询异常: {e}", "details": [], "matches": [],
-                **_mode, **_empty_ref}
+                **_mode, **_empty_ref, **_meta}
 
     stats = result.get("stats", {})
     matches = result.get("matches", [])
@@ -3580,7 +3631,10 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
             "score": f"{hs}-{aws}",
             "homeScore": int(hs) if hs is not None else None,
             "awayScore": int(aws) if aws is not None else None,
-            "result": {"H": "主胜", "D": "平局", "A": "客胜"}.get(m.get("result"), ""),
+            "result": (
+                {"H": "让胜", "D": "让平", "A": "让负"} if odds_kind == "nspf"
+                else {"H": "主胜", "D": "平局", "A": "客胜"}
+            ).get(m.get("result"), ""),
             "handicap": _fmt_ah_line(hc),  # 兼容旧字段=终盘
             "handicapOpen": _fmt_ah_line(oh),
             "handicapClose": _fmt_ah_line(hc),
@@ -3603,7 +3657,12 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
         mode_tag = f"{league} "
     else:
         mode_tag = ""
+    if odds_kind == "nspf" and jc_handicap is not None:
+        mode_tag = f"{mode_tag}让球{float(jc_handicap):+.0f} "
     soft_high_tag = " 高赔软约束" if query.get("soft_high") else ""
+    low_pos = query.get("low_position", "")
+    if odds_kind == "nspf":
+        low_pos = {"胜": "让胜", "平": "让平", "负": "让负"}.get(low_pos, low_pos)
     if total < 3:
         ref_score, breakdown = _calc_similar_ref_score(
             "neutral", ref_rows, ah_handicap=ah_handicap,
@@ -3612,13 +3671,13 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
                 "reason": f"匹配到{total}场历史比赛，样本不足(需≥3场)",
                 "details": [
                     {"name": "匹配条件", "desc": (
-                        f"{mode_tag}{query.get('low_position', '')}赔初{query.get('low_open', 0):.2f}→终{query.get('low_close', 0):.2f} "
+                        f"{mode_tag}{low_pos}赔初{query.get('low_open', 0):.2f}→终{query.get('low_close', 0):.2f} "
                         f"方向{dir_label}{soft_high_tag}"
                     )},
                     {"name": "参考分", "desc": f"{ref_score}"},
                 ],
                 "matches": similar_matches, "refScore": ref_score, "refBreakdown": breakdown,
-                **_mode}
+                **_mode, **_meta}
 
     # 方向以盘路(亚盘上盘/下盘)统计为准, 与弹窗"盘路"列口径一致
     ah_total = stats.get("ah_total", 0)
@@ -3654,7 +3713,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
     half_down = stats.get("half_down", 0)
     details = [
         {"name": "匹配条件", "desc": (
-            f"{mode_tag}{query.get('low_position', '')}赔初{query.get('low_open', 0):.2f}→终{query.get('low_close', 0):.2f} "
+            f"{mode_tag}{low_pos}赔初{query.get('low_open', 0):.2f}→终{query.get('low_close', 0):.2f} "
             f"高赔初{query.get('high_open', 0):.2f}→终{query.get('high_close', 0):.2f} "
             f"方向{dir_label}{soft_high_tag}"
         )},
@@ -3673,7 +3732,7 @@ def calc_factor_jczq_similar_odds(jczq_company: Optional[Dict], league: Optional
 
     return {"name": "历史同赔", "score": score, "direction": direction,
             "reason": reason, "details": details, "matches": similar_matches,
-            "refScore": ref_score, "refBreakdown": breakdown, **_mode}
+            "refScore": ref_score, "refBreakdown": breakdown, **_mode, **_meta}
 
 
 def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
@@ -3704,12 +3763,27 @@ def predict_match(match_info: Dict[str, Any], match_data: Optional[Dict] = None,
         _mid = match_info.get("match_id")
         jczq_spf = get_match_spf_odds(_mid) if _mid else None
         f5 = calc_factor_jczq_odds(jczq_spf, home_is_upper=is_home_let)
-        f6 = calc_factor_jczq_similar_odds(
-            jczq_spf, league=match_info.get("league"),
-            exclude_match_id=_mid,
-            ah_handicap=match_info.get("handicap"),
-            ah_open=match_info.get("handicap_open"),
-            is_single=is_single)
+        if jczq_spf:
+            f6 = calc_factor_jczq_similar_odds(
+                jczq_spf, league=match_info.get("league"),
+                exclude_match_id=_mid,
+                ah_handicap=match_info.get("handicap"),
+                ah_open=match_info.get("handicap_open"),
+                is_single=is_single)
+        else:
+            jczq_nspf = get_match_nspf_odds(_mid) if _mid else None
+            hhad = match_info.get("hhad")
+            try:
+                hhad = float(hhad) if hhad is not None else None
+            except (TypeError, ValueError):
+                hhad = None
+            f6 = calc_factor_jczq_similar_odds(
+                jczq_nspf, league=match_info.get("league"),
+                exclude_match_id=_mid,
+                ah_handicap=match_info.get("handicap"),
+                ah_open=match_info.get("handicap_open"),
+                is_single=is_single,
+                odds_kind="nspf", jc_handicap=hhad)
         f7 = calc_factor6(is_single, f4["direction"], f4["score"])
         return f3, f4, f5, f6, f7, jczq_spf
 

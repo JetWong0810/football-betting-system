@@ -58,10 +58,10 @@
 
       <view v-if="stats.total > 0" class="similar-stats">
         <view class="stats-row">
-          <text class="stats-label">胜平负</text>
-          <text class="stats-item r-win">主胜 {{ stats.win }}({{ stats.winPct }}%)</text>
-          <text class="stats-item r-draw">平 {{ stats.draw }}({{ stats.drawPct }}%)</text>
-          <text class="stats-item r-loss">客胜 {{ stats.loss }}({{ stats.lossPct }}%)</text>
+          <text class="stats-label">{{ oddsKind === 'nspf' ? '让球胜平负' : '胜平负' }}</text>
+          <text class="stats-item r-win">{{ oddsKind === 'nspf' ? '让胜' : '主胜' }} {{ stats.win }}({{ stats.winPct }}%)</text>
+          <text class="stats-item r-draw">{{ oddsKind === 'nspf' ? '让平' : '平' }} {{ stats.draw }}({{ stats.drawPct }}%)</text>
+          <text class="stats-item r-loss">{{ oddsKind === 'nspf' ? '让负' : '客胜' }} {{ stats.loss }}({{ stats.lossPct }}%)</text>
           <text class="stats-n">{{ stats.total }}场</text>
         </view>
         <view class="stats-row">
@@ -136,6 +136,7 @@ const props = defineProps({
   initialMatches: { type: Array, default: () => [] },
   initialRefScore: { type: Number, default: null },
   initialSnapshots: { type: Array, default: () => [] },
+  oddsKind: { type: String, default: 'spf' },
 })
 
 const emit = defineEmits(['close', 'same-event'])
@@ -165,7 +166,9 @@ const extraHint = computed(() => {
 })
 
 function applyList(list) {
-  return filterSimilarWithAh(list || [])
+  const rows = list || []
+  if (props.oddsKind === 'nspf') return rows
+  return filterSimilarWithAh(rows)
 }
 
 function fmt(v) {
@@ -201,9 +204,9 @@ function deltaClass(s) {
 }
 
 function resultClass(r) {
-  if (r === '主胜') return 'r-win'
-  if (r === '平局') return 'r-draw'
-  if (r === '客胜') return 'r-loss'
+  if (r === '主胜' || r === '让胜') return 'r-win'
+  if (r === '平局' || r === '让平') return 'r-draw'
+  if (r === '客胜' || r === '让负') return 'r-loss'
   return ''
 }
 

@@ -260,12 +260,17 @@ def _attach_squad_worth(match_info: Dict[str, Any], match: Dict[str, Any]) -> No
 
 def _attach_f6_snapshots(factors: Optional[List], match_id: str) -> None:
     """给 F6 带上赔率轴, 同赔弹窗默认打开不必再打 similar-odds。"""
-    from jczq_similar_odds import list_spf_snapshots
+    from jczq_similar_odds import list_odds_snapshots
+    kind = "spf"
+    for f in factors or []:
+        if f.get("name") == "历史同赔":
+            kind = "nspf" if f.get("oddsKind") == "nspf" else "spf"
+            break
     snaps: List[Dict[str, Any]] = []
     try:
-        snaps = list_spf_snapshots(match_id)
+        snaps = list_odds_snapshots(match_id, kind)
     except Exception as e:
-        logger.warning(f"spf 快照加载失败 {match_id}: {e}")
+        logger.warning(f"{kind} 快照加载失败 {match_id}: {e}")
     for f in factors or []:
         if f.get("name") == "历史同赔":
             f["snapshots"] = snaps
@@ -331,9 +336,11 @@ async def startup_event():
 
 def _warmup_spf_pool():
     try:
-        from jczq_similar_odds import get_spf_pool
+        from jczq_similar_odds import get_spf_pool, get_nspf_pool
         n = len(get_spf_pool())
-        logger.info(f"[同赔池] 预热完成 {n} 场")
+        logger.info(f"[同赔池] spf 预热完成 {n} 场")
+        n2 = len(get_nspf_pool())
+        logger.info(f"[同赔池] nspf 预热完成 {n2} 场")
     except Exception as e:
         logger.warning(f"[同赔池] 预热失败: {e}")
 
@@ -1301,7 +1308,10 @@ def batch_similar(
     """
     import time as _time
     from predict_service import calc_factor_jczq_similar_odds
-    from jczq_similar_odds import get_match_spf_odds, list_spf_snapshots, _ah_outcome, _get_low_odds_info
+    from jczq_similar_odds import (
+        get_match_spf_odds, get_match_nspf_odds, list_odds_snapshots,
+        _ah_outcome, _get_low_odds_info,
+    )
 
     if not date:
         date = _time.strftime("%Y-%m-%d", _time.localtime())
@@ -1376,23 +1386,36 @@ def batch_similar(
         item["ahHandicapOpen"] = ah_open
         item["ahHandicapClose"] = ahc
 
-        # F6 历史同赔
+        # F6 历史同赔: 有胜平负走 spf; 只开让球胜平负则走 nspf(同赔率+变动, 不限让球档)
         spf = get_match_spf_odds(mid)
-        has_move = bool(spf and spf["initial"] != spf["current"])
+        nspf = None
+        odds_kind = "spf"
+        jc_hc = item.get("handicap")
+        try:
+            jc_hc = float(jc_hc) if jc_hc is not None else None
+        except (TypeError, ValueError):
+            jc_hc = None
         if spf:
             f6 = calc_factor_jczq_similar_odds(
                 spf, league=item.get("league"), exclude_match_id=mid,
                 ah_handicap=ahc, ah_open=ah_open,
                 is_single=bool(item.get("isSingle")))
+            has_move = bool(spf["initial"] != spf["current"])
         else:
-            f6 = {"name": "历史同赔", "direction": "neutral", "score": 5,
-                  "reason": "无竞彩spf赔率，无法匹配历史同赔", "details": [], "matches": [],
-                  "refScore": 0, "refBreakdown": {"edge": 0, "quality": 0, "sample": 0, "decidable": 0}}
-        item["spf"] = spf  # 本场初盘/终盘(胜平负), 供对比展示
+            nspf = get_match_nspf_odds(mid)
+            odds_kind = "nspf"
+            f6 = calc_factor_jczq_similar_odds(
+                nspf, league=item.get("league"), exclude_match_id=mid,
+                ah_handicap=ahc, ah_open=ah_open,
+                is_single=bool(item.get("isSingle")),
+                odds_kind="nspf", jc_handicap=jc_hc)
+            has_move = bool(nspf and nspf["initial"] != nspf["current"])
+        item["spf"] = spf
+        item["nspf"] = nspf
         item["hasMove"] = has_move
         item["f6"] = f6
         try:
-            f6["snapshots"] = list_spf_snapshots(mid)
+            f6["snapshots"] = list_odds_snapshots(mid, odds_kind)
         except Exception as _se:
             logger.warning(f"批量同赔快照失败 {mid}: {_se}")
             f6["snapshots"] = []
@@ -1411,6 +1434,11 @@ def batch_similar(
                     lk = _get_low_odds_info(
                         spf["initial"]["win"], spf["initial"]["draw"], spf["initial"]["lose"],
                         spf["current"]["win"], spf["current"]["draw"], spf["current"]["lose"])
+                    low_key = lk[0]
+                elif nspf:
+                    lk = _get_low_odds_info(
+                        nspf["initial"]["win"], nspf["initial"]["draw"], nspf["initial"]["lose"],
+                        nspf["current"]["win"], nspf["current"]["draw"], nspf["current"]["lose"])
                     low_key = lk[0]
                 out = _ah_outcome(int(hs), int(aws), ahc, low_key)
                 actual_ah = out[0] if out else None
@@ -1837,8 +1865,8 @@ def predict_similar_odds_detail(
     """
     from predict_service import calc_factor_jczq_similar_odds
     from jczq_similar_odds import (
-        get_match_spf_odds, is_japan_league, is_same_league_eligible,
-        list_spf_snapshots, apply_spf_snapshot,
+        get_match_spf_odds, get_match_nspf_odds, is_japan_league, is_same_league_eligible,
+        list_odds_snapshots, apply_spf_snapshot,
     )
     from database import get_db
 
@@ -1854,7 +1882,25 @@ def predict_similar_odds_detail(
     if league_only and not is_same_league_eligible(league):
         raise HTTPException(status_code=400, detail="同赛事模式仅适用于五大联赛及二级、葡超/荷甲等指定赛事")
 
-    snapshots = list_spf_snapshots(match_id)
+    spf = get_match_spf_odds(match_id)
+    nspf = None
+    odds_kind = "spf"
+    jc_hc = None
+    if spf:
+        odds = spf
+        snapshots = list_odds_snapshots(match_id, "spf")
+    else:
+        nspf = get_match_nspf_odds(match_id)
+        odds_kind = "nspf"
+        odds = nspf
+        snapshots = list_odds_snapshots(match_id, "nspf")
+        wdl = repo.get_wdl_odds(match_id) or {}
+        hhad = (wdl.get("hhad") or {}).get("handicap")
+        try:
+            jc_hc = float(hhad) if hhad is not None else None
+        except (TypeError, ValueError):
+            jc_hc = None
+
     snap_id = (snapshot or "latest").strip() or "latest"
     if snap_id != "latest" and not any(s.get("id") == snap_id for s in snapshots):
         raise HTTPException(status_code=400, detail="无效的赔率快照")
@@ -1871,14 +1917,18 @@ def predict_similar_odds_detail(
         "isHistoricalSnapshot": snap_id != "latest",
         "matches": [],
         "refScore": 0,
-        "reason": "无竞彩spf赔率，无法匹配历史同赔",
+        "oddsKind": odds_kind,
+        "jcHandicap": jc_hc,
+        "reason": (
+            "无竞彩让球胜平负赔率，无法匹配历史同赔"
+            if odds_kind == "nspf" else "无竞彩spf赔率，无法匹配历史同赔"
+        ),
     }
 
-    spf = get_match_spf_odds(match_id)
-    if not spf:
+    if not odds:
         return empty
 
-    spf, is_hist = apply_spf_snapshot(spf, snapshots, snap_id)
+    odds, is_hist = apply_spf_snapshot(odds, snapshots, snap_id)
 
     # 亚盘初/终: 仅 Bet365 系 jczq_ah_history, 不用澳门/matches 兜底
     # 历史帧不把「当前亚终」并入相似度
@@ -1901,11 +1951,12 @@ def predict_similar_odds_detail(
         logger.warning(f"similar-odds 读亚盘失败 {match_id}: {e}")
 
     is_single = resolve_had_is_single(match.get("is_single"), repo.get_wdl_odds(match_id))
+    extra = {"odds_kind": "nspf", "jc_handicap": jc_hc} if odds_kind == "nspf" else {}
     f6 = calc_factor_jczq_similar_odds(
-        spf, league=league, exclude_match_id=match_id,
+        odds, league=league, exclude_match_id=match_id,
         ah_handicap=ah_close, ah_open=ah_open,
         japan_mode=japan_only, same_league_mode=league_only,
-        is_single=is_single,
+        is_single=is_single, **extra,
     )
     return {
         "matchId": match_id,
@@ -1923,6 +1974,8 @@ def predict_similar_odds_detail(
         "direction": f6.get("direction"),
         "reason": f6.get("reason"),
         "details": f6.get("details") or [],
+        "oddsKind": f6.get("oddsKind") or odds_kind,
+        "jcHandicap": f6.get("jcHandicap") if f6.get("jcHandicap") is not None else jc_hc,
     }
 
 

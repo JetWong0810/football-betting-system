@@ -71,7 +71,9 @@
         <text class="ctrl-lab">排序</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'default' }" @tap="sortMode = 'default'">默认</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'time' }" @tap="sortMode = 'time'">时间</text>
-        <text class="ctrl-btn" :class="{ active: sortMode === 'hitPct' }" @tap="sortMode = 'hitPct'">命中率</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'hitPct' }" @tap="sortMode = 'hitPct'">赢盘率</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'homeWin' }" @tap="sortMode = 'homeWin'">主胜率</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'homeLoss' }" @tap="sortMode = 'homeLoss'">主负率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'refScore' }" @tap="sortMode = 'refScore'">分数</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'rating' }" @tap="sortMode = 'rating'">星级</text>
       </view>
@@ -96,12 +98,12 @@
           class="ctrl-btn hitpct"
           :class="{ active: dirFilters.includes('hitPct65') }"
           @tap="toggleFilter('hitPct65')"
-        >命中≥65%</text>
+        >赢盘≥65%</text>
         <text
           class="ctrl-btn score"
-          :class="{ active: dirFilters.includes('score60') }"
-          @tap="toggleFilter('score60')"
-        >分数≥60</text>
+          :class="{ active: dirFilters.includes('score48') }"
+          @tap="toggleFilter('score48')"
+        >分数≥48</text>
         <text
           class="ctrl-btn single"
           :class="{ active: dirFilters.includes('single') }"
@@ -143,6 +145,9 @@
           v-for="it in filteredItems"
           :key="it.matchId"
           class="match-card"
+          :class="{ pinned: isPinned(it.matchId) }"
+          @longpress="onCardLongPress(it)"
+          @contextmenu.prevent="onCardLongPress(it)"
         >
           <view class="row-meta">
             <text class="league">{{ it.league || '-' }}</text>
@@ -227,34 +232,34 @@
             </template>
           </view>
 
-          <!-- 赔率一行 -->
-          <view class="row-odds" v-if="it.spf">
-            <text class="ol-lab">竞彩</text>
+          <!-- 赔率一行: 有胜平负显示竞彩; 仅让球胜平负显示让球盘 -->
+          <view class="row-odds" v-if="jcOdds(it)">
+            <text class="ol-lab">{{ oddsLab(it) }}</text>
             <text class="ol-muted">初</text>
-            <text :class="lowClass(it.spf.initial, 'win')">{{ fmt(it.spf.initial.win) }}</text>
-            <text :class="lowClass(it.spf.initial, 'draw')">{{ fmt(it.spf.initial.draw) }}</text>
-            <text :class="lowClass(it.spf.initial, 'loss')">{{ fmt(it.spf.initial.lose) }}</text>
+            <text :class="lowClass(jcOdds(it).initial, 'win')">{{ fmt(jcOdds(it).initial.win) }}</text>
+            <text :class="lowClass(jcOdds(it).initial, 'draw')">{{ fmt(jcOdds(it).initial.draw) }}</text>
+            <text :class="lowClass(jcOdds(it).initial, 'loss')">{{ fmt(jcOdds(it).initial.lose) }}</text>
             <text class="ol-muted">→</text>
             <text class="ol-muted">终</text>
-            <text :class="lowClass(it.spf.current, 'win')">{{ fmt(it.spf.current.win) }}</text>
-            <text :class="lowClass(it.spf.current, 'draw')">{{ fmt(it.spf.current.draw) }}</text>
-            <text :class="lowClass(it.spf.current, 'loss')">{{ fmt(it.spf.current.lose) }}</text>
-            <text class="ol-move" :class="moveClass(it.spf)">{{ moveLabel(it.spf) }}</text>
+            <text :class="lowClass(jcOdds(it).current, 'win')">{{ fmt(jcOdds(it).current.win) }}</text>
+            <text :class="lowClass(jcOdds(it).current, 'draw')">{{ fmt(jcOdds(it).current.draw) }}</text>
+            <text :class="lowClass(jcOdds(it).current, 'loss')">{{ fmt(jcOdds(it).current.lose) }}</text>
+            <text class="ol-move" :class="moveClass(jcOdds(it))">{{ moveLabel(jcOdds(it)) }}</text>
           </view>
 
           <MatchNoteCard
             :note="noteMap[it.matchId]"
             :is-single="!!it.isSingle"
-            :jc-move="lowMoveDir(it.spf)"
+            :jc-move="lowMoveDir(jcOdds(it))"
             @edit="openNoteEditor(it)"
             @rate="(val) => quickRate(it, val)"
           />
 
           <view class="row-detail" @tap="openSimilar(it)">
             <view class="spf-stat" v-if="spfStats(it.f6).total">
-              <text class="r-win">胜 {{ spfStats(it.f6).win }}</text>
-              <text class="r-draw">平 {{ spfStats(it.f6).draw }}</text>
-              <text class="r-loss">负 {{ spfStats(it.f6).loss }}</text>
+              <text class="r-win">{{ spfCountLab(it).win }} {{ spfStats(it.f6).win }}</text>
+              <text class="r-draw">{{ spfCountLab(it).draw }} {{ spfStats(it.f6).draw }}</text>
+              <text class="r-loss">{{ spfCountLab(it).loss }} {{ spfStats(it.f6).loss }}</text>
             </view>
             <text class="detail-link">同赔详情 {{ it.f6?.matches?.length || 0 }} 场 ›</text>
           </view>
@@ -286,7 +291,7 @@
       :matches="simTarget?.f6?.matches || []"
       :f6-direction="simTarget?.f6?.direction || 'neutral'"
       :ref-score="simTarget?.f6?.refScore"
-      :low-key="lowKeyFromSpf(simTarget?.spf)"
+      :low-key="lowKeyFromSpf(jcOdds(simTarget))"
       :selected-side="simBet.findLeg(simTarget?.matchId)?.side"
       :selected-line="simBet.findLeg(simTarget?.matchId)?.line"
       @close="closeSimPick"
@@ -301,6 +306,7 @@
       :initial-matches="similarDefaultMatches"
       :initial-ref-score="similarDefaultRef"
       :initial-snapshots="similarDefaultSnapshots"
+      :odds-kind="similarOddsKind"
       @close="closeSimilar"
       @same-event="onSimilarSameEvent"
     />
@@ -320,6 +326,23 @@
         <JapanIntelCard v-else-if="japanIntelData" :data="japanIntelData" />
         <view v-else class="japan-loading"><text>暂无数据</text></view>
       </scroll-view>
+    </view>
+
+    <view v-if="showPinSheet" class="app-mask pin-sheet-mask" @tap="closePinSheet"></view>
+    <view v-if="showPinSheet" class="pin-sheet show" @tap.stop>
+      <view class="pin-sheet-bar"></view>
+      <view class="pin-sheet-head">
+        <view class="pin-sheet-titles">
+          <text class="pin-sheet-teams">{{ pinSheetTeams }}</text>
+          <text class="pin-sheet-hint">{{ pinSheetHint }}</text>
+        </view>
+        <text class="pin-sheet-close" @tap="closePinSheet">关闭</text>
+      </view>
+      <text
+        class="pin-sheet-act"
+        :class="{ off: pinSheetPinned }"
+        @tap="confirmPinSheet"
+      >{{ pinSheetPinned ? '取消置顶' : '置顶' }}</text>
     </view>
 
     <!-- 日期选择 -->
@@ -393,11 +416,14 @@ const showSimilar = ref(false)
 const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const similarDefaultSnapshots = ref([])
+const similarOddsKind = ref('spf')
 const similarMatchId = ref('')
 const similarLeagueName = ref('')
 
 function applySimilarList(list) {
-  return filterSimilarWithAh(list || [])
+  const rows = list || []
+  if (similarOddsKind.value === 'nspf') return rows
+  return filterSimilarWithAh(rows)
 }
 const showJapanIntel = ref(false)
 const japanIntelData = ref(null)
@@ -417,18 +443,36 @@ const noteHints = computed(() => {
   return {
     isSingle: !!it.isSingle,
     hc: it.ahHandicap,
-    jcMove: lowMoveDir(it.spf),
+    jcMove: lowMoveDir(jcOdds(it)),
   }
 })
 /** 多选: upper/lower/neutral/hit */
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
 const moveFilters = ref([])
-/** default | time | hitPct | refScore | rating */
+/** default | time | hitPct | homeWin | homeLoss | refScore | rating */
 const sortMode = ref('default')
+const PIN_KEY = 'batch-similar-pins'
+const pinnedIds = ref(loadPinnedIds())
+const pinSheetItem = ref(null)
+const showPinSheet = computed(() => !!pinSheetItem.value)
+const pinSheetPinned = computed(() => isPinned(pinSheetItem.value?.matchId))
+const pinSheetTeams = computed(() => {
+  const it = pinSheetItem.value
+  if (!it) return ''
+  return `${it.homeTeam?.name || '主队'} vs ${it.awayTeam?.name || '客队'}`
+})
+const pinSheetHint = computed(() => (
+  pinSheetPinned.value
+    ? '已置顶，默认排序时固定在列表最前'
+    : '置顶后，默认排序时排在列表最前'
+))
 
 const isFinished = computed(() => status.value === 'finished')
 const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0)
+/** 默认排序且无筛选时置顶才浮到最上；有筛选/非默认排序则按条件排 */
+const pinToTop = computed(() => sortMode.value === 'default' && !hasFilter.value)
+const pinnedSet = computed(() => new Set(pinnedIds.value))
 const dateLabel = computed(() => (date.value || '').slice(5) || '--')
 /** 日历打点用全量售卖日, 方便从在售点进已结束期 */
 const saleDateSet = computed(() => new Set(navDates.value.length ? navDates.value : saleDates.value))
@@ -579,6 +623,7 @@ function simPickLabel(it) {
   return '选盘'
 }
 function openSimPick(it) {
+  if (cardTapBlocked()) return
   if (it.ahHandicap == null) {
     uni.showToast({ title: '该场无亚盘数据', icon: 'none' })
     return
@@ -648,6 +693,25 @@ const DIR_ORDER = { upper: 0, lower: 1, neutral: 2 }
 function itemHitPct(it) {
   return focusPct(it?.f6) || 0
 }
+function itemHomeWinPct(it) {
+  const s = spfStats(it?.f6)
+  return s?.total ? s.winPct : -1
+}
+function itemHomeLossPct(it) {
+  const s = spfStats(it?.f6)
+  return s?.total ? s.lossPct : -1
+}
+function itemSpfTotal(it) {
+  return spfStats(it?.f6)?.total || 0
+}
+function cmpSpfRate(a, b, pctOf) {
+  const bigA = itemSpfTotal(a) > 4 ? 1 : 0
+  const bigB = itemSpfTotal(b) > 4 ? 1 : 0
+  if (bigA !== bigB) return bigB - bigA
+  const d = pctOf(b) - pctOf(a)
+  if (d !== 0) return d
+  return itemRefScore(b) - itemRefScore(a)
+}
 function itemRefScore(it) {
   const s = it?.f6?.refScore
   return s == null ? -1 : Number(s)
@@ -692,6 +756,12 @@ const sortedItems = computed(() => {
       return itemRefScore(b) - itemRefScore(a)
     })
   }
+  if (mode === 'homeWin') {
+    return list.sort((a, b) => cmpSpfRate(a, b, itemHomeWinPct))
+  }
+  if (mode === 'homeLoss') {
+    return list.sort((a, b) => cmpSpfRate(a, b, itemHomeLossPct))
+  }
   if (mode === 'refScore') {
     return list.sort((a, b) => {
       const d = itemRefScore(b) - itemRefScore(a)
@@ -717,11 +787,11 @@ const filteredItems = computed(() => {
   let list = sortedItems.value
   const dirs = dirFilters.value
   if (dirs.length) {
-    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample8' && k !== 'hitPct65' && k !== 'score60' && k !== 'single' && k !== 'hasNote')
+    const dirSet = dirs.filter(k => k !== 'hit' && k !== 'sample8' && k !== 'hitPct65' && k !== 'score48' && k !== 'single' && k !== 'hasNote')
     const needHit = dirs.includes('hit')
     const needSample8 = dirs.includes('sample8')
     const needHitPct65 = dirs.includes('hitPct65')
-    const needScore60 = dirs.includes('score60')
+    const needScore48 = dirs.includes('score48')
     const needSingle = dirs.includes('single')
     const needNote = dirs.includes('hasNote')
     list = list.filter(it => {
@@ -729,7 +799,7 @@ const filteredItems = computed(() => {
       const okHit = !needHit || it.hit === true
       const okSample = !needSample8 || similarHistCount(it) >= 8
       const okHitPct = !needHitPct65 || itemHitPct(it) >= 65
-      const okScore = !needScore60 || itemRefScore(it) >= 60
+      const okScore = !needScore48 || itemRefScore(it) >= 48
       const okSingle = !needSingle || !!it.isSingle
       const okNote = !needNote || hasNote(noteMap[it.matchId])
       return okDir && okHit && okSample && okHitPct && okScore && okSingle && okNote
@@ -737,9 +807,18 @@ const filteredItems = computed(() => {
   }
   const moves = moveFilters.value
   if (moves.length) {
-    list = list.filter(it => moves.includes(lowMoveDir(it.spf)))
+    list = list.filter(it => moves.includes(lowMoveDir(jcOdds(it))))
   }
-  return list
+  if (!pinToTop.value) return list
+  const pinRank = new Map(pinnedIds.value.map((id, i) => [String(id), i]))
+  const pinned = []
+  const rest = []
+  for (const it of list) {
+    if (pinRank.has(String(it.matchId))) pinned.push(it)
+    else rest.push(it)
+  }
+  pinned.sort((a, b) => pinRank.get(String(a.matchId)) - pinRank.get(String(b.matchId)))
+  return [...pinned, ...rest]
 })
 const filteredHitCount = computed(() =>
   filteredItems.value.reduce((n, it) => n + (it.hit === true ? 1 : 0), 0)
@@ -756,6 +835,52 @@ function toggleInList(listRef, key) {
   const i = arr.indexOf(key)
   if (i >= 0) listRef.value = arr.filter((_, idx) => idx !== i)
   else listRef.value = [...arr, key]
+}
+function loadPinnedIds() {
+  try {
+    const raw = uni.getStorageSync(PIN_KEY)
+    const list = Array.isArray(raw) ? raw : (raw ? JSON.parse(raw) : [])
+    return list.map(String).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+function persistPins() {
+  uni.setStorageSync(PIN_KEY, pinnedIds.value)
+}
+function isPinned(matchId) {
+  return !!matchId && pinnedSet.value.has(String(matchId))
+}
+function togglePin(it) {
+  const id = it?.matchId != null ? String(it.matchId) : ''
+  if (!id) return
+  const i = pinnedIds.value.indexOf(id)
+  const pinned = i < 0
+  pinnedIds.value = pinned
+    ? [id, ...pinnedIds.value]
+    : pinnedIds.value.filter((x) => x !== id)
+  persistPins()
+  uni.showToast({ title: pinned ? '已置顶' : '已取消置顶', icon: 'none' })
+}
+let pinGestureUntil = 0
+function suppressCardTap() {
+  pinGestureUntil = Date.now() + 500
+}
+function cardTapBlocked() {
+  return Date.now() < pinGestureUntil
+}
+function onCardLongPress(it) {
+  suppressCardTap()
+  pinSheetItem.value = it
+}
+function closePinSheet() {
+  if (cardTapBlocked()) return
+  pinSheetItem.value = null
+}
+function confirmPinSheet() {
+  const it = pinSheetItem.value
+  pinSheetItem.value = null
+  if (it) togglePin(it)
 }
 function toggleFilter(key) {
   toggleInList(dirFilters, key)
@@ -789,6 +914,24 @@ function refTier(f6) {
   return 'ref-strong'
 }
 function fmt(v) { return v == null ? '-' : Number(v).toFixed(2) }
+function jcOdds(it) { return it?.spf || it?.nspf || null }
+function isNspf(it) { return it?.f6?.oddsKind === 'nspf' }
+function fmtJcHc(h) {
+  if (h == null || h === '') return ''
+  const n = Number(h)
+  if (Number.isNaN(n)) return ''
+  if (Math.abs(n) < 1e-9) return '0'
+  return n > 0 ? `+${n}` : String(n)
+}
+function oddsLab(it) {
+  if (!isNspf(it)) return '竞彩'
+  const hc = fmtJcHc(it?.f6?.jcHandicap != null ? it.f6.jcHandicap : it?.handicap)
+  return hc ? `让球 ${hc}` : '让球'
+}
+function spfCountLab(it) {
+  if (isNspf(it)) return { win: '让胜', draw: '让平', loss: '让负' }
+  return { win: '胜', draw: '平', loss: '负' }
+}
 /** 亚盘展示: 标准约定负=主让, 保留常见四分盘精度 */
 function fmtAh(h) {
   if (h == null || h === '') return '-'
@@ -958,9 +1101,9 @@ function unbeatenLabel(f6) {
   return dir === 'upper' ? `上盘不败 ${pct}%` : `下盘不败 ${pct}%`
 }
 function resultClass(r) {
-  if (r === '主胜') return 'r-win'
-  if (r === '平局') return 'r-draw'
-  if (r === '客胜') return 'r-loss'
+  if (r === '主胜' || r === '让胜') return 'r-win'
+  if (r === '平局' || r === '让平') return 'r-draw'
+  if (r === '客胜' || r === '让负') return 'r-loss'
   return ''
 }
 function ahResultClass(ah) {
@@ -970,6 +1113,8 @@ function ahResultClass(ah) {
   return ''
 }
 function openSimilar(it) {
+  if (cardTapBlocked()) return
+  similarOddsKind.value = it?.f6?.oddsKind === 'nspf' ? 'nspf' : 'spf'
   similarDefaultMatches.value = applySimilarList(it?.f6?.matches || [])
   similarDefaultRef.value = it?.f6?.refScore != null ? it.f6.refScore : null
   similarDefaultSnapshots.value = Array.isArray(it?.f6?.snapshots) ? it.f6.snapshots : []
@@ -999,6 +1144,7 @@ function japanSummary(it) {
 }
 
 async function openJapanIntel(it) {
+  if (cardTapBlocked()) return
   const mid = it?.matchId
   if (!mid) return
   showJapanIntel.value = true
@@ -1033,6 +1179,7 @@ function closeJapanIntel() {
 }
 
 function goPredict(it) {
+  if (cardTapBlocked()) return
   if (!it?.matchId) {
     uni.showToast({ title: '比赛ID缺失', icon: 'none' })
     return
@@ -1065,6 +1212,7 @@ function applyNote(matchId, data) {
 }
 
 function openNoteEditor(it) {
+  if (cardTapBlocked()) return
   if (!requireAuth()) return
   noteTarget.value = it
   showNoteEditor.value = true
@@ -1176,7 +1324,7 @@ async function syncSimilarNotes(list) {
 function writeObjectiveFields(it) {
   if (!it?.matchId) return Promise.resolve()
   const single = it.isSingle ? 'yes' : null
-  const jcMove = lowMoveDir(it.spf) || null
+  const jcMove = lowMoveDir(jcOdds(it)) || null
   const prev = noteMap[it.matchId]?.structure || {}
   if ((prev.single || null) === single && (prev.jcMove || null) === jcMove) {
     return Promise.resolve()
@@ -1202,6 +1350,7 @@ async function saveNote({ content, rating, structure }) {
 }
 
 async function quickRate(it, rating) {
+  if (cardTapBlocked()) return
   if (!it?.matchId || noteSaving.value) return
   if (!requireAuth()) return
   const prev = noteMap[it.matchId] || {}
@@ -1506,7 +1655,7 @@ onShow(() => {
 .card-list-inner { padding: 16rpx 24rpx 80rpx; width: 100%; }
 .batch-page.sim-pad .card-list-inner { padding-bottom: 180rpx; }
 
-/* 卡片: 白底 + 细分隔,无阴影/左边条/内嵌色盒 */
+/* 卡片: 白底 + 细分隔；置顶只用左边条+底色，不加文字按钮 */
 .match-card {
   background: #fff;
   border-radius: 10rpx;
@@ -1514,6 +1663,14 @@ onShow(() => {
   margin-bottom: 14rpx;
   border: 1rpx solid #e8eef0;
   width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  &.pinned {
+    background: #f3faf9;
+    border-color: #9dd9d2;
+    box-shadow: inset 8rpx 0 0 #0d9488;
+  }
 }
 
 .row-sim {
@@ -1675,6 +1832,82 @@ onShow(() => {
 }
 .detail-link {
   margin-left: auto; font-size: 22rpx; color: $frbt-primary;
+}
+
+.pin-sheet-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  z-index: 240;
+}
+.pin-sheet {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  width: min(320px, calc(100vw - 40px));
+  background: #fff;
+  border-radius: 12rpx;
+  z-index: 241;
+  padding: 22rpx 24rpx 24rpx;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 16rpx 48rpx rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+.pin-sheet-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 6rpx;
+  background: #0d9488;
+}
+.pin-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+}
+.pin-sheet-titles { flex: 1; min-width: 0; }
+.pin-sheet-teams {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.pin-sheet-hint {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #64748b;
+  line-height: 1.45;
+}
+.pin-sheet-close {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: #64748b;
+  padding: 2rpx 0 2rpx 8rpx;
+  line-height: 1.3;
+  &:active { opacity: 0.65; }
+}
+.pin-sheet-act {
+  display: block;
+  text-align: center;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #fff;
+  background: #0d9488;
+  border-radius: 6rpx;
+  padding: 18rpx 20rpx;
+  line-height: 1.2;
+  &:active { opacity: 0.86; }
+  &.off {
+    color: #0f766e;
+    background: #f0fdfa;
+    border: 1rpx solid rgba(#0d9488, 0.35);
+  }
 }
 
 .similar-mask {

@@ -36,7 +36,7 @@ export function filterSimilarWithAh(matches) {
 }
 
 export function calcSimilarStats(matches) {
-  const list = filterSimilarWithAh(matches)
+  const list = Array.isArray(matches) ? matches : []
   const total = list.length
 
   let win = 0
@@ -52,9 +52,9 @@ export function calcSimilarStats(matches) {
 
   for (const m of list) {
     const r = m?.result
-    if (r === '主胜') win += 1
-    else if (r === '平局') draw += 1
-    else if (r === '客胜') loss += 1
+    if (r === '主胜' || r === '让胜') win += 1
+    else if (r === '平局' || r === '让平') draw += 1
+    else if (r === '客胜' || r === '让负') loss += 1
 
     const ah = m?.ahResult
     if (!ah || ah === '-') continue
