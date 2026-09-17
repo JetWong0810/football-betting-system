@@ -198,14 +198,10 @@
             <text class="reason">{{ it.f6?.reason || '暂无同赔样本' }}</text>
           </view>
 
-          <view
-            v-if="isJapanLeague(it.league)"
-            class="row-jp"
-            @tap.stop="openJapanIntel(it)"
-          >
-            <text class="jp-lab">日本情报</text>
-            <text class="jp-sum">{{ japanSummary(it) }}</text>
-            <text class="jp-go">详情 ›</text>
+          <view class="row-intel" @tap.stop="openIntel(it)">
+            <text class="intel-lab">基本面</text>
+            <text class="intel-sum">阵容 · 伤停 · 近况</text>
+            <text class="intel-go">详情</text>
           </view>
 
           <!-- 亚盘盘口: 初/终; 无数据时显示「无数据」 -->
@@ -311,22 +307,11 @@
       @same-event="onSimilarSameEvent"
     />
 
-    <!-- 日本情报弹层（辅助参考） -->
-    <view class="similar-mask" v-if="showJapanIntel" @tap="closeJapanIntel"></view>
-    <view class="japan-modal" :class="{ show: showJapanIntel }">
-      <view class="similar-header">
-        <view class="similar-title-wrap">
-          <text class="similar-title">日本情报</text>
-          <text class="similar-ref">辅助参考</text>
-        </view>
-        <text class="similar-close" @tap="closeJapanIntel">关闭</text>
-      </view>
-      <scroll-view class="japan-body" scroll-y>
-        <view v-if="japanIntelLoading" class="japan-loading"><text>加载中…</text></view>
-        <JapanIntelCard v-else-if="japanIntelData" :data="japanIntelData" />
-        <view v-else class="japan-loading"><text>暂无数据</text></view>
-      </scroll-view>
-    </view>
+    <IntelModal
+      :visible="showIntelModal"
+      :match-id="intelMatchId"
+      @close="showIntelModal = false"
+    />
 
     <view v-if="showPinSheet" class="app-mask pin-sheet-mask" @tap="closePinSheet"></view>
     <view v-if="showPinSheet" class="pin-sheet show" @tap.stop>
@@ -389,11 +374,10 @@ import { requireAuth, isLoggedIn } from '@/utils/auth'
 import { useSimBetStore } from '@/stores/simBetStore'
 import { lowKeyFromSpf, upperSideForHc } from '@/utils/simBet'
 import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
-import { isJapanLeague } from '@/utils/japanLeague'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
 import SimBetSlip from '@/components/SimBetSlip.vue'
 import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
-import JapanIntelCard from '@/components/JapanIntelCard.vue'
+import IntelModal from '@/components/IntelModal.vue'
 import MatchNoteCard from '@/components/MatchNoteCard.vue'
 import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
 import { hasNote, ratingFullLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
@@ -425,10 +409,8 @@ function applySimilarList(list) {
   if (similarOddsKind.value === 'nspf') return rows
   return filterSimilarWithAh(rows)
 }
-const showJapanIntel = ref(false)
-const japanIntelData = ref(null)
-const japanIntelLoading = ref(false)
-const japanIntelCache = ref({})
+const showIntelModal = ref(false)
+const intelMatchId = ref('')
 const showSimSheet = ref(false)
 const simTarget = ref(null)
 /** matchId -> { content, rating, updatedAt } */
@@ -1132,50 +1114,12 @@ function onSimilarSameEvent(payload) {
   writeSimilarAndFit(mid, payload?.matches, it?.ahHandicap, 'sameEvent', 2, !!it?.isSingle)
 }
 
-function japanSummary(it) {
-  const cached = japanIntelCache.value[it.matchId]
-  if (!cached) return '阵容 / 天气 / 进攻点'
-  if ((cached.lineups || []).length) {
-    const n = cached.attackNotes?.length || 0
-    return n ? `已出首发 · 进攻点${n}` : '已出首发'
-  }
-  if (cached.weather) return '天气已出 · 阵容待公布'
-  return cached.note || '点击查看'
-}
-
-async function openJapanIntel(it) {
+function openIntel(it) {
   if (cardTapBlocked()) return
   const mid = it?.matchId
   if (!mid) return
-  showJapanIntel.value = true
-  if (japanIntelCache.value[mid]) {
-    japanIntelData.value = japanIntelCache.value[mid]
-    return
-  }
-  japanIntelLoading.value = true
-  japanIntelData.value = null
-  try {
-    const data = await request({
-      url: `/api/predict/${encodeURIComponent(mid)}/japan-context`,
-      method: 'GET',
-    })
-    japanIntelCache.value = { ...japanIntelCache.value, [mid]: data }
-    japanIntelData.value = data
-  } catch (e) {
-    japanIntelData.value = {
-      isJapanLeague: true,
-      note: e?.message || '加载失败',
-      lineups: [],
-      weather: null,
-      attackNotes: [],
-    }
-  } finally {
-    japanIntelLoading.value = false
-  }
-}
-
-function closeJapanIntel() {
-  showJapanIntel.value = false
+  intelMatchId.value = String(mid)
+  showIntelModal.value = true
 }
 
 function goPredict(it) {
@@ -1921,7 +1865,7 @@ onShow(() => {
   .similar-ref { font-size: 22rpx; color: #64748b; font-variant-numeric: tabular-nums; }
   .similar-close { font-size: 24rpx; color: $frbt-primary; padding: 8rpx 4rpx; }
 }
-.row-jp {
+.row-intel {
   display: flex;
   align-items: center;
   gap: 10rpx;
@@ -1931,13 +1875,13 @@ onShow(() => {
   border: 1rpx solid #99f6e4;
   border-radius: 6rpx;
 }
-.jp-lab {
+.intel-lab {
   font-size: 20rpx;
   font-weight: 600;
   color: #0f766e;
   flex-shrink: 0;
 }
-.jp-sum {
+.intel-sum {
   flex: 1;
   min-width: 0;
   font-size: 20rpx;
@@ -1946,31 +1890,10 @@ onShow(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.jp-go {
+.intel-go {
   font-size: 20rpx;
   color: #0f766e;
   flex-shrink: 0;
-}
-.japan-modal {
-  position: fixed; top: 50%; left: 4vw; right: 4vw; bottom: auto;
-  max-height: 80vh;
-  background: #fff; border-radius: 12rpx; z-index: 201;
-  display: flex; flex-direction: column;
-  transform: translateY(-50%) scale(0.96); opacity: 0;
-  transition: transform 0.2s ease, opacity 0.2s ease;
-  pointer-events: none;
-  &.show { transform: translateY(-50%) scale(1); opacity: 1; pointer-events: auto; }
-}
-.japan-body {
-  flex: 1;
-  max-height: 70vh;
-  padding-bottom: 16rpx;
-}
-.japan-loading {
-  padding: 40rpx 24rpx;
-  text-align: center;
-  font-size: 24rpx;
-  color: #64748b;
 }
 
 .r-win { color: #dc2626; }

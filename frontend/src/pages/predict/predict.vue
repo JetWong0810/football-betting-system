@@ -29,17 +29,12 @@
         <text class="info-time">{{ selectedMatch.matchDate.slice(5) }} {{ selectedMatch.matchTime.slice(0, 5) }}</text>
         <text class="info-handicap" v-if="selectedMatch.handicap != null">{{ formatHandicap(selectedMatch.handicap) }}</text>
         <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
+        <text class="info-intel" @tap.stop="openIntel">基本面</text>
       </view>
       <view class="info-sides" v-if="selectedMatch.handicap != null">
         <text class="side-tag upper">上盘 {{ sideTeams().upper }}</text>
         <text class="side-tag lower">下盘 {{ sideTeams().lower }}</text>
       </view>
-    </view>
-
-    <!-- 日职辅助情报（仅展示，不参与因子） -->
-    <JapanIntelCard v-if="isJapanMatch && japanContext" :data="japanContext" />
-    <view v-else-if="isJapanMatch && japanContextLoading" class="jp-loading">
-      <text>加载日本情报…</text>
     </view>
 
     <!-- 分析流程区域 -->
@@ -375,6 +370,11 @@
       :odds-kind="similarDefaultOddsKind"
       @close="closeSimilarModal"
     />
+    <IntelModal
+      :visible="showIntelModal"
+      :match-id="selectedMatch?.matchId || ''"
+      @close="showIntelModal = false"
+    />
 
     <!-- 日期选择弹窗 -->
     <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
@@ -423,7 +423,7 @@ import { loadCalibration } from '@/utils/calibration'
 import { filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
-import JapanIntelCard from '@/components/JapanIntelCard.vue'
+import IntelModal from '@/components/IntelModal.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
 import H2hRefCard from '@/components/H2hRefCard.vue'
 import RecentFormModal from '@/components/RecentFormModal.vue'
@@ -569,8 +569,7 @@ const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const similarDefaultSnapshots = ref([])
 const similarDefaultOddsKind = ref('spf')
-const japanContext = ref(null)
-const japanContextLoading = ref(false)
+const showIntelModal = ref(false)
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
 
 function applyPredictSimilarList(list) {
@@ -584,6 +583,10 @@ const openSimilarModal = () => {
 }
 const closeSimilarModal = () => {
   showSimilarModal.value = false
+}
+function openIntel() {
+  if (!selectedMatch.value?.matchId) return
+  showIntelModal.value = true
 }
 
 const allMatches = ref([])
@@ -791,7 +794,6 @@ async function fetchMatches() {
       if (found) {
         selectedMatch.value = found
         pendingMatchId.value = null
-        loadJapanContext(found.matchId)
         if (pendingAutoStart.value) {
           analysisSteps.value = []
           analysisComplete.value = false
@@ -989,34 +991,6 @@ const scoredFactorCount = computed(() =>
   analysisSteps.value.filter((s) => s.name !== '交锋历史').length || 7
 )
 
-async function loadJapanContext(matchId) {
-  japanContext.value = null
-  if (!matchId || !isJapanLeague(selectedMatch.value?.league)) return
-  japanContextLoading.value = true
-  try {
-    const data = await request({
-      url: `/api/predict/${encodeURIComponent(matchId)}/japan-context`,
-      method: 'GET',
-    })
-    if (selectedMatch.value?.matchId === matchId) {
-      japanContext.value = data
-    }
-  } catch (e) {
-    if (selectedMatch.value?.matchId === matchId) {
-      japanContext.value = {
-        available: true,
-        isJapanLeague: true,
-        note: e?.message || '日本情报加载失败',
-        lineups: [],
-        weather: null,
-        attackNotes: [],
-      }
-    }
-  } finally {
-    japanContextLoading.value = false
-  }
-}
-
 function selectMatch(match) {
   selectedMatch.value = match
   showPicker.value = false
@@ -1033,7 +1007,6 @@ function selectMatch(match) {
   similarDefaultSnapshots.value = []
   similarDefaultOddsKind.value = 'spf'
   uni.removeStorageSync('predict-last-result')
-  loadJapanContext(match?.matchId)
 }
 
 function goBatchSimilar() {
@@ -1213,7 +1186,6 @@ function pickLeagueColor(league) {
 
 watch(matchStatus, async () => {
   selectedMatch.value = null
-  japanContext.value = null
   analysisSteps.value = []
   analysisComplete.value = false
   h2hRef.value = null
@@ -1404,6 +1376,18 @@ onShow(async () => {
       line-height: 1;
     }
   }
+  .info-intel {
+    margin-left: auto;
+    font-size: 20rpx;
+    color: #0f766e;
+    background: #ccfbf1;
+    padding: 0 12rpx;
+    height: 36rpx;
+    line-height: 36rpx;
+    border-radius: 6rpx;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
   .info-sides {
     display: flex;
     align-items: center;
@@ -1422,12 +1406,6 @@ onShow(async () => {
     &.upper { color: #dc2626; background: #fef2f2; }
     &.lower { color: #059669; background: #ecfdf5; }
   }
-}
-
-.jp-loading {
-  margin: 12rpx 24rpx 0;
-  font-size: 22rpx;
-  color: #64748b;
 }
 
 /* ===== 分析流程 ===== */
