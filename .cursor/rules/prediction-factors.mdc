@@ -18,7 +18,7 @@ globs: api-service/predict_service.py, api-service/wc_predict_service.py, api-se
 - **F6 单关修正(1.5)** 量化 `calc_factor6()`:放大 F5,与 F5 同向时 calc_prediction 权重打 5 折避免重复计权。
 
 ## AI 模型
-DeepSeek `deepseek-v4-flash`(非推理),temp 0.3。F1/F2/F3 一次调用出 3 因子(竞彩版并行 3 次取多数)。
+DeepSeek `deepseek-flash`(DeepSeek-V4.1-Flash),temp 0.3。F1/F2/F3 一次调用出 3 因子(竞彩版并行 3 次取多数)。
 
 ## 置信度 calc_prediction()(三维度,勿用旧 net_ratio 单比值)
 - **一致性 consistency** = 主导方向权重/有方向因子总权重(0.5~1.0),主导 base 50~85。

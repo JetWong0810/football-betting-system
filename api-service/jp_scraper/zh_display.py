@@ -249,7 +249,7 @@ def _deepseek_translate(names: List[str]) -> Dict[str, str]:
         logger.warning("无 DeepSeek key，跳过球员译名")
         return {}
     client = OpenAI(api_key=api_key, base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")  # DeepSeek-V4.1-Flash
     out: Dict[str, str] = {}
     for i in range(0, len(names), 15):
         chunk = names[i:i + 15]

@@ -230,7 +230,7 @@ def generate_sql_deepseek(question: str) -> Optional[str]:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": "deepseek-flash",
         "messages": [
             {"role": "user", "content": SCHEMA_PROMPT.format(question=question)}
         ],

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = "deepseek-flash"  # DeepSeek-V4.1-Flash
 
 SYSTEM_PROMPT = """你是体育投注信息提取助手。从OCR文字中提取投注数据，只输出JSON：
 

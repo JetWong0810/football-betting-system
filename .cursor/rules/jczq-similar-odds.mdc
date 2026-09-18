@@ -9,7 +9,7 @@ globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-ser
 `predict_service.predict_match` 从原 6 因子改为世界杯同构 7 因子,**去掉交锋历史**(live 因子集):
 - F1 近期状态 / F2 实力定位 / F3 市场信号 / F4 市场热度 / F5 竞彩赔率 / F6 历史同赔 / F7 单关修正。
 - 权重(FACTOR_WEIGHTS):F5/F6 各 1.5。
-- F1/F2 走 DeepSeek(`deepseek-v4-flash`,temp 0.3,3 次调用取多数,并行)。F3-F7 纯量化。
+- F1/F2 走 DeepSeek(`deepseek-flash` / DeepSeek-V4.1-Flash,temp 0.3,3 次调用取多数,并行)。F3-F7 纯量化。
 - `calc_factor2`(交锋)保留供 backtest_factors,不进 live。
 
 ## 历史同赔(F6)— `jczq_similar_odds.py`
