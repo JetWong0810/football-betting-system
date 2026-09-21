@@ -75,10 +75,12 @@
         <text class="ctrl-btn" :class="{ active: sortMode === 'homeWin' }" @tap="sortMode = 'homeWin'">主胜率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'homeLoss' }" @tap="sortMode = 'homeLoss'">主负率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'refScore' }" @tap="sortMode = 'refScore'">分数</text>
+        <text class="ctrl-btn" :class="{ active: sortMode === 'stability' }" @tap="sortMode = 'stability'">稳度</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'rating' }" @tap="sortMode = 'rating'">星级</text>
       </view>
       <view class="ctrl-row">
         <text class="ctrl-lab">筛选</text>
+        <text class="ctrl-btn stable" :class="{ active: stablePick }" @tap="toggleStablePick">今日稳</text>
         <text class="ctrl-btn" :class="{ active: !dirFilters.length }" @tap="dirFilters = []">全部</text>
         <text class="ctrl-btn upper" :class="{ active: dirFilters.includes('upper') }" @tap="toggleFilter('upper')">上盘</text>
         <text class="ctrl-btn lower" :class="{ active: dirFilters.includes('lower') }" @tap="toggleFilter('lower')">下盘</text>
@@ -128,6 +130,16 @@
         <text v-if="isFinished" class="fc-hit">命中 {{ filteredHitCount }}/{{ filteredItems.length }}</text>
         <text class="fc-clear" @tap="clearFilter">清除</text>
       </view>
+      <view class="stable-banner" v-if="stablePick">
+        <text v-if="stableRecs.length" class="sb-main">稳度推荐 {{ stableRecs.length }} 场</text>
+        <text v-else class="sb-empty">无同赔≥8 的配对场（下盘+下降 / 上盘+上升）</text>
+        <text
+          v-for="(it, i) in stableRecs"
+          :key="'rec-' + it.matchId"
+          class="sb-item"
+          :class="it.f6?.direction || 'neutral'"
+        >稳{{ i + 1 }} {{ it.league || '' }} {{ dirLabel(it.f6?.direction) }} {{ stabilityOf(it).score }}</text>
+      </view>
     </view>
 
     <view v-if="loading" class="state-hint"><text>分析中…</text></view>
@@ -135,7 +147,7 @@
       <text>该日无{{ isFinished ? '已结束' : '在售' }}竞彩比赛</text>
     </view>
     <view v-else-if="filteredItems.length === 0" class="state-hint">
-      <text>当前筛选无场次</text>
+      <text>{{ stablePick ? '无同赔≥8 的配对场（下盘+下降 / 上盘+上升）' : '当前筛选无场次' }}</text>
       <text class="state-clear" @tap="clearFilter">清除筛选</text>
     </view>
 
@@ -145,7 +157,7 @@
           v-for="it in filteredItems"
           :key="it.matchId"
           class="match-card"
-          :class="{ pinned: isPinned(it.matchId) }"
+          :class="{ pinned: isPinned(it.matchId), rec1: recRank(it) === 1, rec2: recRank(it) === 2 }"
           @longpress="onCardLongPress(it)"
           @contextmenu.prevent="onCardLongPress(it)"
         >
@@ -153,6 +165,7 @@
             <text class="league">{{ it.league || '-' }}</text>
             <text class="time">{{ (it.matchTime || '').slice(0, 5) }}</text>
             <text v-if="it.isSingle" class="single-tag">单关</text>
+            <text v-if="recRank(it)" class="rec-tag" :class="'rec-' + recRank(it)">稳{{ recRank(it) }}</text>
             <view class="dir-wrap">
               <text class="dir" :class="[it.f6?.direction || 'neutral', refTier(it.f6)]">{{ dirLabel(it.f6?.direction) }}</text>
               <text
@@ -177,6 +190,17 @@
             <text class="team home">{{ it.homeTeam?.name }}</text>
             <text class="vs">vs</text>
             <text class="team away">{{ it.awayTeam?.name }}</text>
+          </view>
+          <view class="row-stable" v-if="showStability">
+            <text class="stb-score">稳度 {{ stabilityOf(it).score }}</text>
+            <text
+              v-for="r in stabilityOf(it).reasons"
+              :key="r"
+              class="stb-tag"
+            >{{ r }}</text>
+            <text v-if="stabilityOf(it).nspf" class="stb-miss">让球同赔</text>
+            <text v-else-if="!stabilityOf(it).paired" class="stb-miss">未配对</text>
+            <text v-else-if="stabilityOf(it).sampleThin" class="stb-miss">样本不足</text>
           </view>
 
           <!-- 核心结论 -->
@@ -397,6 +421,7 @@ import JapanIntelCard from '@/components/JapanIntelCard.vue'
 import MatchNoteCard from '@/components/MatchNoteCard.vue'
 import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
 import { hasNote, ratingFullLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
+import { calcStability, cmpStability, pickStableRecs } from '@/utils/stabilityScore'
 
 const simBet = useSimBetStore()
 const date = ref('')
@@ -450,7 +475,9 @@ const noteHints = computed(() => {
 const dirFilters = ref([])
 /** 多选: up/down/flat — 低赔方(让球方)初→终 */
 const moveFilters = ref([])
-/** default | time | hitPct | homeWin | homeLoss | refScore | rating */
+/** 今日稳: 只保留方向-变动配对场, 并按稳度排、标 1–2 场推荐 */
+const stablePick = ref(false)
+/** default | time | hitPct | homeWin | homeLoss | refScore | stability | rating */
 const sortMode = ref('default')
 const PIN_KEY = 'batch-similar-pins'
 const pinnedIds = ref(loadPinnedIds())
@@ -469,7 +496,8 @@ const pinSheetHint = computed(() => (
 ))
 
 const isFinished = computed(() => status.value === 'finished')
-const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0)
+const hasFilter = computed(() => dirFilters.value.length > 0 || moveFilters.value.length > 0 || stablePick.value)
+const showStability = computed(() => stablePick.value || sortMode.value === 'stability')
 /** 默认排序且无筛选时置顶才浮到最上；有筛选/非默认排序则按条件排 */
 const pinToTop = computed(() => sortMode.value === 'default' && !hasFilter.value)
 const pinnedSet = computed(() => new Set(pinnedIds.value))
@@ -769,6 +797,9 @@ const sortedItems = computed(() => {
       return itemHitPct(b) - itemHitPct(a)
     })
   }
+  if (mode === 'stability') {
+    return list.sort(cmpItemStability)
+  }
   if (mode === 'rating') {
     return list.sort((a, b) => {
       const d = itemRating(b) - itemRating(a)
@@ -809,6 +840,15 @@ const filteredItems = computed(() => {
   if (moves.length) {
     list = list.filter(it => moves.includes(lowMoveDir(jcOdds(it))))
   }
+  if (stablePick.value) {
+    list = list.filter(it => stabilityOf(it).recommendable)
+    const recs = pickStableRecs([...list].map(stabilityRow).sort(cmpStability)).map((x) => x.it)
+    if (recs.length) {
+      const recSet = new Set(recs.map((it) => String(it.matchId)))
+      const rest = list.filter((it) => !recSet.has(String(it.matchId)))
+      list = [...recs, ...rest]
+    }
+  }
   if (!pinToTop.value) return list
   const pinRank = new Map(pinnedIds.value.map((id, i) => [String(id), i]))
   const pinned = []
@@ -823,11 +863,71 @@ const filteredItems = computed(() => {
 const filteredHitCount = computed(() =>
   filteredItems.value.reduce((n, it) => n + (it.hit === true ? 1 : 0), 0)
 )
+const stableRecs = computed(() => {
+  if (!stablePick.value) return []
+  return pickStableRecs(
+    filteredItems.value.map(stabilityRow).sort(cmpStability),
+  ).map((x) => x.it)
+})
+const recIdRank = computed(() => {
+  const m = {}
+  stableRecs.value.forEach((it, i) => { m[String(it.matchId)] = i + 1 })
+  return m
+})
+function recRank(it) {
+  return recIdRank.value[String(it?.matchId)] || 0
+}
 
-/** 同赔历史匹配场次(详情列表条数) */
+function handicapAbsOf(it) {
+  const v = it?.ahHandicapClose ?? it?.ahHandicap
+  if (v == null) return null
+  const n = Number(v)
+  return Number.isNaN(n) ? null : n
+}
+function stabilityOf(it) {
+  return calcStability({
+    direction: it?.f6?.direction,
+    move: lowMoveDir(jcOdds(it)),
+    handicap: handicapAbsOf(it),
+    isSingle: !!it?.isSingle,
+    sample: similarHistCount(it),
+    hitPct: itemHitPct(it),
+    refScore: itemRefScore(it),
+    oddsKind: it?.f6?.oddsKind,
+  })
+}
+function cmpItemStability(a, b) {
+  return cmpStability(
+    {
+      score: stabilityOf(a).score,
+      hitPct: itemHitPct(a),
+      sample: similarHistCount(a),
+      refScore: itemRefScore(a),
+    },
+    {
+      score: stabilityOf(b).score,
+      hitPct: itemHitPct(b),
+      sample: similarHistCount(b),
+      refScore: itemRefScore(b),
+    },
+  )
+}
+
 function similarHistCount(it) {
   const n = it?.f6?.matches?.length
   return n == null ? 0 : Number(n)
+}
+function stabilityRow(it) {
+  const st = stabilityOf(it)
+  return {
+    it,
+    score: st.score,
+    recommendable: st.recommendable,
+    shallowUpper: st.shallowUpper,
+    hitPct: itemHitPct(it),
+    sample: similarHistCount(it),
+    refScore: itemRefScore(it),
+  }
 }
 
 function toggleInList(listRef, key) {
@@ -888,9 +988,14 @@ function toggleFilter(key) {
 function toggleMoveFilter(key) {
   toggleInList(moveFilters, key)
 }
+function toggleStablePick() {
+  stablePick.value = !stablePick.value
+  if (stablePick.value) sortMode.value = 'stability'
+}
 function clearFilter() {
   dirFilters.value = []
   moveFilters.value = []
+  stablePick.value = false
 }
 
 function dirLabel(dir) { return dir === 'upper' ? '上盘' : dir === 'lower' ? '下盘' : '中性' }
@@ -1629,6 +1734,7 @@ onShow(() => {
     &.note.active { color: #0891b2; border-color: rgba(#0891b2, 0.4); background: rgba(#0891b2, 0.06); }
     &.move-up.active { color: #dc2626; border-color: rgba(#dc2626, 0.4); background: rgba(#dc2626, 0.06); }
     &.move-down.active { color: #059669; border-color: rgba(#059669, 0.4); background: rgba(#059669, 0.06); }
+    &.stable.active { color: #b45309; border-color: rgba(#b45309, 0.45); background: rgba(#b45309, 0.08); }
     &:active { opacity: 0.7; }
   }
   .filter-count {
@@ -1641,6 +1747,21 @@ onShow(() => {
     .fc-clear {
       margin-left: auto; font-size: 22rpx; color: $frbt-primary; padding: 4rpx 0;
       &:active { opacity: 0.6; }
+    }
+  }
+  .stable-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10rpx;
+    margin-top: 12rpx; padding-top: 10rpx;
+    border-top: 1rpx solid #f1f5f9;
+    .sb-main { font-size: 24rpx; font-weight: 600; color: #b45309; }
+    .sb-empty { font-size: 22rpx; color: #94a3b8; }
+    .sb-item {
+      font-size: 20rpx; font-weight: 600;
+      padding: 4rpx 10rpx; border-radius: 6rpx;
+      background: #fff7ed; color: #c2410c;
+      border: 1rpx solid rgba(#c2410c, 0.25);
+      &.upper { color: #dc2626; background: rgba(#dc2626, 0.06); border-color: rgba(#dc2626, 0.3); }
+      &.lower { color: #059669; background: rgba(#059669, 0.06); border-color: rgba(#059669, 0.3); }
     }
   }
 }
@@ -1671,6 +1792,18 @@ onShow(() => {
     border-color: #9dd9d2;
     box-shadow: inset 8rpx 0 0 #0d9488;
   }
+  &.rec1 {
+    border-color: #f59e0b;
+    box-shadow: inset 8rpx 0 0 #d97706;
+  }
+  &.rec2 {
+    border-color: #fcd34d;
+    box-shadow: inset 8rpx 0 0 #f59e0b;
+  }
+  &.pinned.rec1,
+  &.pinned.rec2 {
+    box-shadow: inset 8rpx 0 0 #0d9488;
+  }
 }
 
 .row-sim {
@@ -1694,6 +1827,13 @@ onShow(() => {
     padding: 2rpx 8rpx; border-radius: 6rpx;
     border: 1rpx solid rgba(#dc2626, 0.4); background: rgba(#dc2626, 0.06);
     flex-shrink: 0;
+  }
+  .rec-tag {
+    font-size: 20rpx; font-weight: 700;
+    padding: 2rpx 8rpx; border-radius: 6rpx;
+    flex-shrink: 0;
+    &.rec-1 { color: #b45309; border: 1rpx solid rgba(#b45309, 0.45); background: rgba(#b45309, 0.1); }
+    &.rec-2 { color: #c2410c; border: 1rpx solid rgba(#c2410c, 0.3); background: rgba(#c2410c, 0.06); }
   }
   .dir-wrap {
     margin-left: auto; display: flex; align-items: baseline; gap: 8rpx; flex-shrink: 0;
@@ -1744,6 +1884,17 @@ onShow(() => {
     &.away { text-align: left; }
   }
   .vs { font-size: 20rpx; color: #cbd5e1; flex-shrink: 0; }
+}
+.row-stable {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8rpx;
+  margin: -8rpx 0 12rpx;
+  .stb-score { font-size: 22rpx; font-weight: 700; color: #b45309; font-variant-numeric: tabular-nums; }
+  .stb-tag {
+    font-size: 20rpx; color: #57534e;
+    padding: 2rpx 8rpx; border-radius: 6rpx;
+    background: #f8fafc; border: 1rpx solid #e2e8f0;
+  }
+  .stb-miss { font-size: 20rpx; color: #94a3b8; }
 }
 
 .row-hit {
