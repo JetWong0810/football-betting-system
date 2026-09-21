@@ -522,9 +522,9 @@ def parse_bsls(html: str) -> Dict:
         return out
 
     if form_tables and home_name:
-        home_recent = _collect(form_tables[0], home_name, 15)
+        home_recent = _collect(form_tables[0], home_name, 30)
     if len(form_tables) > 1 and away_name:
-        away_recent = _collect(form_tables[1], away_name, 15)
+        away_recent = _collect(form_tables[1], away_name, 30)
     if len(form_tables) > 2 and home_name:
         h2h = _collect(form_tables[2], home_name, 30, h2h_home=home_name)
 

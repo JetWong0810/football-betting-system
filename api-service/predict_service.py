@@ -1561,7 +1561,7 @@ def build_recent_ref(match_data: Optional[Dict]) -> Dict[str, Any]:
                 "ouResult": (r.get("ouResult") or "").strip(),
                 "isSingle": bool(r.get("isSingle") or r.get("is_single")),
             })
-        return out[:15]
+        return out[:30]
 
     if not match_data:
         return {"home": [], "away": []}

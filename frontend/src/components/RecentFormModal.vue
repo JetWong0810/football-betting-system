@@ -17,11 +17,11 @@
               <view class="rf-chip" :class="{ on: homeFilters.sameComp }" @tap="homeFilters.sameComp = !homeFilters.sameComp">
                 <text>同赛事</text>
               </view>
-              <view class="rf-chip" :class="{ on: homeFilters.count === 10 }" @tap="homeFilters.count = 10">
-                <text>10场</text>
+              <view class="rf-chip" :class="{ on: homeFilters.count === 20 }" @tap="homeFilters.count = 20">
+                <text>20场</text>
               </view>
-              <view class="rf-chip" :class="{ on: homeFilters.count === 15 }" @tap="homeFilters.count = 15">
-                <text>15场</text>
+              <view class="rf-chip" :class="{ on: homeFilters.count === 30 }" @tap="homeFilters.count = 30">
+                <text>30场</text>
               </view>
             </view>
             <view class="h2h-table">
@@ -70,11 +70,11 @@
               <view class="rf-chip" :class="{ on: awayFilters.sameComp }" @tap="awayFilters.sameComp = !awayFilters.sameComp">
                 <text>同赛事</text>
               </view>
-              <view class="rf-chip" :class="{ on: awayFilters.count === 10 }" @tap="awayFilters.count = 10">
-                <text>10场</text>
+              <view class="rf-chip" :class="{ on: awayFilters.count === 20 }" @tap="awayFilters.count = 20">
+                <text>20场</text>
               </view>
-              <view class="rf-chip" :class="{ on: awayFilters.count === 15 }" @tap="awayFilters.count = 15">
-                <text>15场</text>
+              <view class="rf-chip" :class="{ on: awayFilters.count === 30 }" @tap="awayFilters.count = 30">
+                <text>30场</text>
               </view>
             </view>
             <view class="h2h-table">
@@ -138,17 +138,17 @@ function close() {
   emit('close')
 }
 
-const homeFilters = reactive({ venueOnly: false, sameComp: false, count: 10 })
-const awayFilters = reactive({ venueOnly: false, sameComp: false, count: 10 })
+const homeFilters = reactive({ venueOnly: false, sameComp: false, count: 20 })
+const awayFilters = reactive({ venueOnly: false, sameComp: false, count: 20 })
 
 watch(() => props.open, (v) => {
   if (!v) return
   homeFilters.venueOnly = false
   homeFilters.sameComp = false
-  homeFilters.count = 10
+  homeFilters.count = 20
   awayFilters.venueOnly = false
   awayFilters.sameComp = false
-  awayFilters.count = 10
+  awayFilters.count = 20
 })
 
 function teamClass(row, side, focusName) {

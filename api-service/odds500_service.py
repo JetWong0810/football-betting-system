@@ -720,7 +720,7 @@ def fetch_match_data(fid: str) -> Dict[str, Any]:
         url = f"{BASE_URL}/fenxi1/inc/shuju_zhanji.php"
         data = {
             "id": fid,
-            "limit": "15",
+            "limit": "30",
             "hoa": str(hoa),
             "bhbc": "0",
             "callback": "ajax",

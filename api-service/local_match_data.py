@@ -18,7 +18,7 @@ import settings
 
 logger = logging.getLogger(__name__)
 
-RECENT_LIMIT = 15
+RECENT_LIMIT = 30
 H2H_LIMIT = 30
 
 

@@ -319,11 +319,11 @@
                 <view class="filter-item" :class="{ active: homeFilters.sameCompetition }" @tap.stop="toggleHomeFilter('sameCompetition')">
                   <text>同赛事</text>
                 </view>
-                <view class="filter-item" :class="{ active: homeFilters.matchCount === 10 }" @tap.stop="setHomeMatchCount(10)">
-                  <text>10场</text>
+                <view class="filter-item" :class="{ active: homeFilters.matchCount === 20 }" @tap.stop="setHomeMatchCount(20)">
+                  <text>20场</text>
                 </view>
-                <view class="filter-item" :class="{ active: homeFilters.matchCount === 15 }" @tap.stop="setHomeMatchCount(15)">
-                  <text>15场</text>
+                <view class="filter-item" :class="{ active: homeFilters.matchCount === 30 }" @tap.stop="setHomeMatchCount(30)">
+                  <text>30场</text>
                 </view>
               </view>
             </view>
@@ -381,11 +381,11 @@
                 <view class="filter-item" :class="{ active: awayFilters.sameCompetition }" @tap.stop="toggleAwayFilter('sameCompetition')">
                   <text>同赛事</text>
                 </view>
-                <view class="filter-item" :class="{ active: awayFilters.matchCount === 10 }" @tap.stop="setAwayMatchCount(10)">
-                  <text>10场</text>
+                <view class="filter-item" :class="{ active: awayFilters.matchCount === 20 }" @tap.stop="setAwayMatchCount(20)">
+                  <text>20场</text>
                 </view>
-                <view class="filter-item" :class="{ active: awayFilters.matchCount === 15 }" @tap.stop="setAwayMatchCount(15)">
-                  <text>15场</text>
+                <view class="filter-item" :class="{ active: awayFilters.matchCount === 30 }" @tap.stop="setAwayMatchCount(30)">
+                  <text>30场</text>
                 </view>
               </view>
             </view>
@@ -726,14 +726,14 @@ const h2hFilters = reactive({
 const homeFilters = reactive({
   homeOnly: false, // 仅主场
   sameCompetition: false, // 同赛事
-  matchCount: 10, // 显示场次
+  matchCount: 20, // 显示场次
 });
 
 // 客队近期战绩筛选器
 const awayFilters = reactive({
   awayOnly: false, // 仅客场
   sameCompetition: false, // 同赛事
-  matchCount: 10, // 显示场次
+  matchCount: 20, // 显示场次
 });
 
 // 近期状态
