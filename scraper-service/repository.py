@@ -676,7 +676,7 @@ class OddsRepository:
         ph = ",".join(["%s"] * len(match_ids))
         sql = (
             f"SELECT match_id, asian_fetched_at, euro_fetched_at, form_fetched_at, "
-            f"ou_fetched_at, ticks_fetched_at, "
+            f"ou_fetched_at, ticks_fetched_at, ou_ticks_fetched_at, "
             f"CHAR_LENGTH(IFNULL(form_json, '')) AS form_len, "
             f"CHAR_LENGTH(IFNULL(asian_json, '')) AS asian_len, "
             f"CHAR_LENGTH(IFNULL(euro_json, '')) AS euro_len "
@@ -772,6 +772,58 @@ class OddsRepository:
             _execute(
                 conn,
                 "UPDATE jczq_fenxi_cache SET ticks_fetched_at=NOW() WHERE match_id=%s",
+                (match_id,),
+            )
+        return len(rows)
+
+    def replace_ou_ticks(
+        self,
+        match_id: str,
+        ticks: List[Dict[str, Any]],
+        *,
+        company: str = "Bet365",
+        cid: int = 2,
+    ) -> int:
+        """整段替换某公司大小球 ticks, 不碰 ou_json 两点缓存。"""
+        if not match_id or not ticks:
+            return 0
+        rows = []
+        for t in ticks:
+            ts = _normalize_tick_time(t.get("time"))
+            if not ts:
+                continue
+            rows.append((
+                match_id,
+                company,
+                int(cid),
+                ts,
+                t.get("over"),
+                t.get("line"),
+                t.get("lineText") or "",
+                t.get("under"),
+            ))
+        if not rows:
+            return 0
+        with get_db() as conn:
+            _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
+            _execute(
+                conn,
+                "DELETE FROM jczq_ou_ticks WHERE match_id=%s AND company=%s",
+                (match_id, company),
+            )
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    """INSERT IGNORE INTO jczq_ou_ticks
+                       (match_id, company, cid, tick_time, over_odds, line, line_text, under_odds)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    rows,
+                )
+            finally:
+                cur.close()
+            _execute(
+                conn,
+                "UPDATE jczq_fenxi_cache SET ou_ticks_fetched_at=NOW() WHERE match_id=%s",
                 (match_id,),
             )
         return len(rows)

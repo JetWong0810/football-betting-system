@@ -35,6 +35,7 @@ def _init_mysql_db() -> None:
             _ensure_fenxi_cache_table(cursor)
             _ensure_fenxi_cache_columns(cursor)
             _ensure_ah_ticks_table(cursor)
+            _ensure_ou_ticks_table(cursor)
         conn.commit()
     finally:
         conn.close()
@@ -93,6 +94,7 @@ def _ensure_fenxi_cache_table(cursor) -> None:
             form_fetched_at DATETIME DEFAULT NULL,
             ou_fetched_at DATETIME DEFAULT NULL,
             ticks_fetched_at DATETIME DEFAULT NULL,
+            ou_ticks_fetched_at DATETIME DEFAULT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
@@ -124,6 +126,7 @@ def _ensure_fenxi_cache_columns(cursor) -> None:
     _ensure_column(cursor, "jczq_fenxi_cache", "ou_json", "MEDIUMTEXT")
     _ensure_column(cursor, "jczq_fenxi_cache", "ou_fetched_at", "DATETIME DEFAULT NULL")
     _ensure_column(cursor, "jczq_fenxi_cache", "ticks_fetched_at", "DATETIME DEFAULT NULL")
+    _ensure_column(cursor, "jczq_fenxi_cache", "ou_ticks_fetched_at", "DATETIME DEFAULT NULL")
 
 
 def _ensure_ah_ticks_table(cursor) -> None:
@@ -153,6 +156,38 @@ def _ensure_ah_ticks_table(cursor) -> None:
             away_odds DECIMAL(8,3) DEFAULT NULL,
             UNIQUE KEY uk_match_company_time (match_id, company, tick_time),
             INDEX idx_match_company (match_id, company)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        )
+
+
+def _ensure_ou_ticks_table(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='jczq_ou_ticks'
+        """
+    )
+    exists = cursor.fetchone()
+    count = exists[0] if isinstance(exists, (tuple, list)) else (
+        exists.get("COUNT(*)") if isinstance(exists, dict) else 0
+    )
+    if count:
+        return
+    cursor.execute(
+        """
+        CREATE TABLE jczq_ou_ticks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            match_id VARCHAR(100) NOT NULL,
+            company VARCHAR(50) NOT NULL DEFAULT 'Bet365',
+            cid INT NOT NULL DEFAULT 2,
+            tick_time DATETIME NOT NULL,
+            over_odds DECIMAL(8,3) DEFAULT NULL,
+            line DECIMAL(6,2) DEFAULT NULL,
+            line_text VARCHAR(32) DEFAULT NULL,
+            under_odds DECIMAL(8,3) DEFAULT NULL,
+            UNIQUE KEY uk_ou_match_company_time (match_id, company, tick_time),
+            INDEX idx_ou_match_company (match_id, company)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )

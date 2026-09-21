@@ -4,7 +4,7 @@ company_id 必须整段数字相等: 22 不得命中 2。
 ypdb 列序与 500 相反: 初盘(主/盘/客) 在前, 即时在后。
 盘口文案与 500 相同(受=主受让), 亚盘数值为 500 原值正=主让。
 入库公司名用规范名(Bet365), 不存 36*。
-大小球与亚盘 ticks 只给指数页, 不进 7 因子。
+大小球 /dxdb 与 Bet365 /dxdb/zhishu 给指数页和独立大小球预测, 不进亚盘 7 因子。
 """
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ BJOP_URL = "https://fenxi.zgzcw.com/{fid}/bjop"
 BSLS_URL = "https://fenxi.zgzcw.com/{fid}/bsls"
 DXDB_URL = "https://fenxi.zgzcw.com/{fid}/dxdb"
 YPDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/ypdb/zhishu?company_id={cid}"
+DXDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/dxdb/zhishu?company_id={cid}"
 
 # cid → 规范名。禁止子串匹配。
 # cid=3 沙巴(ＳＢ/SBOBET)按皇冠计入 F3; cid=11 是韦德, 不是伟德, 只进热度。
@@ -314,6 +315,52 @@ def parse_dxdb(html: str) -> List[dict]:
             },
         })
     return companies
+
+
+def _zhishu_ou_triple(cells: List[str]) -> Optional[tuple]:
+    """时间后找 大水/盘口/小水。盘口须在 0.5–8, 水位须像亚盘水。"""
+    for i in range(len(cells) - 2):
+        over = _parse_odds(cells[i])
+        line = _parse_ou_line(cells[i + 1])
+        under = _parse_odds(cells[i + 2])
+        if over is None or line is None or under is None:
+            continue
+        if not (0.5 <= line <= 8.0):
+            continue
+        if not (0.3 <= over <= 2.5 and 0.3 <= under <= 2.5):
+            continue
+        return over, line, cells[i + 1], under
+    return None
+
+
+def parse_dxdb_zhishu(html: str) -> List[dict]:
+    """Bet365 大小球变动轴, 页面新在前。"""
+    soup = BeautifulSoup(html, "html.parser")
+    out: List[dict] = []
+    seen = set()
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 4:
+            continue
+        found = _zhishu_time(cells)
+        if not found:
+            continue
+        time_i, time_s = found
+        triple = _zhishu_ou_triple(cells[time_i + 1:])
+        if not triple:
+            continue
+        if time_s in seen:
+            continue
+        seen.add(time_s)
+        over, line, line_text, under = triple
+        out.append({
+            "over": over,
+            "line": line,
+            "lineText": line_text,
+            "under": under,
+            "time": time_s,
+        })
+    return out
 
 
 def _zhishu_time(cells: List[str]) -> Optional[tuple]:
@@ -716,4 +763,16 @@ class FenxiSession:
         ticks = parse_ypdb_zhishu(html)
         if not ticks:
             logger.info(f"ypdb/zhishu 无 ticks fid={fid} cid={cid}")
+        return ticks
+
+    def fetch_dxdb_zhishu(self, fid: str, cid: int = BET365_CID) -> Optional[list]:
+        html = self._open(
+            DXDB_ZHISHU_URL.format(fid=fid, cid=cid),
+            f"dxdb/zhishu fid={fid} cid={cid}",
+        )
+        if not html:
+            return None
+        ticks = parse_dxdb_zhishu(html)
+        if not ticks:
+            logger.info(f"dxdb/zhishu 无 ticks fid={fid} cid={cid}")
         return ticks

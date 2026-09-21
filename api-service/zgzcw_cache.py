@@ -219,6 +219,11 @@ def load_predict_inputs(match: Dict[str, Any]) -> Tuple[Optional[Dict], List, Op
     return form, asian or [], euro
 
 
+def load_ou_companies(match: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cache = get_fenxi_cache(match.get("match_id") or "") or {}
+    return _companies(cache.get("ou_json"))
+
+
 def load_match_form(match: Dict[str, Any]) -> Dict[str, Any]:
     form, _, _ = load_predict_inputs(match)
     return form or dict(_EMPTY_FORM)
@@ -295,6 +300,33 @@ def find_match_by_fid(fid: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"按 fid 查比赛失败 {fid}: {e}")
         return None
+
+
+def list_ou_ticks(match_id: str, cid: int = 2) -> List[Dict[str, Any]]:
+    if not match_id:
+        return []
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT tick_time, over_odds, line, line_text, under_odds "
+                "FROM jczq_ou_ticks WHERE match_id=%s AND cid=%s "
+                "ORDER BY tick_time DESC",
+                (match_id, cid),
+            )
+            out = []
+            for r in cur.fetchall() or []:
+                out.append({
+                    "over": float(r["over_odds"]) if r.get("over_odds") is not None else None,
+                    "line": float(r["line"]) if r.get("line") is not None else None,
+                    "lineText": r.get("line_text") or "",
+                    "under": float(r["under_odds"]) if r.get("under_odds") is not None else None,
+                    "time": _fmt_ts(r.get("tick_time")),
+                })
+            return out
+    except Exception as e:
+        logger.warning(f"读大小球 ticks 失败 {match_id}: {e}")
+        return []
 
 
 def list_ah_ticks(match_id: str, cid: int = 2) -> List[Dict[str, Any]]:
@@ -414,6 +446,10 @@ def load_odds_history(
         item = _pick_company(euro, cid)
         return _two_point_history(item, "european", cache.get("euro_fetched_at"))
     if kind == "overunder":
+        if int(cid) == 2:
+            ticks = list_ou_ticks(match.get("match_id") or "", cid=2)
+            if ticks:
+                return ticks
         ou = _companies(cache.get("ou_json"))
         item = _pick_company(ou, cid)
         return _two_point_history(item, "overunder", cache.get("ou_fetched_at"))

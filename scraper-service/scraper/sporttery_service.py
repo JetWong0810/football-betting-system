@@ -361,8 +361,8 @@ class SportterySyncService:
     def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
         """在售场刷新亚盘/欧赔/基本面/指数。缺亚盘优先, 基本面已新则跳过。
 
-        顺序: /ypdb → /bsls → /bjop → /dxdb+ticks。Playwright 有页数预算,
-        周末 40+ 场时先补同赔页要的 Bet365 亚盘, 再补近期/交锋。
+        顺序: /ypdb → /dxdb+ou ticks → /bsls → /bjop → 亚盘 ticks。
+        Playwright 有页数预算, 周末先补亚盘和大小球(预测要用), 再补近期/交锋。
         max_workers 保留签名, 足彩网路径忽略。
         """
         from scraper.zgzcw_fenxi import FenxiSession
@@ -454,6 +454,42 @@ class SportterySyncService:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
+                row_meta = meta.get(mid) or {}
+                asian_changed = mid in packs and not _asian_close_unchanged(
+                    m, (packs[mid].get("bet365") or {})
+                )
+                need_ou = asian_changed or _is_stale(row_meta.get("ou_fetched_at"), OU_TTL_SEC)
+                need_ou_ticks = asian_changed or _is_stale(
+                    row_meta.get("ou_ticks_fetched_at"), TICKS_TTL_SEC
+                )
+                if need_ou:
+                    ou = sess.fetch_dxdb(fid)
+                    if ou and ou.get("companies"):
+                        try:
+                            self.repository.upsert_fenxi_cache(mid, ou=ou)
+                            row = meta.setdefault(mid, {})
+                            row["ou_fetched_at"] = datetime.utcnow()
+                            logger.info(f"  大小球 {m.get('match_code')} {len(ou['companies'])}家")
+                        except Exception as e:
+                            logger.warning(f"大小球缓存失败 {mid}: {e}")
+                if sess.aborted or sess.remaining <= 0:
+                    break
+                if need_ou_ticks:
+                    ou_ticks = sess.fetch_dxdb_zhishu(fid)
+                    if ou_ticks:
+                        try:
+                            n = self.repository.replace_ou_ticks(mid, ou_ticks)
+                            row = meta.setdefault(mid, {})
+                            row["ou_ticks_fetched_at"] = datetime.utcnow()
+                            logger.info(f"  大小球轴 {m.get('match_code')} {n}点")
+                        except Exception as e:
+                            logger.warning(f"大小球轴落库失败 {mid}: {e}")
+
+            for m in targets:
+                if sess.aborted or sess.remaining <= 0:
+                    break
+                mid = m.get("match_id")
+                fid = m.get("fid_zgzcw")
                 if not need_form_fetch(meta.get(mid)):
                     continue
                 form = sess.fetch_bsls(fid)
@@ -504,28 +540,18 @@ class SportterySyncService:
                 asian_changed = mid in packs and not _asian_close_unchanged(
                     m, (packs[mid].get("bet365") or {})
                 )
-                need_ou = asian_changed or _is_stale(row_meta.get("ou_fetched_at"), OU_TTL_SEC)
                 need_ticks = asian_changed or _is_stale(
                     row_meta.get("ticks_fetched_at"), TICKS_TTL_SEC
                 )
-                if need_ou:
-                    ou = sess.fetch_dxdb(fid)
-                    if ou and ou.get("companies"):
-                        try:
-                            self.repository.upsert_fenxi_cache(mid, ou=ou)
-                            logger.info(f"  大小球 {m.get('match_code')} {len(ou['companies'])}家")
-                        except Exception as e:
-                            logger.warning(f"大小球缓存失败 {mid}: {e}")
-                if sess.aborted or sess.remaining <= 0:
-                    break
-                if need_ticks:
-                    ticks = sess.fetch_ypdb_zhishu(fid)
-                    if ticks:
-                        try:
-                            n = self.repository.replace_ah_ticks(mid, ticks)
-                            logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
-                        except Exception as e:
-                            logger.warning(f"亚盘轴落库失败 {mid}: {e}")
+                if not need_ticks:
+                    continue
+                ticks = sess.fetch_ypdb_zhishu(fid)
+                if ticks:
+                    try:
+                        n = self.repository.replace_ah_ticks(mid, ticks)
+                        logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
+                    except Exception as e:
+                        logger.warning(f"亚盘轴落库失败 {mid}: {e}")
         logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
         return updated
 

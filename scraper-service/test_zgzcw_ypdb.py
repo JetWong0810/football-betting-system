@@ -3,6 +3,7 @@ from scraper.zgzcw_fenxi import (
     parse_bjop,
     parse_bsls,
     parse_dxdb,
+    parse_dxdb_zhishu,
     parse_ypdb_bet365,
     parse_ypdb_mainstream,
     parse_ypdb_zhishu,
@@ -142,6 +143,15 @@ DXDB_HTML = """
 </table>
 """
 
+DXDB_ZHISHU_HTML = """
+<table>
+<tr><td>序号</td><td>时间</td><td>更新</td><td>大</td><td>盘口</td><td>小</td></tr>
+<tr><td>1</td><td>2026-09-03 12:23:59</td><td>即时</td><td>0.98↑</td><td>3球</td><td>0.82↓</td></tr>
+<tr><td>2</td><td>2026-09-03 11:00:00</td><td></td><td>0.90</td><td>2.5/3球</td><td>0.90</td></tr>
+<tr><td>3</td><td>2026-09-03 10:00:00</td><td>初盘</td><td>0.85</td><td>2.5球</td><td>0.95</td></tr>
+</table>
+"""
+
 ZHISHU_HTML = """
 <table>
 <tr><td>序号</td><td>时间</td><td>更新</td><td>主</td><td>盘口</td><td>客</td></tr>
@@ -205,6 +215,13 @@ def main() -> None:
     assert ticks[0]["handicapText"] == "平手"
     assert abs(ticks[1]["handicap"] - 0.25) < 1e-9
     assert abs(ticks[-1]["home"] - 0.9) < 1e-9
+
+    ou_ticks = parse_dxdb_zhishu(DXDB_ZHISHU_HTML)
+    assert len(ou_ticks) == 3, ou_ticks
+    assert abs(ou_ticks[0]["line"] - 3.0) < 1e-9
+    assert abs(ou_ticks[0]["over"] - 0.98) < 1e-9
+    assert abs(ou_ticks[1]["line"] - 2.75) < 1e-9
+    assert abs(ou_ticks[-1]["line"] - 2.5) < 1e-9
     print("ok ypdb/bjop/bsls/dxdb/zhishu")
 
 

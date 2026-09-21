@@ -19,6 +19,16 @@
       }
     },
     {
+      "path": "pages/predict/ou",
+      "style": {
+        "navigationBarTitleText": "大小球预测",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
       "path": "pages/predict/detail",
       "style": {
         "navigationBarTitleText": "预测详情",

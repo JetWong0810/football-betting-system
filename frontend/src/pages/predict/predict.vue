@@ -17,6 +17,9 @@
         <text class="picker-arrow">▾</text>
       </view>
 
+      <view class="ou-entry" @tap="goOuPredict">
+        <text>大小球</text>
+      </view>
       <view class="predict-trigger" :class="{ disabled: !selectedMatch || analyzing }" @tap="startAnalysis">
         <text>预测</text>
       </view>
@@ -1200,6 +1203,17 @@ function betWithAdvice() {
   uni.switchTab({ url: '/pages/record/record' })
 }
 
+function goOuPredict() {
+  const qs = [`status=${matchStatus.value}`]
+  if (selectedMatch.value?.matchId) {
+    qs.push(`matchId=${encodeURIComponent(selectedMatch.value.matchId)}`)
+  }
+  if (filterDate.value && filterDate.value !== 'all') {
+    qs.push(`date=${filterDate.value}`)
+  }
+  uni.navigateTo({ url: `/pages/predict/ou?${qs.join('&')}` })
+}
+
 function formatHandicap(v) {
   if (v === undefined || v === null) return ''
   const num = Number(v)
@@ -1331,6 +1345,23 @@ onShow(async () => {
     color: #94a3b8;
     margin-left: 4rpx;
   }
+}
+
+.ou-entry {
+  flex-shrink: 0;
+  height: 56rpx;
+  padding: 0 20rpx;
+  border: 1px solid #0d9488;
+  border-radius: 6rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text {
+    font-size: 24rpx;
+    color: #0d9488;
+    font-weight: 600;
+  }
+  &:active { opacity: 0.85; }
 }
 
 .predict-trigger {

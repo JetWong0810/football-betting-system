@@ -1519,6 +1519,63 @@ def list_predict_dates(
     return {"dates": dates}
 
 
+@app.post("/api/predict/ou/{match_id}")
+def predict_match_ou(match_id: str, user_id: Optional[int] = Depends(get_current_user_id)):
+    """在售场大小球独立预测, 不进亚盘 7 因子。"""
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+    from zgzcw_cache import load_match_form, load_ou_companies
+    from ou_predict_service import predict_ou
+
+    form = load_match_form(match)
+    ou_data = load_ou_companies(match)
+    ttg_rows = repo.get_total_goals(match_id)
+    try:
+        result = predict_ou(ou_data, form=form, ttg_rows=ttg_rows)
+        match_formatted = format_match(match)
+        ou_meta = result.get("ou") or {}
+        if ou_meta.get("closeLine") is not None:
+            match_formatted["ouLine"] = ou_meta["closeLine"]
+            match_formatted["ouOpenLine"] = ou_meta.get("openLine")
+            match_formatted["ouBook"] = ou_meta.get("book")
+
+        prediction = result["prediction"]
+        try:
+            import json as _json
+            from database import get_db as _get_db_pred
+            with _get_db_pred() as _conn_pred:
+                _conn_pred.cursor().execute("""
+                    INSERT INTO prediction_history
+                        (match_id, predict_type, direction, confidence, overall_reverse, handicap, factors_json, analysis)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        direction=VALUES(direction), confidence=VALUES(confidence),
+                        overall_reverse=VALUES(overall_reverse), handicap=VALUES(handicap),
+                        factors_json=VALUES(factors_json), analysis=VALUES(analysis),
+                        predicted_at=CURRENT_TIMESTAMP
+                """, (
+                    match_id, "ou", prediction.get("direction", "neutral"),
+                    prediction.get("confidence", 50),
+                    1 if prediction.get("overall_reverse") else 0,
+                    ou_meta.get("closeLine"),
+                    _json.dumps(result["factors"], ensure_ascii=False),
+                    prediction.get("analysis", ""),
+                ))
+        except Exception as save_err:
+            logger.warning(f"[predict-ou] 保存预测记录失败: {save_err}")
+
+        return {
+            "match": match_formatted,
+            "factors": result["factors"],
+            "prediction": prediction,
+            "ou": ou_meta,
+        }
+    except Exception as e:
+        logger.error(f"大小球预测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"大小球预测失败：{str(e)}")
+
+
 @app.post("/api/predict/{match_id}")
 def predict_match_direction(
     match_id: str,
