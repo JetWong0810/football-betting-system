@@ -1,8 +1,9 @@
-"""HTTP 响应缓存：按 TTL 命中 bsd_http_cache。"""
+"""HTTP 响应缓存：按 TTL 命中 bsd_http_cache。同一 BsdCache 实例复用一条 MySQL 连接。"""
 from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any, Dict, Optional
 
 from .client import BsdClient, cache_key
@@ -14,6 +15,29 @@ logger = logging.getLogger(__name__)
 class BsdCache:
     def __init__(self, client: BsdClient):
         self.client = client
+        self._conn = None
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> "BsdCache":
+        self._ensure_conn()
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def close(self) -> None:
+        conn = self._conn
+        self._conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _ensure_conn(self):
+        if self._conn is None:
+            self._conn = db.get_conn()
+        return self._conn
 
     def get_json(
         self,
@@ -39,8 +63,8 @@ class BsdCache:
         return body
 
     def _read(self, key: str, ttl_s: int) -> Any:
-        conn = db.get_conn()
-        try:
+        with self._lock:
+            conn = self._ensure_conn()
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -52,8 +76,6 @@ class BsdCache:
                     (key,),
                 )
                 row = cur.fetchone()
-        finally:
-            conn.close()
         if not row:
             return None
         age = row.get("age_s")
@@ -69,8 +91,8 @@ class BsdCache:
 
     def _write(self, key: str, endpoint: str, status: int, body: Any) -> None:
         payload = json.dumps(body, ensure_ascii=False, default=str)
-        conn = db.get_conn()
-        try:
+        with self._lock:
+            conn = self._ensure_conn()
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -85,5 +107,3 @@ class BsdCache:
                     (key, endpoint[:256], payload, status),
                 )
             conn.commit()
-        finally:
-            conn.close()

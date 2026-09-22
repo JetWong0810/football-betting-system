@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
@@ -15,12 +16,13 @@ BASE = "https://sports.bzzoiro.com"
 
 
 class BsdClient:
-    def __init__(self, min_interval: float = 0.08, timeout: float = 30.0):
+    def __init__(self, min_interval: float = 0.02, timeout: float = 20.0):
         token = (os.getenv("BSD_API_TOKEN") or "").strip()
         if not token:
             raise RuntimeError("缺少 BSD_API_TOKEN（api-service/.env）")
         self.min_interval = min_interval
         self._last = 0.0
+        self._lock = threading.Lock()
         self.req_n = 0
         self.client = httpx.Client(
             timeout=timeout,
@@ -42,10 +44,11 @@ class BsdClient:
         self.close()
 
     def _throttle(self) -> None:
-        gap = time.time() - self._last
-        if gap < self.min_interval:
-            time.sleep(self.min_interval - gap)
-        self._last = time.time()
+        with self._lock:
+            gap = time.time() - self._last
+            if gap < self.min_interval:
+                time.sleep(self.min_interval - gap)
+            self._last = time.time()
 
     def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> httpx.Response:
         last_err: Optional[Exception] = None

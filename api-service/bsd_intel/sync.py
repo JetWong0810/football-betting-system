@@ -95,8 +95,7 @@ def sync(days: int, apply: bool, limit: Optional[int], kickoff_soon: bool) -> No
 
     table = load_alias_table() if apply else {a: n for a, n in TEAM_SEEDS}
 
-    with BsdClient() as client:
-        cache = BsdCache(client)
+    with BsdClient() as client, BsdCache(client) as cache:
         if apply:
             events = list_bsd_events(cache, date_from, date_to)
         else:

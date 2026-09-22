@@ -29,8 +29,9 @@ def load_alias_table() -> Dict[str, str]:
         with conn.cursor() as cur:
             cur.execute("SELECT alias, bsd_name FROM bsd_team_map")
             for row in cur.fetchall() or []:
-                if row.get("alias") and row.get("bsd_name"):
-                    out[row["alias"]] = row["bsd_name"]
+                alias, name = row.get("alias"), row.get("bsd_name")
+                if alias and name and alias not in out:
+                    out[alias] = name
     except Exception:
         logger.debug("bsd_team_map 读失败，仅用种子")
     finally:
@@ -47,13 +48,25 @@ def cn_to_en(name: str, table: Dict[str, str]) -> Optional[str]:
     return hits[0][1] if hits else None
 
 
+_CLUB = {"fc", "cf", "cd", "ud", "sc", "afc"}
+
+
+def _raw_toks(s: str) -> set:
+    s = unicodedata.normalize("NFKD", s or "")
+    s = s.encode("ascii", "ignore").decode().lower()
+    return set(re.findall(r"[a-z0-9]+", s))
+
+
 def score_pair(cn: str, en: str, table: Dict[str, str]) -> float:
     mapped = cn_to_en(cn, table)
     n_en, t_en = norm_en(en)
     if not mapped:
         return 0.0
     n_m, t_m = norm_en(mapped)
-    if n_m and n_m in n_en:
+    extra = _raw_toks(mapped) & _CLUB
+    if extra and not extra <= _raw_toks(en):
+        return 0.0
+    if n_m and n_m == n_en:
         return 0.95
     if t_m and t_m <= t_en:
         return 0.90

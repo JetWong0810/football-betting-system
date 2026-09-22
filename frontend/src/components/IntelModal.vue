@@ -13,59 +13,95 @@
 
       <view class="intel-body">
         <view v-if="loading" class="intel-state">
-          <text>加载中</text>
+          <text>拉取球员统计…</text>
         </view>
         <view v-else-if="!data || !data.available" class="intel-state">
           <text>{{ emptyText }}</text>
         </view>
         <view v-else class="intel-content">
-          <view class="hero">
-            <view class="hero-side">
-              <text class="hero-name">{{ data.homeTeam }}</text>
-              <view class="hero-meta">
-                <text v-if="pred.home.formation" class="form">{{ pred.home.formation }}</text>
-                <text v-if="pred.home.confidence != null" class="conf">{{ pct(pred.home.confidence) }}</text>
+          <view class="metric-list" v-if="verdicts.length">
+            <view
+              v-for="v in verdicts"
+              :key="v.key"
+              class="metric"
+              :class="v.lean"
+            >
+              <view class="metric-top">
+                <view class="metric-k-row">
+                  <text class="metric-k">{{ v.label }}</text>
+                  <text class="metric-q" @tap.stop="toggleHelp(v.key)">?</text>
+                </view>
+                <text class="metric-tag" :class="v.lean">{{ v.title }}</text>
               </view>
-              <text v-if="stand.home" class="rank">{{ standLine(stand.home) }}</text>
-            </view>
-            <text class="hero-vs">vs</text>
-            <view class="hero-side away">
-              <text class="hero-name">{{ data.awayTeam }}</text>
-              <view class="hero-meta">
-                <text v-if="pred.away.formation" class="form">{{ pred.away.formation }}</text>
-                <text v-if="pred.away.confidence != null" class="conf">{{ pct(pred.away.confidence) }}</text>
+              <view class="metric-row">
+                <text class="metric-team">{{ data.homeTeam }}</text>
+                <view class="metric-track">
+                  <view class="metric-fill home" :style="{ width: barW(v.home) }" />
+                </view>
+                <text class="metric-num">{{ fmtScore(v.home) }}</text>
               </view>
-              <text v-if="stand.away" class="rank">{{ standLine(stand.away) }}</text>
+              <view class="metric-row">
+                <text class="metric-team">{{ data.awayTeam }}</text>
+                <view class="metric-track">
+                  <view class="metric-fill away" :style="{ width: barW(v.away) }" />
+                </view>
+                <text class="metric-num">{{ fmtScore(v.away) }}</text>
+              </view>
+              <text class="metric-d">{{ v.text }}</text>
+              <text v-if="helpKey === v.key" class="metric-help">{{ metricHelp(v.key) }}</text>
             </view>
           </view>
 
-          <view v-if="metaChips.length" class="chip-row">
-            <text v-for="(c, i) in metaChips" :key="'m'+i" class="chip mute">{{ c }}</text>
-          </view>
-
-          <view v-if="insights.length" class="sec">
-            <text class="sec-h">推断</text>
-            <view class="insight">
-              <text v-for="(x, i) in insights" :key="'i'+i" class="insight-item" :class="x.tone">{{ x.text }}</text>
+          <IntelPitch
+            :home-name="data.homeTeam"
+            :away-name="data.awayTeam"
+            :home-form="sidePack.home?.formation || pred.home.formation"
+            :away-form="sidePack.away?.formation || pred.away.formation"
+            :home-meta="sideMeta('home')"
+            :away-meta="sideMeta('away')"
+            :home-conf="sidePack.home?.xiConf"
+            :away-conf="sidePack.away?.xiConf"
+            :home-players="(data.players && data.players.home) || []"
+            :away-players="(data.players && data.players.away) || []"
+            @pick="openPlayer"
+          />
+          <text v-if="aiPitchHint" class="hint dim">{{ aiPitchHint }}</text>
+          <view v-if="bsdModel" class="bsd-model">
+            <view class="bsd-head">
+              <text class="bsd-h">BSD模型</text>
+              <text v-if="bsdModel.lean" class="bsd-lean">倾向{{ bsdModel.lean }}</text>
             </view>
-            <text class="hint dim">仅作辅助，不改变七因子方向</text>
+            <view v-if="bsdModel.oneXtwo.length" class="bsd-1x2">
+              <view v-for="c in bsdModel.oneXtwo" :key="c.k" class="bsd-odd" :class="{ on: c.on }">
+                <text class="bsd-odd-k">{{ c.k }}</text>
+                <text class="bsd-odd-v">{{ c.v }}</text>
+              </view>
+            </view>
+            <view class="bsd-rows">
+              <view v-for="r in bsdModel.rows" :key="r.k" class="bsd-row">
+                <text class="bsd-k">{{ r.k }}</text>
+                <text class="bsd-v">{{ r.v }}</text>
+              </view>
+            </view>
+            <text class="bsd-n">仅对照，不进七因子</text>
           </view>
+          <text v-if="droppedLine" class="hint warn">{{ droppedLine }}</text>
 
           <view class="sec" v-if="unav.home.length || unav.away.length">
             <text class="sec-h">伤停</text>
-            <view class="duo">
-              <view class="card">
-                <text class="card-h">{{ data.homeTeam }}</text>
-                <view v-if="!unav.home.length" class="empty">无记录</view>
+            <view class="unav-duo">
+              <view class="unav-col">
+                <text class="unav-h">{{ data.homeTeam }}</text>
+                <text v-if="!unav.home.length" class="empty">无</text>
                 <view v-for="p in unav.home" :key="'h'+p.id" class="unav-row">
                   <text class="unav-st" :class="p.status">{{ statusZh(p.status) }}</text>
                   <text class="unav-n">{{ p.name }}</text>
                   <text class="unav-r">{{ reasonZh(p.reason) }}</text>
                 </view>
               </view>
-              <view class="card">
-                <text class="card-h">{{ data.awayTeam }}</text>
-                <view v-if="!unav.away.length" class="empty">无记录</view>
+              <view class="unav-col">
+                <text class="unav-h">{{ data.awayTeam }}</text>
+                <text v-if="!unav.away.length" class="empty">无</text>
                 <view v-for="p in unav.away" :key="'a'+p.id" class="unav-row">
                   <text class="unav-st" :class="p.status">{{ statusZh(p.status) }}</text>
                   <text class="unav-n">{{ p.name }}</text>
@@ -75,21 +111,16 @@
             </view>
           </view>
 
-          <view class="sec">
-            <view class="sec-h-row">
-              <text class="sec-h">阵容近况</text>
-              <view class="side-tabs">
-                <text class="tab" :class="{ on: viewSide === 'home' }" @tap="viewSide = 'home'">{{ data.homeTeam }}</text>
-                <text class="tab" :class="{ on: viewSide === 'away' }" @tap="viewSide = 'away'">{{ data.awayTeam }}</text>
-              </view>
-            </view>
+          <view class="sec more-sec">
+            <text class="more-btn" @tap="showMore = !showMore">{{ showMore ? '收起明细' : '积分 / 交锋 / 教练' }}</text>
+          </view>
 
+          <view v-if="showMore" class="sec">
+            <view class="sec-h-row">
+              <text class="sec-h">首发明细</text>
+              <text v-if="curPred.formation" class="form">{{ curPred.formation }}</text>
+            </view>
             <view class="card xi-card">
-              <view class="card-h-row">
-                <text class="card-h">本场 XI</text>
-                <text v-if="curPred.formation" class="form">{{ curPred.formation }}</text>
-                <text v-if="curPred.confidence != null" class="conf">{{ pct(curPred.confidence) }}</text>
-              </view>
               <view v-if="!xiGroups.length" class="empty">未公布</view>
               <view v-for="g in xiGroups" :key="g.key" class="xi-group">
                 <text class="xi-lab">{{ g.label }}</text>
@@ -98,15 +129,15 @@
                     <text v-if="p.num" class="xi-num">{{ p.num }}</text>
                     <text>{{ p.name }}</text>
                     <text v-if="p.captain" class="xi-c">C</text>
+                    <text v-if="p.aiScore != null" class="xi-ai">{{ fmtAi(p.aiScore) }}</text>
                   </view>
                 </view>
               </view>
             </view>
-
             <scroll-view v-if="hasMatrix" class="mx-scroll" scroll-x :show-scrollbar="false">
               <view class="mx">
                 <view class="mx-row mx-head">
-                  <text class="mx-name hd">近 5 场首发</text>
+                  <text class="mx-name hd">近 5 场</text>
                   <text class="mx-role hd">角色</text>
                   <text v-for="c in matrix.cols" :key="c.id" class="mx-cell hd">{{ c.label }}</text>
                   <text class="mx-cell hd tonight">本场</text>
@@ -129,10 +160,9 @@
                 </view>
               </view>
             </scroll-view>
-            <text v-if="matrix.note" class="hint">{{ matrix.note }}</text>
           </view>
 
-          <view class="sec">
+          <view class="sec" v-if="showMore">
             <text class="sec-h">教练</text>
             <view class="duo">
               <view class="card">
@@ -146,10 +176,9 @@
                 <text class="coach-d">{{ mgrDesc('away') }}</text>
               </view>
             </view>
-            <text v-if="coachFormHint" class="hint">{{ coachFormHint }}</text>
           </view>
 
-          <view class="sec" v-if="stand.home || stand.away">
+          <view class="sec" v-if="showMore && (stand.home || stand.away)">
             <text class="sec-h">积分</text>
             <view class="tbl">
               <view class="tbl-row hd">
@@ -185,7 +214,7 @@
             </view>
           </view>
 
-          <view class="sec" v-if="h2hLine">
+          <view class="sec" v-if="showMore && h2hLine">
             <text class="sec-h">交锋</text>
             <text class="h2h">{{ h2hLine }}</text>
             <view class="h2h-list" v-if="h2hRecent.length">
@@ -194,13 +223,41 @@
           </view>
         </view>
       </view>
+
+      <view v-if="picked" class="p-mask" @tap="picked = null"></view>
+      <view v-if="picked" class="p-sheet" @tap.stop>
+        <view class="p-top">
+          <view class="p-face" :class="{ ace: picked.role === '主力' }">
+            <text class="p-ini">{{ picked.initials || '?' }}</text>
+          </view>
+          <view class="p-who">
+            <text class="p-name">{{ picked.name }}</text>
+            <text class="p-sub">{{ posZh(picked.pos) }}{{ picked.role && picked.role !== '—' ? ' · ' + picked.role : '' }}{{ picked.num != null ? ' · ' + picked.num + '号' : '' }}</text>
+          </view>
+          <text v-if="picked.score != null" class="p-sc" :class="scoreTone(picked.score)">{{ Number(picked.score).toFixed(1) }}</text>
+          <text class="p-x" @tap="picked = null">关</text>
+        </view>
+        <view class="p-grid">
+          <view class="p-cell"><text class="p-k">近8场</text><text class="p-v">{{ picked.apps || 0 }}</text></view>
+          <view class="p-cell"><text class="p-k">球</text><text class="p-v">{{ picked.goals || 0 }}</text></view>
+          <view class="p-cell"><text class="p-k">助</text><text class="p-v">{{ picked.assists || 0 }}</text></view>
+          <view class="p-cell"><text class="p-k">xG</text><text class="p-v">{{ picked.xg != null ? Number(picked.xg).toFixed(1) : '—' }}</text></view>
+          <view class="p-cell"><text class="p-k">场均评</text><text class="p-v">{{ picked.avgRating != null ? Number(picked.avgRating).toFixed(2) : '—' }}</text></view>
+          <view class="p-cell"><text class="p-k">能力</text><text class="p-v">{{ picked.profileRating || '—' }}</text></view>
+          <view class="p-cell"><text class="p-k">身价</text><text class="p-v">{{ picked.valueLabel || '—' }}</text></view>
+          <view class="p-cell"><text class="p-k">主力</text><text class="p-v">{{ picked.n ? `${picked.starts}/${picked.n}` : '—' }}</text></view>
+          <view v-if="picked.aiScore != null" class="p-cell"><text class="p-k">首发概率</text><text class="p-v">{{ fmtAi(picked.aiScore) }}</text></view>
+        </view>
+        <text v-if="picked.injured" class="p-inj">伤停名单</text>
+      </view>
     </view>
   </view>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { request } from '@/utils/http'
+import IntelPitch from '@/components/IntelPitch.vue'
+import { prefetchIntel } from '@/utils/intelPrefetch'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -212,31 +269,143 @@ const loading = ref(false)
 const data = ref(null)
 const errText = ref('')
 const viewSide = ref('home')
+const showMore = ref(false)
+const picked = ref(null)
+const helpKey = ref('')
+const verdicts = computed(() => data.value?.verdicts || [])
+const sidePack = computed(() => data.value?.sides || {})
+
+const METRIC_HELP = {
+  ability: '本场首发有多强，不含主场。档案 35%、身价（对数，2 倍约差 5–6 分）25%、近 8 场评分 15%、XI 近期 xG 10%、球队赛季 xGD 15%。分差满 6 写占优。不换算让球。',
+  line: '对照真实亚盘和 BSD 模型 xG（已含主场），不拿能力条除 10。深=盘口让球比模型更大；浅=市场不买模型那一档。没模型才用能力差÷25 折算（顶对底大约一球出头）。',
+  completeness: '这套首发齐不齐。缺的主力按近 8 场评分和对位替补比，不是按人头。替上接近或更好→影响小/替上更强；分差大或没人顶→缺主力。伤停、门将、进攻核心权重更高。',
+  style: '本场是攻还是守。阵型六成：三中卫/两前锋/4-3-3 偏攻，五后卫/单前锋偏守。教练四成：BSD 标签 + 场均进失 + 控球。惯用阵型和本场不一致会写更攻/更收。高=更攻，两边都高=对攻。',
+  rotation: '对照上场名单。人数三成，七成看被换下 vs 替上的近 8 场评分。轮换但替上差不多→影响小；伤核心/分差大才会标影响大。条越长换得越狠，颜色标更稳的一边。',
+  xg: '这场大概能进几个球，换成百分。优先用模型双方期望进球，没有就用赛季场均。大约 2.4 记满分。两边差不到 0.25 球算接近。这是和盘口同量纲的一条。',
+  overperf: '积分含不含金。用（实际进球−xG）+（xGA−实际失球）场均，换到 0–100。分数越高越虚：排名好于底层数据，容易回落。差满 12 分才写谁虚高。',
+  motivation: '这场有多不敢输。德比直接拉满，欧战疲劳和客队正势不扣战意（那些走轮换）。非德比才看：前 8 轮欧冠区不加分、主场不胜加分、客队正势减分、近 14 天欧战失利和长途扣分。22 以上算高。',
+}
 
 watch(
   () => [props.visible, props.matchId],
   ([vis, id]) => {
     if (!vis || !id) return
     viewSide.value = 'home'
+    showMore.value = false
+    picked.value = null
+    helpKey.value = ''
     load(id)
   },
 )
 
+function openPlayer(p) {
+  picked.value = p
+}
+function toggleHelp(key) {
+  helpKey.value = helpKey.value === key ? '' : key
+}
+function metricHelp(key) {
+  return METRIC_HELP[key] || ''
+}
+function fmtScore(n) {
+  return n == null || n === '' ? '—' : String(n)
+}
+function barW(n) {
+  if (n == null || n === '') return '0%'
+  const v = Math.max(0, Math.min(100, Number(n)))
+  return `${v}%`
+}
+function sideMeta(side) {
+  const p = sidePack.value[side]
+  if (!p) return ''
+  const bits = []
+  if (p.styleLabel && p.styleLabel !== '未知') bits.push(p.styleLabel)
+  if (p.avgProfile) bits.push(`能力${Math.round(p.avgProfile)}`)
+  if (p.stand?.position != null) bits.push(`第${p.stand.position}`)
+  return bits.join(' · ')
+}
+function posZh(p) {
+  return { G: '门', D: '卫', M: '中', F: '前' }[p] || p || ''
+}
+function fmtAi(v) {
+  const n = Number(v)
+  if (Number.isNaN(n)) return ''
+  const pct = n <= 1.5 ? n * 100 : n
+  return `${Math.round(pct)}%`
+}
+const aiPitchHint = computed(() => {
+  const d = data.value
+  if (!d) return ''
+  const has = ['home', 'away'].some((side) =>
+    ((d.players || {})[side] || []).some((p) => p.inXi && p.aiScore != null),
+  )
+  if (!has) return ''
+  return '角标是模型首发概率。确认后改回近况评分。'
+})
+const bsdModel = computed(() => {
+  const pred = data.value?.prediction
+  const mk = pred?.markets
+  if (!mk) return null
+  const mr = mk.match_result || {}
+  const lean = { H: '主胜', D: '平局', A: '客胜' }[mr.predicted] || ''
+  const oneXtwo = []
+  if (mr.prob_home != null) {
+    oneXtwo.push(
+      { k: '主胜', v: `${Math.round(mr.prob_home)}%`, on: mr.predicted === 'H' },
+      { k: '平', v: `${Math.round(mr.prob_draw)}%`, on: mr.predicted === 'D' },
+      { k: '客胜', v: `${Math.round(mr.prob_away)}%`, on: mr.predicted === 'A' },
+    )
+  }
+  const rows = []
+  const xg = mk.expected_goals || {}
+  if (xg.home != null && xg.away != null) {
+    const h = Number(xg.home)
+    const a = Number(xg.away)
+    rows.push({ k: '期望进球', v: `${h.toFixed(2)}-${a.toFixed(2)} · 总${(h + a).toFixed(1)}` })
+  }
+  if (mk.over_under?.prob_over_25 != null) {
+    const p = Math.round(mk.over_under.prob_over_25)
+    rows.push({ k: '大 2.5 球', v: p >= 70 ? `${p}% 偏大` : p <= 35 ? `${p}% 偏小` : `${p}%` })
+  }
+  if (mk.btts?.prob_yes != null) {
+    const p = Math.round(mk.btts.prob_yes)
+    rows.push({ k: '双方都进', v: p >= 68 ? `${p}% 偏是` : p <= 38 ? `${p}% 偏否` : `${p}%` })
+  }
+  if (!oneXtwo.length && !rows.length) return null
+  return { lean, oneXtwo, rows }
+})
+function scoreTone(s) {
+  if (s >= 7.2) return 'hi'
+  if (s >= 6.5) return 'mid'
+  return 'lo'
+}
+
+const droppedLine = computed(() => {
+  const d = data.value
+  if (!d) return ''
+  const bits = []
+  for (const side of ['home', 'away']) {
+    const name = side === 'home' ? d.homeTeam : d.awayTeam
+    const dropped = ((d.players || {})[side] || []).filter((p) => !p.inXi && p.role === '主力')
+    if (dropped.length) bits.push(`${name}未发 ${dropped.map((p) => p.short || p.name).join('、')}`)
+  }
+  return bits.join('；')
+})
+
 async function load(id) {
-  loading.value = true
-  errText.value = ''
-  data.value = null
+  const stale = data.value?.matchId === id
+  if (!stale) {
+    loading.value = true
+    errText.value = ''
+    data.value = null
+  }
   try {
-    const res = await request({
-      url: `/api/predict/${encodeURIComponent(id)}/intel`,
-      method: 'GET',
-      timeout: 60000,
-    })
+    const res = await prefetchIntel(id)
     if (props.matchId === id) data.value = res
   } catch (e) {
     if (props.matchId === id) {
       errText.value = e?.message || '加载失败'
-      data.value = { available: false }
+      if (!stale) data.value = { available: false }
     }
   } finally {
     if (props.matchId === id) loading.value = false
@@ -582,6 +751,47 @@ const h2hRecent = computed(() => {
 }
 .intel-content { padding: 20rpx 20rpx 36rpx; }
 
+.vd-grid {
+  display: flex; flex-direction: column; gap: 10rpx;
+  margin: 12rpx 0 8rpx;
+}
+.vd {
+  border: 1rpx solid #e2e8f0; border-radius: 6rpx;
+  padding: 10rpx 12rpx; background: #f8fafb;
+  border-left: 6rpx solid #94a3b8;
+  &.home { border-left-color: #0f766e; }
+  &.away { border-left-color: #b45309; }
+}
+.vd-top { display: flex; align-items: baseline; gap: 10rpx; margin-bottom: 4rpx; }
+.vd-k {
+  font-size: 18rpx; font-weight: 650; color: #64748b;
+  width: 88rpx; flex-shrink: 0;
+}
+.vd-t { font-size: 24rpx; font-weight: 650; color: #0f172a; flex: 1; min-width: 0; }
+.vd-x { display: block; font-size: 20rpx; color: #475569; line-height: 1.5; }
+
+.pl { border: 1rpx solid #e2e8f0; border-radius: 6rpx; overflow: hidden; margin-top: 8rpx; }
+.pl-row {
+  display: flex; align-items: center; padding: 8rpx 8rpx;
+  border-bottom: 1rpx solid #f1f5f9;
+  font-size: 20rpx; color: #334155; font-variant-numeric: tabular-nums;
+  &:last-child { border-bottom: 0; }
+  &.hd { background: #f8fafb; color: #94a3b8; font-size: 18rpx; }
+  &.out { color: #94a3b8; }
+  &.inj .pl-n { color: #b45309; }
+}
+.pl-n {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 6rpx;
+}
+.pl-r {
+  width: 56rpx; flex-shrink: 0; font-size: 18rpx;
+  &.主力 { color: #0f766e; font-weight: 650; }
+  &.轮换 { color: #b45309; }
+}
+.pl-c { width: 52rpx; flex-shrink: 0; text-align: right; }
+.pl-v { width: 88rpx; flex-shrink: 0; text-align: right; font-size: 18rpx; }
+
 .hero {
   display: flex; align-items: flex-start; gap: 12rpx; margin-bottom: 14rpx;
 }
@@ -603,10 +813,64 @@ const h2hRecent = computed(() => {
 }
 .rank { display: block; margin-top: 4rpx; font-size: 20rpx; color: #64748b; }
 
-.chip-row { display: flex; flex-wrap: wrap; gap: 8rpx; margin-bottom: 16rpx; }
-.chip {
-  font-size: 20rpx; border-radius: 6rpx; padding: 4rpx 10rpx;
-  &.mute { color: #475569; background: #f1f5f9; }
+.metric-list { display: flex; flex-direction: column; gap: 10rpx; margin-bottom: 16rpx; }
+.metric {
+  background: #f8fafb; border: 1rpx solid #e8eef2; border-radius: 6rpx;
+  padding: 12rpx 12rpx 10rpx;
+  &.home { border-color: #fecaca; }
+  &.away { border-color: #a7f3d0; }
+}
+.metric-top {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8rpx; margin-bottom: 8rpx;
+}
+.metric-k-row { display: flex; align-items: center; gap: 6rpx; min-width: 0; }
+.metric-k { font-size: 20rpx; font-weight: 650; color: #0f766e; }
+.metric-q {
+  width: 28rpx; height: 28rpx; line-height: 26rpx; text-align: center;
+  font-size: 20rpx; font-weight: 700; color: #0d9488;
+  background: #f0fdf9; border: 1rpx solid #99f6e4; border-radius: 6rpx;
+  box-sizing: border-box;
+}
+.metric-tag {
+  font-size: 18rpx; color: #64748b;
+  &.home { color: #dc2626; }
+  &.away { color: #059669; }
+}
+.metric-row {
+  display: flex; align-items: center; gap: 8rpx;
+  margin-bottom: 6rpx;
+}
+.metric-team {
+  width: 88rpx; flex-shrink: 0; font-size: 20rpx; color: #334155;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.metric-track {
+  flex: 1; min-width: 0; height: 10rpx; border-radius: 6rpx;
+  background: #e2e8f0; overflow: hidden;
+}
+.metric-fill {
+  height: 100%; border-radius: 6rpx;
+  &.home { background: #dc2626; }
+  &.away { background: #059669; }
+}
+.metric-num {
+  width: 56rpx; flex-shrink: 0; text-align: right;
+  font-size: 24rpx; font-weight: 700; color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.metric-d {
+  display: block; margin-top: 4rpx; font-size: 20rpx; color: #64748b; line-height: 1.45;
+}
+.metric-help {
+  display: block; margin-top: 8rpx; padding: 8rpx 10rpx;
+  font-size: 20rpx; color: #334155; line-height: 1.5;
+  background: #f0fdfa; border-radius: 6rpx;
+}
+.more-sec { margin: 4rpx 0 8rpx; }
+.more-btn {
+  font-size: 20rpx; color: #0f766e;
+  background: #f0fdfa; border-radius: 6rpx; padding: 6rpx 12rpx;
 }
 
 .sec { margin-bottom: 24rpx; }
@@ -655,9 +919,12 @@ const h2hRecent = computed(() => {
 .conf { font-size: 18rpx; color: #94a3b8; }
 .empty { font-size: 20rpx; color: #94a3b8; padding: 8rpx 0; }
 
+.unav-duo { display: flex; gap: 16rpx; }
+.unav-col { flex: 1; min-width: 0; }
+.unav-h { display: block; font-size: 20rpx; font-weight: 650; color: #334155; margin-bottom: 4rpx; }
 .unav-row {
   display: flex; align-items: baseline; gap: 6rpx;
-  font-size: 20rpx; line-height: 1.55; font-variant-numeric: tabular-nums;
+  font-size: 20rpx; line-height: 1.5; font-variant-numeric: tabular-nums;
 }
 .unav-st {
   width: 32rpx; flex-shrink: 0; font-size: 18rpx; font-weight: 650;
@@ -681,9 +948,59 @@ const h2hRecent = computed(() => {
 }
 .xi-num { color: #94a3b8; margin-right: 4rpx; font-variant-numeric: tabular-nums; }
 .xi-c { color: #0f766e; font-weight: 650; margin-left: 4rpx; font-size: 16rpx; }
+.xi-ai { color: #b45309; font-size: 16rpx; font-variant-numeric: tabular-nums; }
+
+.bsd-model {
+  margin: 8rpx 0 12rpx;
+  padding: 12rpx 12rpx 10rpx;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 6rpx;
+  background: #f8fafc;
+}
+.bsd-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+.bsd-h { font-size: 18rpx; font-weight: 650; color: #64748b; }
+.bsd-lean { font-size: 20rpx; font-weight: 650; color: #0f766e; }
+.bsd-1x2 {
+  display: flex; gap: 8rpx;
+  margin-bottom: 10rpx;
+}
+.bsd-odd {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 2rpx;
+  padding: 8rpx 4rpx 6rpx;
+  background: #fff;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 6rpx;
+  &.on {
+    border-color: #99f6e4;
+    background: #f0fdfa;
+  }
+}
+.bsd-odd-k { font-size: 18rpx; color: #64748b; }
+.bsd-odd-v {
+  font-size: 26rpx; font-weight: 700; color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.bsd-odd.on .bsd-odd-v { color: #0f766e; }
+.bsd-rows { display: flex; flex-direction: column; }
+.bsd-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 6rpx 2rpx;
+  border-top: 1rpx solid #eef2f6;
+}
+.bsd-k { font-size: 20rpx; color: #64748b; }
+.bsd-v {
+  font-size: 20rpx; font-weight: 650; color: #1e293b;
+  font-variant-numeric: tabular-nums;
+}
+.bsd-n { display: block; margin-top: 8rpx; font-size: 18rpx; color: #94a3b8; }
 
 .hint { display: block; margin-top: 8rpx; font-size: 20rpx; color: #64748b; line-height: 1.5; }
 .hint.dim { color: #94a3b8; font-size: 18rpx; }
+.hint.warn { color: #b45309; }
 .coach-n { display: block; font-size: 24rpx; font-weight: 650; color: #0f172a; }
 .coach-d { display: block; font-size: 20rpx; color: #64748b; margin-top: 4rpx; line-height: 1.45; }
 .h2h { display: block; font-size: 22rpx; color: #334155; margin-bottom: 8rpx; }
@@ -730,4 +1047,47 @@ const h2hRecent = computed(() => {
   &.now { color: #0f766e; }
   &.tonight { width: 72rpx; }
 }
+
+.p-mask {
+  position: absolute; inset: 0; background: rgba(15, 23, 42, 0.35); z-index: 8;
+}
+.p-sheet {
+  position: absolute; left: 16rpx; right: 16rpx; bottom: 16rpx;
+  background: #fff; border-radius: 6rpx; z-index: 9;
+  padding: 20rpx 20rpx 16rpx;
+  box-shadow: 0 12rpx 40rpx rgba(15, 23, 42, 0.18);
+}
+.p-top { display: flex; align-items: center; gap: 12rpx; margin-bottom: 16rpx; }
+.p-face {
+  width: 72rpx; height: 72rpx; border-radius: 50%; flex-shrink: 0;
+  background: #0f291c; border: 3rpx solid #94a3b8;
+  display: flex; align-items: center; justify-content: center;
+  &.ace { border-color: #fbbf24; }
+}
+.p-ini { font-size: 24rpx; font-weight: 700; color: #ecfdf5; }
+.p-who { flex: 1; min-width: 0; }
+.p-name { display: block; font-size: 28rpx; font-weight: 700; color: #0f172a; }
+.p-sub { display: block; font-size: 20rpx; color: #64748b; margin-top: 2rpx; }
+.p-sc {
+  font-size: 28rpx; font-weight: 700; color: #fff; border-radius: 6rpx;
+  padding: 4rpx 12rpx; line-height: 1.2;
+  &.hi { background: #15803d; }
+  &.mid { background: #ca8a04; }
+  &.lo { background: #dc2626; }
+}
+.p-x { font-size: 22rpx; color: #64748b; padding: 8rpx 4rpx; }
+.p-grid {
+  display: flex; flex-wrap: wrap;
+  border: 1rpx solid #e2e8f0; border-radius: 6rpx; overflow: hidden;
+}
+.p-cell {
+  width: 25%; box-sizing: border-box;
+  padding: 10rpx 8rpx; text-align: center;
+  border-right: 1rpx solid #f1f5f9; border-bottom: 1rpx solid #f1f5f9;
+  &:nth-child(4n) { border-right: 0; }
+  &:nth-child(n+5) { border-bottom: 0; }
+}
+.p-k { display: block; font-size: 18rpx; color: #94a3b8; }
+.p-v { display: block; font-size: 24rpx; font-weight: 650; color: #0f172a; font-variant-numeric: tabular-nums; }
+.p-inj { display: block; margin-top: 10rpx; font-size: 20rpx; color: #b45309; }
 </style>

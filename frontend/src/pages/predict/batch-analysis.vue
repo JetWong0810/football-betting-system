@@ -381,6 +381,7 @@ import IntelModal from '@/components/IntelModal.vue'
 import MatchNoteCard from '@/components/MatchNoteCard.vue'
 import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
 import { hasNote, ratingFullLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
+import { prefetchIntel } from '@/utils/intelPrefetch'
 
 const simBet = useSimBetStore()
 const date = ref('')
@@ -1119,6 +1120,7 @@ function openIntel(it) {
   const mid = it?.matchId
   if (!mid) return
   intelMatchId.value = String(mid)
+  prefetchIntel(String(mid)).catch(() => {})
   showIntelModal.value = true
 }
 

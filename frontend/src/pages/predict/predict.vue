@@ -427,6 +427,7 @@ import IntelModal from '@/components/IntelModal.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
 import H2hRefCard from '@/components/H2hRefCard.vue'
 import RecentFormModal from '@/components/RecentFormModal.vue'
+import { prefetchIntel } from '@/utils/intelPrefetch'
 
 function hasChart(sub) {
   return !!(sub && sub.chart && sub.chart.items && sub.chart.items.length)
@@ -586,6 +587,7 @@ const closeSimilarModal = () => {
 }
 function openIntel() {
   if (!selectedMatch.value?.matchId) return
+  prefetchIntel(selectedMatch.value.matchId)
   showIntelModal.value = true
 }
 
@@ -707,6 +709,10 @@ watch(analysisComplete, async (v) => {
   if (v && !calibrationData.value) {
     calibrationData.value = await loadCalibration()
   }
+})
+
+watch(() => selectedMatch.value?.matchId, (id) => {
+  if (id) prefetchIntel(id).catch(() => {})
 })
 
 onLoad((query) => {
