@@ -1990,6 +1990,17 @@ def predict_japan_context(match_id: str):
     return get_japan_context(match_id)
 
 
+@app.get("/api/predict/{match_id}/intel")
+def predict_intel(match_id: str):
+    """BSD 赛前基本面（阵容/伤停/教练/场地），仅展示参考，不参与因子加权。"""
+    from bsd_intel.service import get_intel
+
+    match = repo.get_match(match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="未找到比赛")
+    return get_intel(match_id, match)
+
+
 @app.get("/api/match-results")
 def list_match_results(
     date: str = Query(..., description="日期 YYYY-MM-DD"),

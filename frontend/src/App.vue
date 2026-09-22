@@ -182,6 +182,7 @@ page {
   }
 
   .similar-modal,
+  .intel-modal,
   .factor-help-modal,
   .japan-modal,
   .history-modal,
