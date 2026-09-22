@@ -1998,7 +1998,17 @@ def predict_intel(match_id: str):
     match = repo.get_match(match_id)
     if not match:
         raise HTTPException(status_code=404, detail="未找到比赛")
-    return get_intel(match_id, match)
+    try:
+        return get_intel(match_id, match)
+    except RuntimeError as e:
+        logger.exception("intel failed %s", match_id)
+        return {
+            "available": False,
+            "reason": "error",
+            "matchId": match_id,
+            "homeTeam": match.get("home_team_name"),
+            "awayTeam": match.get("away_team_name"),
+        }
 
 
 @app.get("/api/match-results")

@@ -414,6 +414,7 @@ async function load(id) {
 
 const emptyText = computed(() => {
   if (data.value?.reason === 'unmatched') return '该场暂无覆盖（亚运等）'
+  if (data.value?.reason === 'error') return '基本面服务暂不可用'
   return errText.value || '暂无数据'
 })
 

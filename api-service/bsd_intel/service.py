@@ -119,6 +119,8 @@ def _end_inflight(match_id: str, result=None, err=None) -> None:
 
 
 def _build_intel(match_id: str, match: Dict[str, Any]) -> Dict[str, Any]:
+    from . import db as bsd_db
+    bsd_db.ensure_schema(apply=True)
     mapped = get_event_map(match_id)
     hit = None
     if mapped:
