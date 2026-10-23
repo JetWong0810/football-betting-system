@@ -1366,7 +1366,7 @@ def batch_similar(
 
     match_ids = [r["match_id"] for r in rows]
     odds_map = repo.fetch_wdl_for_matches(match_ids) if match_ids else {}
-    from zgzcw_cache import beidan_flags_for_matches
+    from zgzcw_cache import beidan_flags_for_matches, is_beidan_flip
     beidan_map = beidan_flags_for_matches(match_ids) if match_ids else {}
 
     items = []
@@ -1387,8 +1387,11 @@ def batch_similar(
         item["ahHandicap"] = ahc  # 兼容=终盘
         item["ahHandicapOpen"] = ah_open
         item["ahHandicapClose"] = ahc
-        if beidan_map.get(mid):
+        bd = beidan_map.get(mid) or {}
+        if bd.get("deep"):
             item["beidanDeep"] = True
+        if is_beidan_flip(item.get("handicap"), bd.get("rq")):
+            item["beidanFlip"] = True
 
         # F6 历史同赔: 有胜平负走 spf; 只开让球胜平负则走 nspf(同赔率+变动, 不限让球档)
         spf = get_match_spf_odds(mid)

@@ -1,5 +1,5 @@
 """北单初盘 1.5 vs 市场 0.75≥30%。"""
-from zgzcw_cache import is_beidan_deep, split_asian_blob
+from zgzcw_cache import is_beidan_deep, is_beidan_flip, split_asian_blob
 
 
 def _c(hc):
@@ -33,8 +33,19 @@ def test_split_asian_blob_keeps_beidan():
     assert beidan is None and len(companies) == 1
 
 
+def test_beidan_flip():
+    assert is_beidan_flip(-1, 1.5)
+    assert is_beidan_flip(1, -0.5)
+    assert not is_beidan_flip(-1, -0.5)
+    assert not is_beidan_flip(1, 1.5)
+    assert not is_beidan_flip(0, 1.5)
+    assert not is_beidan_flip(-1, 0)
+    assert not is_beidan_flip(None, 1.5)
+
+
 if __name__ == "__main__":
     test_beidan_deep_trigger()
     test_beidan_deep_skip()
     test_split_asian_blob_keeps_beidan()
+    test_beidan_flip()
     print("ok beidan deep")

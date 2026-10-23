@@ -101,8 +101,20 @@ def is_beidan_deep(
     return n075 / len(opens) >= 0.30
 
 
-def beidan_flags_for_matches(match_ids: List[str]) -> Dict[str, bool]:
-    out: Dict[str, bool] = {}
+def is_beidan_flip(jc_hc, sfgg_rq) -> bool:
+    """竞彩让球与胜负过关方向相反。两套都是正=主受让、负=主让。平手不算。"""
+    try:
+        a = float(jc_hc)
+        b = float(sfgg_rq)
+    except (TypeError, ValueError):
+        return False
+    if abs(a) < 1e-9 or abs(b) < 1e-9:
+        return False
+    return (a > 0) != (b > 0)
+
+
+def beidan_flags_for_matches(match_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
     if not match_ids:
         return out
     try:
@@ -120,8 +132,13 @@ def beidan_flags_for_matches(match_ids: List[str]) -> Dict[str, bool]:
         return out
     for r in rows:
         companies, beidan = split_asian_blob(r.get("asian_json"))
-        if is_beidan_deep(companies, beidan):
-            out[r["match_id"]] = True
+        rq = _open_hc(beidan)
+        if rq is None:
+            continue
+        out[r["match_id"]] = {
+            "deep": is_beidan_deep(companies, beidan),
+            "rq": rq,
+        }
     return out
 
 

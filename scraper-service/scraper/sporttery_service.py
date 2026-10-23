@@ -249,6 +249,10 @@ class SportterySyncService:
             self.stats["asian"] = self.refresh_live_asian_bet365()
         except Exception as e:
             logger.warning(f"在售亚盘刷新失败: {e}")
+            try:
+                self.refresh_bjdcsf()
+            except Exception as e2:
+                logger.warning(f"北单胜负过关刷新失败: {e2}")
         self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
         return self.stats
 
@@ -413,13 +417,11 @@ class SportterySyncService:
                     continue
                 packs[mid] = pack
                 companies = pack.get("companies") or []
-                beidan = pack.get("beidan")
-                if companies or beidan:
-                    asian_payload = {"companies": companies}
-                    if beidan:
-                        asian_payload["beidan"] = beidan
+                if companies:
                     try:
-                        self.repository.upsert_fenxi_cache(mid, asian=asian_payload)
+                        self.repository.merge_fenxi_asian(
+                            mid, companies=companies, touch_fetched=True
+                        )
                         row = meta.setdefault(mid, {})
                         row["asian_fetched_at"] = datetime.utcnow()
                         row["asian_len"] = max(len(companies) * 40, _CACHE_MIN_LEN)
@@ -531,7 +533,35 @@ class SportterySyncService:
                         except Exception as e:
                             logger.warning(f"亚盘轴落库失败 {mid}: {e}")
         logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
+        try:
+            n_bd = self.refresh_bjdcsf(live)
+            logger.info(f"北单胜负过关: 写入 {n_bd}/{len(live)}")
+        except Exception as e:
+            logger.warning(f"北单胜负过关刷新失败: {e}")
         return updated
+
+    def refresh_bjdcsf(self, live: Optional[List[Dict]] = None) -> int:
+        from scraper.bjdcsf import fetch_bjdcsf, match_sfgg, to_beidan
+
+        live = live if live is not None else self.repository.list_live_for_asian()
+        if not live:
+            return 0
+        rows = fetch_bjdcsf()
+        if not rows:
+            logger.warning("bjdcsf 无数据")
+            return 0
+        n = 0
+        for m in live:
+            hit = match_sfgg(m, rows)
+            if not hit:
+                continue
+            mid = m.get("match_id")
+            try:
+                self.repository.merge_fenxi_asian(mid, beidan=to_beidan(hit))
+                n += 1
+            except Exception as e:
+                logger.warning(f"北单写入失败 {mid}: {e}")
+        return n
 
     # Parsing helpers -----------------------------------------------------
     def parse_pool(self, pool_name: str, data: Dict) -> None:

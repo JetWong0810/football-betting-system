@@ -724,6 +724,49 @@ class OddsRepository:
                 tuple(params),
             )
 
+    def merge_fenxi_asian(
+        self,
+        match_id: str,
+        *,
+        companies=None,
+        beidan=None,
+        touch_fetched: bool = False,
+    ) -> None:
+        """合并 asian_json.companies / beidan, 默认不改 asian_fetched_at。"""
+        if not match_id or (companies is None and beidan is None):
+            return
+        with get_db() as conn:
+            _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
+            cur = _execute(
+                conn, "SELECT asian_json FROM jczq_fenxi_cache WHERE match_id=%s", (match_id,)
+            )
+            row = cur.fetchone() or {}
+            raw = row.get("asian_json") if isinstance(row, dict) else None
+            data = None
+            if raw:
+                try:
+                    data = json.loads(raw) if isinstance(raw, str) else raw
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    data = None
+            if isinstance(data, list):
+                data = {"companies": data}
+            if not isinstance(data, dict):
+                data = {"companies": []}
+            if companies is not None:
+                data["companies"] = companies
+            if beidan is not None:
+                data["beidan"] = beidan
+            sets = ["asian_json=%s"]
+            params: list = [json.dumps(data, ensure_ascii=False)]
+            if touch_fetched:
+                sets.append("asian_fetched_at=NOW()")
+            params.append(match_id)
+            _execute(
+                conn,
+                f"UPDATE jczq_fenxi_cache SET {', '.join(sets)} WHERE match_id=%s",
+                tuple(params),
+            )
+
     def replace_ah_ticks(
         self,
         match_id: str,
