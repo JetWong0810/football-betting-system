@@ -3,6 +3,7 @@ from scraper.zgzcw_fenxi import (
     parse_bjop,
     parse_bsls,
     parse_dxdb,
+    parse_ypdb_beidan,
     parse_ypdb_bet365,
     parse_ypdb_mainstream,
     parse_ypdb_zhishu,
@@ -39,6 +40,16 @@ YPDB_HTML = """
 <td>8</td><td><a href="/ypdb/zhishu?company_id=11">韦*</a></td>
 <td>0.89</td><td>平手</td><td>0.91</td>
 <td>0.79</td><td>受平/半</td><td>1.01</td>
+</tr>
+<tr>
+<td>9</td><td><a href="/ypdb/zhishu?company_id=88">北单</a></td>
+<td>1.00</td><td>球半</td><td>1.00</td>
+<td>1.00</td><td>球半</td><td>1.00</td>
+</tr>
+<tr>
+<td>10</td><td>北单推荐微信</td>
+<td>1.00</td><td>球半</td><td>1.00</td>
+<td>1.00</td><td>球半</td><td>1.00</td>
 </tr>
 </table>
 """
@@ -163,6 +174,11 @@ def main() -> None:
     assert books["Pinnacle"]["current"]["handicap"] == 0.5
     assert books["皇冠"]["cid"] == 3 and books["韦德"]["cid"] == 11, books.keys()
     assert "伟德" not in books
+    assert "北单" not in books
+    beidan = parse_ypdb_beidan(YPDB_HTML)
+    assert beidan is not None and beidan["bookmaker"] == "北单", beidan
+    assert abs(beidan["initial"]["handicap"] - 1.5) < 1e-9, beidan
+    assert beidan["raw_name"] == "北单"
 
     euro = parse_bjop(BJOP_HTML)
     names = [c["bookmaker"] for c in euro["companies"]]

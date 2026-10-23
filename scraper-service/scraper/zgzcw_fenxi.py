@@ -99,7 +99,33 @@ def _link_cid(href: str) -> Optional[int]:
 
 
 def _is_ad(name: str) -> bool:
+    # 北单单独 parse_ypdb_beidan, 不进主流/欧赔/大小球
     return any(k in (name or "") for k in ("微信", "推荐", "北单"))
+
+
+def _is_beidan_name(name: str) -> bool:
+    n = name or ""
+    return "北单" in n and "微信" not in n and "推荐" not in n
+
+
+def _ypdb_company_row(book: str, cid: int, name: str, line: dict) -> dict:
+    return {
+        "bookmaker": book,
+        "cid": cid,
+        "raw_name": name,
+        "initial": {
+            "home": line.get("open_home"),
+            "handicap": line.get("open_hc"),
+            "handicapText": line.get("open_hc_text") or "",
+            "away": line.get("open_away"),
+        },
+        "current": {
+            "home": line.get("close_home"),
+            "handicap": line.get("close_hc"),
+            "handicapText": line.get("close_hc_text") or "",
+            "away": line.get("close_away"),
+        },
+    }
 
 
 def _ypdb_from_tds(tds, cid: int, name: str) -> Optional[dict]:
@@ -169,24 +195,40 @@ def parse_ypdb_mainstream(html: str) -> List[dict]:
         if not line:
             continue
         seen.add(cid)
-        out.append({
-            "bookmaker": book,
-            "cid": cid,
-            "raw_name": name,
-            "initial": {
-                "home": line["open_home"],
-                "handicap": line["open_hc"],
-                "handicapText": line.get("open_hc_text") or "",
-                "away": line["open_away"],
-            },
-            "current": {
-                "home": line["close_home"],
-                "handicap": line["close_hc"],
-                "handicapText": line.get("close_hc_text") or "",
-                "away": line["close_away"],
-            },
-        })
+        out.append(_ypdb_company_row(book, cid, name, line))
     return out
+
+
+def parse_ypdb_beidan(html: str) -> Optional[dict]:
+    """ypdb 北单行。handicap=500 原值正=主让。无则 None。"""
+    soup = BeautifulSoup(html, "html.parser")
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 5:
+            continue
+        name = tds[1].get_text(strip=True)
+        if not _is_beidan_name(name):
+            continue
+        a = tds[1].find("a", href=True)
+        cid = _link_cid(a["href"]) if a else 0
+        line = _ypdb_from_tds(tds, cid or 0, name) if len(tds) >= 8 else None
+        if not line:
+            open_hc_text = _clean_hc(tds[3].get_text(strip=True))
+            open_hc = _parse_handicap_value(open_hc_text)
+            if open_hc is None:
+                continue
+            line = {
+                "open_hc": open_hc,
+                "close_hc": None,
+                "open_hc_text": open_hc_text,
+                "close_hc_text": "",
+                "open_home": _parse_odds(tds[2].get_text(strip=True)),
+                "open_away": _parse_odds(tds[4].get_text(strip=True)),
+                "close_home": None,
+                "close_away": None,
+            }
+        return _ypdb_company_row("北单", cid or 0, name, line)
+    return None
 
 
 def parse_bjop(html: str) -> Dict:
@@ -671,9 +713,10 @@ class FenxiSession:
             return None
         companies = parse_ypdb_mainstream(html)
         bet365 = parse_ypdb_bet365(html)
+        beidan = parse_ypdb_beidan(html)
         if not bet365:
             logger.info(f"ypdb 无 Bet365(cid={BET365_CID}) fid={fid}")
-        return {"bet365": bet365, "companies": companies}
+        return {"bet365": bet365, "companies": companies, "beidan": beidan}
 
     def fetch_ypdb_bet365(self, fid: str) -> Optional[dict]:
         pack = self.fetch_ypdb(fid)

@@ -52,6 +52,79 @@ def _normalize_companies(rows: Any) -> List[Dict[str, Any]]:
     return [_normalize_bookmaker(c) if isinstance(c, dict) else c for c in rows]
 
 
+def _open_hc(row: Optional[Dict[str, Any]]) -> Optional[float]:
+    if not isinstance(row, dict):
+        return None
+    h = (row.get("initial") or {}).get("handicap")
+    if h is None:
+        return None
+    try:
+        return float(h)
+    except (TypeError, ValueError):
+        return None
+
+
+def split_asian_blob(blob) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    data = blob if isinstance(blob, (dict, list)) else _loads(blob)
+    companies: List[Dict[str, Any]] = []
+    beidan = None
+    if isinstance(data, dict):
+        companies = data.get("companies") or []
+        beidan = data.get("beidan") if isinstance(data.get("beidan"), dict) else None
+    elif isinstance(data, list):
+        companies = data
+    companies = _normalize_companies(companies)
+    if beidan:
+        beidan = dict(beidan)
+        beidan["bookmaker"] = "北单"
+    return companies, beidan
+
+
+def is_beidan_deep(
+    companies: Optional[List[Dict[str, Any]]],
+    beidan: Optional[Dict[str, Any]],
+) -> bool:
+    """北单初盘 |1.5| 且其他公司初盘 |0.75| ≥30%。"""
+    bd = _open_hc(beidan)
+    if bd is None or abs(abs(bd) - 1.5) > 1e-6:
+        return False
+    opens = []
+    for c in companies or []:
+        if "北单" in str(c.get("bookmaker") or ""):
+            continue
+        h = _open_hc(c)
+        if h is not None:
+            opens.append(abs(h))
+    if not opens:
+        return False
+    n075 = sum(1 for h in opens if abs(h - 0.75) < 1e-6)
+    return n075 / len(opens) >= 0.30
+
+
+def beidan_flags_for_matches(match_ids: List[str]) -> Dict[str, bool]:
+    out: Dict[str, bool] = {}
+    if not match_ids:
+        return out
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            ph = ",".join(["%s"] * len(match_ids))
+            cur.execute(
+                f"SELECT match_id, asian_json FROM jczq_fenxi_cache "
+                f"WHERE match_id IN ({ph})",
+                tuple(match_ids),
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        logger.warning(f"读北单缓存失败: {e}")
+        return out
+    for r in rows:
+        companies, beidan = split_asian_blob(r.get("asian_json"))
+        if is_beidan_deep(companies, beidan):
+            out[r["match_id"]] = True
+    return out
+
+
 def get_fenxi_cache(match_id: str) -> Optional[Dict[str, Any]]:
     if not match_id:
         return None

@@ -413,9 +413,13 @@ class SportterySyncService:
                     continue
                 packs[mid] = pack
                 companies = pack.get("companies") or []
-                if companies:
+                beidan = pack.get("beidan")
+                if companies or beidan:
+                    asian_payload = {"companies": companies}
+                    if beidan:
+                        asian_payload["beidan"] = beidan
                     try:
-                        self.repository.upsert_fenxi_cache(mid, asian=companies)
+                        self.repository.upsert_fenxi_cache(mid, asian=asian_payload)
                         row = meta.setdefault(mid, {})
                         row["asian_fetched_at"] = datetime.utcnow()
                         row["asian_len"] = max(len(companies) * 40, _CACHE_MIN_LEN)

@@ -165,6 +165,7 @@
             <text class="league">{{ it.league || '-' }}</text>
             <text class="time">{{ (it.matchTime || '').slice(0, 5) }}</text>
             <text v-if="it.isSingle" class="single-tag">单关</text>
+            <text v-if="it.beidanDeep" class="beidan-tag">北单1.5</text>
             <text v-if="recRank(it)" class="rec-tag" :class="'rec-' + recRank(it)">稳{{ recRank(it) }}</text>
             <view class="dir-wrap">
               <text class="dir" :class="[it.f6?.direction || 'neutral', refTier(it.f6)]">{{ dirLabel(it.f6?.direction) }}</text>
@@ -1772,6 +1773,12 @@ onShow(() => {
     font-size: 20rpx; color: #dc2626; font-weight: 600;
     padding: 2rpx 8rpx; border-radius: 6rpx;
     border: 1rpx solid rgba(#dc2626, 0.4); background: rgba(#dc2626, 0.06);
+    flex-shrink: 0;
+  }
+  .beidan-tag {
+    font-size: 20rpx; color: #0369a1; font-weight: 600;
+    padding: 2rpx 8rpx; border-radius: 6rpx;
+    border: 1rpx solid rgba(#0369a1, 0.4); background: rgba(#0369a1, 0.06);
     flex-shrink: 0;
   }
   .rec-tag {
