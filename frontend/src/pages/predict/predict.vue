@@ -29,7 +29,6 @@
         <text class="info-time">{{ selectedMatch.matchDate.slice(5) }} {{ selectedMatch.matchTime.slice(0, 5) }}</text>
         <text class="info-handicap" v-if="selectedMatch.handicap != null">{{ formatHandicap(selectedMatch.handicap) }}</text>
         <view class="info-single" v-if="selectedMatch.isSingle"><text>单关</text></view>
-        <text class="info-intel" @tap.stop="openIntel">基本面</text>
       </view>
       <view class="info-sides" v-if="selectedMatch.handicap != null">
         <text class="side-tag upper">上盘 {{ sideTeams().upper }}</text>
@@ -370,11 +369,6 @@
       :odds-kind="similarDefaultOddsKind"
       @close="closeSimilarModal"
     />
-    <IntelModal
-      :visible="showIntelModal"
-      :match-id="selectedMatch?.matchId || ''"
-      @close="showIntelModal = false"
-    />
 
     <!-- 日期选择弹窗 -->
     <view class="cal-mask" v-if="showCalendar" @tap="showCalendar = false"></view>
@@ -423,11 +417,9 @@ import { loadCalibration } from '@/utils/calibration'
 import { filterSimilarWithAh } from '@/utils/similarStats'
 import { isJapanLeague } from '@/utils/japanLeague'
 import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
-import IntelModal from '@/components/IntelModal.vue'
 import FactorCompareBars from '@/components/FactorCompareBars.vue'
 import H2hRefCard from '@/components/H2hRefCard.vue'
 import RecentFormModal from '@/components/RecentFormModal.vue'
-import { prefetchIntel } from '@/utils/intelPrefetch'
 
 function hasChart(sub) {
   return !!(sub && sub.chart && sub.chart.items && sub.chart.items.length)
@@ -570,7 +562,6 @@ const similarDefaultMatches = ref([])
 const similarDefaultRef = ref(null)
 const similarDefaultSnapshots = ref([])
 const similarDefaultOddsKind = ref('spf')
-const showIntelModal = ref(false)
 const isJapanMatch = computed(() => isJapanLeague(selectedMatch.value?.league))
 
 function applyPredictSimilarList(list) {
@@ -584,11 +575,6 @@ const openSimilarModal = () => {
 }
 const closeSimilarModal = () => {
   showSimilarModal.value = false
-}
-function openIntel() {
-  if (!selectedMatch.value?.matchId) return
-  prefetchIntel(selectedMatch.value.matchId)
-  showIntelModal.value = true
 }
 
 const allMatches = ref([])
@@ -711,9 +697,6 @@ watch(analysisComplete, async (v) => {
   }
 })
 
-watch(() => selectedMatch.value?.matchId, (id) => {
-  if (id) prefetchIntel(id).catch(() => {})
-})
 
 onLoad((query) => {
   // 进入页先清空上次预测展示(不再从 storage 恢复)
@@ -1381,18 +1364,6 @@ onShow(async () => {
       color: #ef4444;
       line-height: 1;
     }
-  }
-  .info-intel {
-    margin-left: auto;
-    font-size: 20rpx;
-    color: #0f766e;
-    background: #ccfbf1;
-    padding: 0 12rpx;
-    height: 36rpx;
-    line-height: 36rpx;
-    border-radius: 6rpx;
-    font-weight: 600;
-    flex-shrink: 0;
   }
   .info-sides {
     display: flex;

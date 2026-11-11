@@ -13,13 +13,15 @@
             :class="{ spinning: loading || refreshing }"
             @tap="refreshBatch"
           >
-            <view class="refresh-ring"></view>
+            <view class="ico ico-refresh"></view>
           </view>
-          <text
+          <view
             class="sim-toggle"
             :class="{ on: simBet.simMode }"
             @tap="simBet.toggleSimMode()"
-          >模拟投注</text>
+          >
+            <view class="ico ico-ticket"></view>
+          </view>
           <text class="sum-total">
             <template v-if="hasFilter">已筛 {{ filteredItems.length }}/{{ summary.total }}</template>
             <template v-else>{{ summary.total }} 场</template>
@@ -27,16 +29,22 @@
         </view>
       </view>
       <view class="status-row">
-        <text
+        <view
           class="status-tab"
           :class="{ on: status === 'not_started' }"
           @tap="switchStatus('not_started')"
-        >在售</text>
-        <text
+        >
+          <view class="ico ico-live"></view>
+          <text>在售</text>
+        </view>
+        <view
           class="status-tab"
           :class="{ on: status === 'finished' }"
           @tap="switchStatus('finished')"
-        >已结束</text>
+        >
+          <view class="ico ico-done"></view>
+          <text>已结束</text>
+        </view>
       </view>
       <view class="sum-stats">
         <text class="st upper">上盘 {{ summary.upper }}</text>
@@ -76,7 +84,6 @@
         <text class="ctrl-btn" :class="{ active: sortMode === 'homeLoss' }" @tap="sortMode = 'homeLoss'">主负率</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'refScore' }" @tap="sortMode = 'refScore'">分数</text>
         <text class="ctrl-btn" :class="{ active: sortMode === 'stability' }" @tap="sortMode = 'stability'">稳度</text>
-        <text class="ctrl-btn" :class="{ active: sortMode === 'rating' }" @tap="sortMode = 'rating'">星级</text>
       </view>
       <view class="ctrl-row">
         <text class="ctrl-lab">筛选</text>
@@ -111,11 +118,6 @@
           :class="{ active: dirFilters.includes('single') }"
           @tap="toggleFilter('single')"
         >单关</text>
-        <text
-          class="ctrl-btn note"
-          :class="{ active: dirFilters.includes('hasNote') }"
-          @tap="toggleFilter('hasNote')"
-        >有备注</text>
       </view>
       <view class="ctrl-row">
         <text class="ctrl-lab">变动</text>
@@ -158,8 +160,14 @@
           :key="it.matchId"
           class="match-card"
           :class="{ pinned: isPinned(it.matchId), rec1: recRank(it) === 1, rec2: recRank(it) === 2 }"
-          @longpress="onCardLongPress(it)"
-          @contextmenu.prevent="onCardLongPress(it)"
+          @touchstart="onCardPressStart($event, it)"
+          @touchmove="onCardPressMove"
+          @touchend="cancelCardPress"
+          @touchcancel="cancelCardPress"
+          @mousedown="onCardPressStart($event, it)"
+          @mouseup="cancelCardPress"
+          @mouseleave="cancelCardPress"
+          @contextmenu.prevent
         >
           <view class="row-meta">
             <text class="league">{{ it.league || '-' }}</text>
@@ -177,7 +185,7 @@
               >{{ it.f6.refScore }}</text>
             </view>
             <view class="predict-icon" @tap.stop="goPredict(it)">
-              <text class="predict-icon-text">预</text>
+              <view class="ico ico-trend"></view>
             </view>
           </view>
           <view v-if="simBet.simMode" class="row-sim">
@@ -224,12 +232,6 @@
             <text class="reason">{{ it.f6?.reason || '暂无同赔样本' }}</text>
           </view>
 
-          <view class="row-intel" @tap.stop="openIntel(it)">
-            <text class="intel-lab">基本面</text>
-            <text class="intel-sum">阵容 · 伤停 · 近况</text>
-            <text class="intel-go">详情</text>
-          </view>
-
           <!-- 亚盘盘口: 初/终; 无数据时显示「无数据」 -->
           <view class="row-ah">
             <text class="ah-lab">亚盘</text>
@@ -269,14 +271,6 @@
             <text class="ol-move" :class="moveClass(jcOdds(it))">{{ moveLabel(jcOdds(it)) }}</text>
           </view>
 
-          <MatchNoteCard
-            :note="noteMap[it.matchId]"
-            :is-single="!!it.isSingle"
-            :jc-move="lowMoveDir(jcOdds(it))"
-            @edit="openNoteEditor(it)"
-            @rate="(val) => quickRate(it, val)"
-          />
-
           <view class="row-detail" @tap="openSimilar(it)">
             <view class="spf-stat" v-if="spfStats(it.f6).total">
               <text class="r-win">{{ spfCountLab(it).win }} {{ spfStats(it.f6).win }}</text>
@@ -288,22 +282,6 @@
         </view>
       </view>
     </scroll-view>
-
-    <MatchNoteEditor
-      :visible="showNoteEditor"
-      :home-name="noteTarget?.homeTeam?.name || ''"
-      :away-name="noteTarget?.awayTeam?.name || ''"
-      :content="noteMap[noteTarget?.matchId]?.content || ''"
-      :rating="noteMap[noteTarget?.matchId]?.rating || null"
-      :structure="noteMap[noteTarget?.matchId]?.structure || null"
-      :hints="noteHints"
-      :has-saved="!!noteMap[noteTarget?.matchId]"
-      :saving="noteSaving"
-      :max-len="noteMaxLen"
-      @close="closeNoteEditor"
-      @save="saveNote"
-      @clear="clearNote"
-    />
 
     <SimBetLineSheet
       :visible="showSimSheet"
@@ -331,12 +309,6 @@
       :odds-kind="similarOddsKind"
       @close="closeSimilar"
       @same-event="onSimilarSameEvent"
-    />
-
-    <IntelModal
-      :visible="showIntelModal"
-      :match-id="intelMatchId"
-      @close="showIntelModal = false"
     />
 
     <view v-if="showPinSheet" class="app-mask pin-sheet-mask" @tap="closePinSheet"></view>
@@ -403,12 +375,8 @@ import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
 import SimBetLineSheet from '@/components/SimBetLineSheet.vue'
 import SimBetSlip from '@/components/SimBetSlip.vue'
 import SimilarOddsModal from '@/components/SimilarOddsModal.vue'
-import IntelModal from '@/components/IntelModal.vue'
-import MatchNoteCard from '@/components/MatchNoteCard.vue'
-import MatchNoteEditor from '@/components/MatchNoteEditor.vue'
 import { hasNote, ratingFullLabel, cloneStructure, formatNoteContent, pickSimilarVerdict, pickSingleFitVerdict } from '@/utils/matchNote'
 import { calcStability, cmpStability, pickStableRecs } from '@/utils/stabilityScore'
-import { prefetchIntel } from '@/utils/intelPrefetch'
 
 const simBet = useSimBetStore()
 const date = ref('')
@@ -437,8 +405,6 @@ function applySimilarList(list) {
   if (similarOddsKind.value === 'nspf') return rows
   return filterSimilarWithAh(rows)
 }
-const showIntelModal = ref(false)
-const intelMatchId = ref('')
 const showSimSheet = ref(false)
 const simTarget = ref(null)
 /** matchId -> { content, rating, updatedAt } */
@@ -462,7 +428,7 @@ const dirFilters = ref([])
 const moveFilters = ref([])
 /** 今日稳: 只保留方向-变动配对场, 并按稳度排、标 1–2 场推荐 */
 const stablePick = ref(false)
-/** default | time | hitPct | homeWin | homeLoss | refScore | stability | rating */
+/** default | time | hitPct | homeWin | homeLoss | refScore | stability */
 const sortMode = ref('default')
 const PIN_KEY = 'batch-similar-pins'
 const pinnedIds = ref(loadPinnedIds())
@@ -729,11 +695,6 @@ function itemRefScore(it) {
   const s = it?.f6?.refScore
   return s == null ? -1 : Number(s)
 }
-function itemRating(it) {
-  const r = noteMap[it?.matchId]?.rating
-  const n = Number(r)
-  return r == null || Number.isNaN(n) ? -1 : n
-}
 function itemTimeValue(it) {
   const rawTime = String(it?.matchTime || '')
   const fullInTime = rawTime.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/)
@@ -784,13 +745,6 @@ const sortedItems = computed(() => {
   }
   if (mode === 'stability') {
     return list.sort(cmpItemStability)
-  }
-  if (mode === 'rating') {
-    return list.sort((a, b) => {
-      const d = itemRating(b) - itemRating(a)
-      if (d !== 0) return d
-      return itemRefScore(b) - itemRefScore(a)
-    })
   }
   return list.sort((a, b) => {
     const da = DIR_ORDER[a.f6?.direction] ?? 2
@@ -953,6 +907,36 @@ function suppressCardTap() {
 }
 function cardTapBlocked() {
   return Date.now() < pinGestureUntil
+}
+/** 自定义长按:需按住 PIN_HOLD_MS 且手指移动不超过 PIN_MOVE_TOL,滑动列表不会误触 */
+const PIN_HOLD_MS = 800
+const PIN_MOVE_TOL = 8
+let pressTimer = null
+let pressX = 0
+let pressY = 0
+function cancelCardPress() {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
+function onCardPressStart(e, it) {
+  cancelCardPress()
+  const pt = (e.touches && e.touches[0]) || e
+  pressX = pt.clientX || 0
+  pressY = pt.clientY || 0
+  pressTimer = setTimeout(() => {
+    pressTimer = null
+    onCardLongPress(it)
+  }, PIN_HOLD_MS)
+}
+function onCardPressMove(e) {
+  if (!pressTimer) return
+  const pt = e.touches && e.touches[0]
+  if (!pt) return
+  if (Math.abs(pt.clientX - pressX) > PIN_MOVE_TOL || Math.abs(pt.clientY - pressY) > PIN_MOVE_TOL) {
+    cancelCardPress()
+  }
 }
 function onCardLongPress(it) {
   suppressCardTap()
@@ -1220,15 +1204,6 @@ function onSimilarSameEvent(payload) {
   const mid = similarMatchId.value
   const it = items.value.find((x) => x.matchId === mid)
   writeSimilarAndFit(mid, payload?.matches, it?.ahHandicap, 'sameEvent', 2, !!it?.isSingle)
-}
-
-function openIntel(it) {
-  if (cardTapBlocked()) return
-  const mid = it?.matchId
-  if (!mid) return
-  intelMatchId.value = String(mid)
-  prefetchIntel(String(mid)).catch(() => {})
-  showIntelModal.value = true
 }
 
 function goPredict(it) {
@@ -1590,26 +1565,6 @@ onShow(() => {
     border: 1rpx solid rgba(255,255,255,0.35);
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
-    &.spinning .refresh-ring {
-      animation: refresh-spin 0.7s linear infinite;
-    }
-  }
-  .refresh-ring {
-    width: 22rpx; height: 22rpx;
-    border: 3rpx solid rgba(255,255,255,0.85);
-    border-top-color: transparent;
-    border-radius: 50%;
-    position: relative;
-    &::after {
-      content: '';
-      position: absolute;
-      top: -5rpx; right: -1rpx;
-      width: 0; height: 0;
-      border-left: 5rpx solid transparent;
-      border-right: 5rpx solid transparent;
-      border-bottom: 8rpx solid rgba(255,255,255,0.85);
-      transform: rotate(45deg);
-    }
   }
   .status-row {
     display: flex; gap: 12rpx; margin-bottom: 10rpx;
@@ -1809,12 +1764,6 @@ onShow(() => {
     flex-shrink: 0;
     box-shadow: 0 2rpx 8rpx rgba(13, 148, 136, 0.3);
     &:active { opacity: 0.75; }
-  }
-  .predict-icon-text {
-    font-size: 22rpx;
-    line-height: 1;
-    color: #fff;
-    font-weight: 600;
   }
   .dir {
     font-size: 24rpx; font-weight: 600;
@@ -2032,37 +1981,6 @@ onShow(() => {
   .similar-ref { font-size: 22rpx; color: #64748b; font-variant-numeric: tabular-nums; }
   .similar-close { font-size: 24rpx; color: $frbt-primary; padding: 8rpx 4rpx; }
 }
-.row-intel {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  margin-top: 10rpx;
-  padding: 10rpx 12rpx;
-  background: #f0fdfa;
-  border: 1rpx solid #99f6e4;
-  border-radius: 6rpx;
-}
-.intel-lab {
-  font-size: 20rpx;
-  font-weight: 600;
-  color: #0f766e;
-  flex-shrink: 0;
-}
-.intel-sum {
-  flex: 1;
-  min-width: 0;
-  font-size: 20rpx;
-  color: #334155;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.intel-go {
-  font-size: 20rpx;
-  color: #0f766e;
-  flex-shrink: 0;
-}
-
 .r-win { color: #dc2626; }
 .r-draw { color: #d97706; }
 .r-loss { color: #059669; }
@@ -2116,6 +2034,27 @@ onShow(() => {
   &.cal-has:not(.cal-selected) { color: #0f766e; font-weight: 600; }
   &.cal-selected { background: #0d9488; color: #fff; font-weight: 600; }
 }
+
+/* ===== SVG 图标(mask,颜色跟随 currentColor) ===== */
+.ico {
+  display: inline-block; flex-shrink: 0;
+  width: 28rpx; height: 28rpx;
+  background-color: currentColor;
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
+}
+.ico-refresh { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 1 1-3-6.7'/%3E%3Cpath d='M21 3v6h-6'/%3E%3C/svg%3E"); }
+.ico-ticket { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z'/%3E%3Cpath d='M13 5v2M13 11v2M13 17v2'/%3E%3C/svg%3E"); }
+.ico-live { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Cpath d='M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2'/%3E%3C/svg%3E"); }
+.ico-done { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8 12.5 3 3 5-6'/%3E%3C/svg%3E"); }
+.ico-trend { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 7l-8.5 8.5-5-5L2 17'/%3E%3Cpath d='M16 7h6v6'/%3E%3C/svg%3E"); }
+.refresh-btn .ico { color: rgba(255,255,255,0.9); width: 28rpx; height: 28rpx; }
+.refresh-btn.spinning .ico { animation: refresh-spin 0.7s linear infinite; }
+.sim-toggle { display: inline-flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; padding: 0; box-sizing: border-box; }
+.sim-toggle .ico { width: 30rpx; height: 30rpx; }
+.status-tab { display: inline-flex; align-items: center; gap: 8rpx; }
+.status-tab .ico { width: 24rpx; height: 24rpx; }
+.predict-icon .ico { width: 30rpx; height: 30rpx; color: #fff; }
 
 @keyframes refresh-spin {
   to { transform: rotate(360deg); }
