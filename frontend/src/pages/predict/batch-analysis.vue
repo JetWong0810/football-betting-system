@@ -15,6 +15,9 @@
           >
             <view class="ico ico-refresh"></view>
           </view>
+          <view class="art-btn" @tap="goArticles">
+            <view class="ico ico-doc"></view>
+          </view>
           <view
             class="sim-toggle"
             :class="{ on: simBet.simMode }"
@@ -175,6 +178,7 @@
             <text v-if="it.isSingle" class="single-tag">单关</text>
             <text v-if="it.beidanDeep" class="beidan-tag">北单1.5</text>
             <text v-if="it.beidanFlip" class="beidan-flip-tag">北单反向</text>
+            <text v-if="articleCount(it)" class="wx-tag" @tap.stop="openArticles(it)">文章 {{ articleCount(it) }}</text>
             <text v-if="recRank(it)" class="rec-tag" :class="'rec-' + recRank(it)">稳{{ recRank(it) }}</text>
             <view class="dir-wrap">
               <text class="dir" :class="[it.f6?.direction || 'neutral', refTier(it.f6)]">{{ dirLabel(it.f6?.direction) }}</text>
@@ -372,6 +376,7 @@ import { ref, computed, reactive } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { request } from '@/utils/http'
 import { requireAuth, isLoggedIn } from '@/utils/auth'
+import { getMatchCounts } from '@/utils/wxArticles'
 import { useSimBetStore } from '@/stores/simBetStore'
 import { lowKeyFromSpf, upperSideForHc } from '@/utils/simBet'
 import { calcSimilarStats, filterSimilarWithAh } from '@/utils/similarStats'
@@ -387,6 +392,24 @@ const status = ref('not_started')
 const loading = ref(true)
 const refreshing = ref(false)
 const items = ref([])
+const articleCounts = ref({})
+const articleCount = (it) => articleCounts.value[it.matchId] || 0
+async function loadArticleCounts(list) {
+  articleCounts.value = {}
+  if (!isLoggedIn() || !list?.length) return
+  try {
+    const res = await getMatchCounts(list.map((x) => x.matchId))
+    articleCounts.value = res.counts || {}
+  } catch (e) { /* 角标是锦上添花,失败不打扰 */ }
+}
+function goArticles() {
+  if (!requireAuth()) return
+  uni.navigateTo({ url: '/pages/articles/list' })
+}
+function openArticles(it) {
+  if (cardTapBlocked()) return
+  uni.navigateTo({ url: `/pages/articles/list?matchId=${encodeURIComponent(it.matchId)}` })
+}
 const summary = ref({ total: 0, upper: 0, lower: 0, neutral: 0 })
 const saleDates = ref([])
 /** 翻页用: 在售∪已结束售卖日, 避免「在售」稀疏日期导致跨大半个月 */
@@ -1497,6 +1520,7 @@ async function loadBatch(opts = {}) {
       }
     }
     items.value = list
+    loadArticleCounts(list)
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
     if (status.value === 'finished') applySimSettlement()
     await loadNotesForItems(list)
@@ -1515,6 +1539,7 @@ async function refreshBatch() {
     const data = await fetchBatch(status.value)
     const list = data?.items || []
     items.value = list
+    loadArticleCounts(list)
     summary.value = data?.summary || { total: 0, upper: 0, lower: 0, neutral: 0 }
     if (status.value === 'finished') applySimSettlement()
     await loadNotesForItems(list)
@@ -2069,6 +2094,7 @@ onShow(() => {
 .ico-ticket { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z'/%3E%3Cpath d='M13 5v2M13 11v2M13 17v2'/%3E%3C/svg%3E"); }
 .ico-live { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Cpath d='M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2'/%3E%3C/svg%3E"); }
 .ico-done { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8 12.5 3 3 5-6'/%3E%3C/svg%3E"); }
+.ico-doc { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z'/%3E%3Cpath d='M14 3v5h5M9 13h6M9 17h6'/%3E%3C/svg%3E"); }
 .ico-chat { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-5.4A8 8 0 1 1 21 12Z'/%3E%3Cpath d='M8.5 11h7M8.5 14.5h4'/%3E%3C/svg%3E"); }
 .ico-trend { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 7l-8.5 8.5-5-5L2 17'/%3E%3Cpath d='M16 7h6v6'/%3E%3C/svg%3E"); }
 .refresh-btn .ico { color: rgba(255,255,255,0.9); width: 28rpx; height: 28rpx; }
@@ -2078,6 +2104,9 @@ onShow(() => {
 .status-tab { display: inline-flex; align-items: center; gap: 8rpx; }
 .status-tab .ico { width: 24rpx; height: 24rpx; }
 .predict-icon .ico { width: 30rpx; height: 30rpx; color: #fff; }
+.art-btn { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; border-radius: 6rpx; border: 1rpx solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.9); flex-shrink: 0; }
+.art-btn .ico { width: 28rpx; height: 28rpx; }
+.wx-tag { font-size: 19rpx; font-weight: 600; color: #7c3aed; background: #ede9fe; padding: 2rpx 10rpx; border-radius: 6rpx; }
 .chat-icon { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; margin-right: 10rpx; border-radius: 6rpx; border: 1rpx solid #99f6e4; background: #f0fdfa; color: #0f766e; flex-shrink: 0; }
 .chat-icon:active { opacity: 0.75; }
 .chat-icon .ico { width: 28rpx; height: 28rpx; }

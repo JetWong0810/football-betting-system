@@ -48,6 +48,26 @@
       }
     },
     {
+      "path": "pages/articles/list",
+      "style": {
+        "navigationBarTitleText": "公众号文章",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
+      "path": "pages/articles/detail",
+      "style": {
+        "navigationBarTitleText": "文章分析",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
       "path": "pages/worldcup/predict",
       "style": {
         "navigationBarTitleText": "世界杯预测",
