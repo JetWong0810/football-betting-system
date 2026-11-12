@@ -37,6 +37,17 @@
       }
     },
     {
+      "path": "pages/predict/match-chat",
+      "style": {
+        "navigationBarTitleText": "AI分析",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9",
+        "disableScroll": true
+      }
+    },
+    {
       "path": "pages/worldcup/predict",
       "style": {
         "navigationBarTitleText": "世界杯预测",

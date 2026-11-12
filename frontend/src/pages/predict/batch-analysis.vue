@@ -184,6 +184,9 @@
                 :class="[it.f6?.direction || 'neutral', refTier(it.f6)]"
               >{{ it.f6.refScore }}</text>
             </view>
+            <view class="chat-icon" @tap.stop="openChat(it)">
+              <view class="ico ico-chat"></view>
+            </view>
             <view class="predict-icon" @tap.stop="goPredict(it)">
               <view class="ico ico-trend"></view>
             </view>
@@ -1206,6 +1209,25 @@ function onSimilarSameEvent(payload) {
   writeSimilarAndFit(mid, payload?.matches, it?.ahHandicap, 'sameEvent', 2, !!it?.isSingle)
 }
 
+function openChat(it) {
+  if (cardTapBlocked()) return
+  if (!it?.matchId) return
+  if (!requireAuth()) return
+  const q = {
+    matchId: it.matchId,
+    home: it.homeTeam?.name || '',
+    away: it.awayTeam?.name || '',
+    league: it.league || '',
+    time: `${(it.matchDate || '').slice(5)} ${(it.matchTime || '').slice(0, 5)}`.trim(),
+    ahOpen: it.ahHandicapOpen ?? '',
+    ahClose: it.ahHandicapClose ?? '',
+    f6dir: it.f6?.direction || '',
+    f6score: it.f6?.refScore ?? '',
+  }
+  const qs = Object.keys(q).map((k) => `${k}=${encodeURIComponent(q[k])}`).join('&')
+  uni.navigateTo({ url: `/pages/predict/match-chat?${qs}` })
+}
+
 function goPredict(it) {
   if (cardTapBlocked()) return
   if (!it?.matchId) {
@@ -2047,6 +2069,7 @@ onShow(() => {
 .ico-ticket { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z'/%3E%3Cpath d='M13 5v2M13 11v2M13 17v2'/%3E%3C/svg%3E"); }
 .ico-live { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Cpath d='M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2'/%3E%3C/svg%3E"); }
 .ico-done { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8 12.5 3 3 5-6'/%3E%3C/svg%3E"); }
+.ico-chat { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-5.4A8 8 0 1 1 21 12Z'/%3E%3Cpath d='M8.5 11h7M8.5 14.5h4'/%3E%3C/svg%3E"); }
 .ico-trend { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 7l-8.5 8.5-5-5L2 17'/%3E%3Cpath d='M16 7h6v6'/%3E%3C/svg%3E"); }
 .refresh-btn .ico { color: rgba(255,255,255,0.9); width: 28rpx; height: 28rpx; }
 .refresh-btn.spinning .ico { animation: refresh-spin 0.7s linear infinite; }
@@ -2055,6 +2078,9 @@ onShow(() => {
 .status-tab { display: inline-flex; align-items: center; gap: 8rpx; }
 .status-tab .ico { width: 24rpx; height: 24rpx; }
 .predict-icon .ico { width: 30rpx; height: 30rpx; color: #fff; }
+.chat-icon { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; margin-right: 10rpx; border-radius: 6rpx; border: 1rpx solid #99f6e4; background: #f0fdfa; color: #0f766e; flex-shrink: 0; }
+.chat-icon:active { opacity: 0.75; }
+.chat-icon .ico { width: 28rpx; height: 28rpx; }
 
 @keyframes refresh-spin {
   to { transform: rotate(360deg); }

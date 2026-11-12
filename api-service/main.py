@@ -51,6 +51,9 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Football Match Odds API", version="1.0.0")
+
+from match_chat.router import router as match_chat_router  # noqa: E402
+app.include_router(match_chat_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 添加全局异常处理器，改进验证错误提示
