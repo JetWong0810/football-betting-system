@@ -47,6 +47,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       BSD_API_TOKEN: ${BSD_API_TOKEN}
       WX_CALLBACK_KEY: ${WX_CALLBACK_KEY}
+      WX_WORKER: "1"
     depends_on:
       mysql:
         condition: service_healthy

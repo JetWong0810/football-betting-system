@@ -56,6 +56,12 @@ from match_chat.router import router as match_chat_router  # noqa: E402
 app.include_router(match_chat_router)
 from wx_articles.router import router as wx_router  # noqa: E402
 app.include_router(wx_router)
+
+
+@app.on_event("startup")
+def _start_wx_worker():
+    from wx_articles.processor import start_worker
+    start_worker()   # 仅 WX_WORKER=1 时生效
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 添加全局异常处理器，改进验证错误提示
