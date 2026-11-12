@@ -40,12 +40,22 @@
             <text v-if="m.evidence && m.linkStatus !== 'manual'" class="ad-evi">依据:{{ m.evidence }}</text>
 
             <view v-if="m.picks.length" class="ad-block">
-              <text class="ad-b-t">作者推荐</text>
-              <view v-for="(p, i) in m.picks" :key="i" class="ad-pick">
-                <text class="ad-pick-t">{{ pickText(p) }}</text>
-                <text class="ad-pick-r" :class="p.result">{{ resultText(p.result) }}</text>
+              <text class="ad-b-t">作者倾向</text>
+              <view v-for="(p, i) in m.picks" :key="i" class="ad-pick" :class="{ infer: !p.explicit }">
+                <view class="ad-pick-top">
+                  <text class="ad-pick-t">{{ pickText(p) }}</text>
+                  <text class="ad-pick-r" :class="p.result">{{ resultText(p.result) }}</text>
+                </view>
+                <view class="ad-pick-tags">
+                  <text class="ad-tag" :class="p.explicit ? 'ex' : 'in'">{{ p.explicit ? '作者明说' : 'AI推测' }}</text>
+                  <text class="ad-tag st" :class="p.strength">强度 {{ STRENGTH[p.strength] || p.strength }}</text>
+                  <text v-if="p.strength === 'weak'" class="ad-tag wk">不计入命中率</text>
+                  <text v-if="p.lineSource === 'system'" class="ad-tag sys">按系统终盘亚盘 {{ p.line }} 结算</text>
+                </view>
+                <text v-if="p.reasoning" class="ad-pick-why">依据:{{ p.reasoning }}</text>
+                <text v-if="p.quote" class="ad-pick-q">原文:{{ p.quote }}</text>
               </view>
-              <text class="ad-pick-n">推荐为文章作者观点,赛后自动结算,不代表本系统结论。</text>
+              <text class="ad-pick-n">微信不允许公众号明说胜负和让球结果,多数倾向由 AI 根据文意推测,可能与作者本意不符。赛后自动结算,不代表本系统结论。</text>
             </view>
 
             <view v-if="m.claims.length" class="ad-block">
@@ -90,7 +100,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { requireAuth } from '@/utils/auth'
-import { getArticle, unlinkMatch, reprocess, pickText, VERIFY, impactText } from '@/utils/wxArticles'
+import { getArticle, unlinkMatch, reprocess, pickText, VERIFY, impactText, RESULT, STRENGTH } from '@/utils/wxArticles'
 
 const V = VERIFY
 const a = ref(null)
@@ -99,7 +109,7 @@ const loading = ref(true)
 const errText = ref('')
 
 const impact = impactText
-const resultText = (r) => ({ pending: '待结算', hit: '命中', miss: '未中', push: '走水', void: '作废' }[r] || r)
+const resultText = (r) => (RESULT[r] ? RESULT[r].text : r)
 const cnt = (m, k) => m.claims.filter((c) => c.verify === k).length
 
 async function load() {
@@ -202,9 +212,14 @@ onLoad((q) => {
 .ad-block { margin-top: 18rpx; padding-top: 14rpx; border-top: 1rpx solid #f1f5f9; display: flex; flex-direction: column; gap: 10rpx; }
 .ad-b-t { font-size: 22rpx; font-weight: 700; color: #475569; letter-spacing: 1rpx; }
 .ad-b-s { font-size: 20rpx; font-weight: 400; color: #94a3b8; margin-left: 8rpx; letter-spacing: 0; }
-.ad-pick { display: flex; align-items: center; justify-content: space-between; background: #f5f3ff; border-radius: 6rpx; padding: 12rpx 16rpx; }
+.ad-pick { display: flex; flex-direction: column; gap: 8rpx; background: #f5f3ff; border-radius: 6rpx; padding: 14rpx 16rpx; &.infer { background: #faf9ff; border: 1rpx dashed #c4b5fd; } }
+.ad-pick-top { display: flex; align-items: center; justify-content: space-between; }
 .ad-pick-t { font-size: 25rpx; font-weight: 600; color: #5b21b6; }
-.ad-pick-r { font-size: 21rpx; color: #64748b; &.hit { color: #dc2626; font-weight: 700; } &.miss { color: #059669; font-weight: 700; } }
+.ad-pick-r { font-size: 21rpx; color: #64748b; &.hit, &.hhit { color: #dc2626; font-weight: 700; } &.miss, &.hmiss { color: #059669; font-weight: 700; } }
+.ad-pick-tags { display: flex; flex-wrap: wrap; gap: 8rpx; }
+.ad-tag { font-size: 19rpx; padding: 2rpx 10rpx; border-radius: 6rpx; color: #64748b; background: #e2e8f0; &.ex { color: #047857; background: #d1fae5; } &.in { color: #7c3aed; background: #ede9fe; } &.st.strong { color: #b91c1c; background: #fee2e2; } &.st.medium { color: #b45309; background: #fef3c7; } &.wk { color: #94a3b8; background: #f1f5f9; } &.sys { color: #1d4ed8; background: #dbeafe; } }
+.ad-pick-why { font-size: 21rpx; color: #6d28d9; line-height: 1.6; }
+.ad-pick-q { font-size: 20rpx; color: #94a3b8; line-height: 1.6; }
 .ad-pick-n { font-size: 19rpx; color: #94a3b8; line-height: 1.6; }
 .ad-claim { background: #f8fafc; border-radius: 6rpx; padding: 14rpx 16rpx; display: flex; flex-direction: column; gap: 8rpx; }
 .ad-c-top { display: flex; align-items: flex-start; gap: 10rpx; }

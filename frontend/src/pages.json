@@ -58,6 +58,16 @@
       }
     },
     {
+      "path": "pages/articles/stats",
+      "style": {
+        "navigationBarTitleText": "公众号榜",
+        "navigationBarBackgroundColor": "#0d9488",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "#e8f8f5",
+        "backgroundColorBottom": "#f0fdf9"
+      }
+    },
+    {
       "path": "pages/articles/detail",
       "style": {
         "navigationBarTitleText": "文章分析",

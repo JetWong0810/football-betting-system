@@ -106,7 +106,7 @@ def _f6_stats(f6: Dict[str, Any]) -> Dict[str, Any]:
             "ci": [round(lo_ci * 100), round(hi_ci * 100)]}
 
 
-def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]]) -> str:
+def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Optional[List[Dict[str, Any]]] = None) -> str:
     L: List[str] = []
     ht, at = it["homeTeam"]["name"], it["awayTeam"]["name"]
     L.append("【比赛】")
@@ -160,6 +160,30 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]]) -> str:
             L.append(f"系统小结: {pred['analysis']}")
     else:
         L.append("该场尚无已存的七因子预测。")
+
+    if arts:
+        MK = {"spf": "胜平负", "rqspf": "让球胜平负", "ah": "亚盘", "ou": "大小球", "score": "比分", "dc": "双选", "other": "其他"}
+        SEL = {"home": "主胜", "draw": "平", "away": "客胜", "home_draw": "主胜或平", "away_draw": "客胜或平",
+               "over": "大", "under": "小"}
+        VS = {"confirmed": "已证实", "contradicted": "被反驳", "unverified": "未验证"}
+        L.append("\n【公众号文章】(用户订阅的公众号;内容是作者观点和二手信息,不是已核实事实;只能辅助参考)")
+        for a in arts:
+            tag = "赛前" if a["timing"] == "preview" else "赛后复盘"
+            link = "(关联存疑)" if a["linkStatus"] == "ambiguous" else ""
+            rec = (f"该号历史推荐命中率 {a['rate']}% (已结算{a['decided']}条" + ("" if a["enough"] else ",样本不足,不具参考性") + ")"
+                   if a.get("rate") is not None else "该号暂无已结算推荐,命中率未知")
+            L.append(f"- [{a['account']}] {a['time']} {tag}{link}《{a['title']}》; {rec}")
+            if a.get("summary"):
+                L.append(f"  总结: {a['summary']}")
+            ST = {"strong": "强", "medium": "中", "weak": "弱"}
+            for p in a["picks"]:
+                kind = "作者明确表达" if p["explicit"] else "AI据文意推测(并非作者原话)"
+                L.append(f"  作者倾向[{kind},强度{ST.get(p['strength'], p['strength'])}]: "
+                         f"{MK.get(p['market'], p['market'])}{(' ' + str(p['line'])) if p['line'] else ''} "
+                         f"{SEL.get(p['selection'], p['selection'])}; 依据: {p.get('reasoning') or '无'} (结算:{p['result']})")
+            for c in a["claims"]:
+                note = f" | {c['verify_note']}" if c.get("verify_note") else ""
+                L.append(f"  事实声明[{VS.get(c['verify_status'], c['verify_status'])}]: {c['text']}{note}")
     return "\n".join(L)
 
 
@@ -169,7 +193,12 @@ def build_context(match_id: str) -> Dict[str, Any]:
     if not it:
         raise MatchNotFound(match_id)
     pred = _load_prediction(match_id)
-    text = render_text(it, pred)
+    try:
+        from wx_articles.query import match_articles_context
+        arts = match_articles_context(match_id)
+    except Exception:  # 文章表不可用不影响聊天
+        arts = []
+    text = render_text(it, pred, arts)
     return {"item": it, "prediction": pred, "text": text,
             "hash": hashlib.sha1(text.encode()).hexdigest()[:16],
             "home": it["homeTeam"]["name"], "away": it["awayTeam"]["name"]}

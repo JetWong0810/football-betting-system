@@ -106,3 +106,8 @@ def reprocess(article_id: int, user_id: int = Depends(require_auth)):
     if r == "limit":
         raise HTTPException(status_code=429, detail="已达重新分析次数上限")
     return {"ok": True}
+
+
+@router.get("/stats")
+def stats(user_id: int = Depends(require_auth)):
+    return {"items": q.account_stats(), "minSample": q.MIN_SAMPLE}

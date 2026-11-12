@@ -105,12 +105,14 @@ def article_detail(article_id: int) -> Optional[Dict[str, Any]]:
                     "type": r["claim_type"], "side": r["side"], "subject": r["subject"], "text": r["text"],
                     "quote": r["quote"], "verify": r["verify_status"], "note": r["verify_note"],
                     "impactDir": r["impact_dir"], "impactLevel": r["impact_level"]})
-        cur.execute("SELECT match_id, market, line, selection, quote, result FROM wx_article_pick WHERE article_id=%s",
-                    (article_id,))
+        cur.execute("SELECT match_id, market, basis, line, line_source, selection, explicit, strength, reasoning, quote, result "
+                    "FROM wx_article_pick WHERE article_id=%s", (article_id,))
         for r in cur.fetchall() or []:
             if r["match_id"] in idx:
-                idx[r["match_id"]]["picks"].append({"market": r["market"], "line": r["line"],
-                                                    "selection": r["selection"], "quote": r["quote"], "result": r["result"]})
+                idx[r["match_id"]]["picks"].append({
+                    "market": r["market"], "basis": r["basis"], "line": r["line"], "lineSource": r["line_source"],
+                    "selection": r["selection"], "explicit": bool(r["explicit"]), "strength": r["strength"],
+                    "reasoning": r["reasoning"], "quote": r["quote"], "result": r["result"]})
     extra = {}
     if a.get("analysis_json"):
         try:
@@ -196,3 +198,121 @@ def reprocess(article_id: int) -> str:
             return "limit"
         cur.execute("UPDATE wx_article SET status='pending' WHERE id=%s", (article_id,))
         return "ok"
+
+
+# ---------------------------------------------------------------- 公众号命中率
+MIN_SAMPLE = 30
+_HIT_SIDE = ("hit", "hhit")
+_DECIDED = ("hit", "hhit", "hmiss", "miss")
+
+
+def _rate(rows: Dict[str, int]):
+    from match_chat.context import _wilson
+    decided = sum(rows.get(k, 0) for k in _DECIDED)
+    hit = sum(rows.get(k, 0) for k in _HIT_SIDE)
+    if not decided:
+        return None, None, 0
+    lo, hi = _wilson(hit, decided)
+    return round(hit * 100 / decided, 1), [round(lo * 100), round(hi * 100)], decided
+
+
+def account_stats() -> List[Dict[str, Any]]:
+    from .processor import CST as _  # noqa: F401  (保证模块可用)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT wxid, MAX(account_name) name, COUNT(*) n FROM wx_article GROUP BY wxid")
+        accts = {r["wxid"]: {"wxid": r["wxid"], "name": r["name"], "articles": r["n"]} for r in cur.fetchall() or []}
+        # 计入口径: 仅 strong/medium;weak 单列。按 (明说/推测) 分口径。
+        cur.execute("SELECT wxid, market, explicit, (strength='weak') weak, result, COUNT(*) n FROM wx_article_pick "
+                    "GROUP BY wxid, market, explicit, (strength='weak'), result")
+        pk: Dict[str, Dict[str, Dict[str, int]]] = {}        # wxid -> market -> result -> n (计入)
+        pk_ex: Dict[str, Dict[int, Dict[str, int]]] = {}     # wxid -> explicit -> result -> n (计入)
+        weak_n: Dict[str, int] = {}
+        for r in cur.fetchall() or []:
+            if r["weak"]:
+                weak_n[r["wxid"]] = weak_n.get(r["wxid"], 0) + r["n"]
+                continue
+            d = pk.setdefault(r["wxid"], {}).setdefault(r["market"], {})
+            d[r["result"]] = d.get(r["result"], 0) + r["n"]
+            e = pk_ex.setdefault(r["wxid"], {}).setdefault(int(r["explicit"]), {})
+            e[r["result"]] = e.get(r["result"], 0) + r["n"]
+        cur.execute("SELECT a.wxid, c.verify_status, COUNT(*) n FROM wx_article_claim c "
+                    "JOIN wx_article a ON a.id=c.article_id GROUP BY a.wxid, c.verify_status")
+        cl: Dict[str, Dict[str, int]] = {}
+        for r in cur.fetchall() or []:
+            cl.setdefault(r["wxid"], {})[r["verify_status"]] = r["n"]
+        cur.execute(
+            f"SELECT p.wxid, p.market, p.basis, p.line, p.selection, p.explicit, p.strength, p.result, a.id article_id, a.title, {_MATCH_COLS} "
+            "FROM wx_article_pick p JOIN wx_article a ON a.id=p.article_id JOIN matches m ON m.match_id=p.match_id "
+            "ORDER BY m.match_timestamp DESC, p.id DESC LIMIT 400")
+        recent: Dict[str, List[Dict[str, Any]]] = {}
+        for r in cur.fetchall() or []:
+            lst = recent.setdefault(r["wxid"], [])
+            if len(lst) < 10:
+                b = _match_brief(r)
+                lst.append({"articleId": r["article_id"], "title": r["title"], "market": r["market"], "line": r["line"],
+                            "selection": r["selection"], "explicit": bool(r["explicit"]), "strength": r["strength"],
+                            "result": r["result"], **b})
+    out = []
+    for wxid, a in accts.items():
+        by_mk = pk.get(wxid, {})
+        total: Dict[str, int] = {}
+        for mk in by_mk.values():
+            for k, v in mk.items():
+                total[k] = total.get(k, 0) + v
+        rate, ci, decided = _rate(total)
+        markets = []
+        for mk, rows in by_mk.items():
+            r2, _ci, d2 = _rate(rows)
+            markets.append({"market": mk, "decided": d2, "rate": r2})
+        markets.sort(key=lambda x: -x["decided"])
+        split = {}
+        for ex, key in ((1, "explicit"), (0, "inferred")):
+            rr, cc, dd = _rate(pk_ex.get(wxid, {}).get(ex, {}))
+            split[key] = {"decided": dd, "rate": rr, "ci": cc}
+        out.append({
+            **a, "picks": {"total": sum(total.values()), "pending": total.get("pending", 0), "void": total.get("void", 0),
+                           "push": total.get("push", 0), "decided": decided,
+                           "hit": total.get("hit", 0), "hhit": total.get("hhit", 0),
+                           "hmiss": total.get("hmiss", 0), "miss": total.get("miss", 0)},
+            "rate": rate, "ci": ci, "enough": decided >= MIN_SAMPLE, "minSample": MIN_SAMPLE,
+            "byMarket": markets, "split": split, "weakExcluded": weak_n.get(wxid, 0), "claims": {k: cl.get(wxid, {}).get(k, 0) for k in ("confirmed", "contradicted", "unverified")},
+            "recent": recent.get(wxid, []),
+        })
+    out.sort(key=lambda x: (-x["picks"]["decided"], -x["articles"]))
+    return out
+
+
+def match_articles_context(match_id: str) -> List[Dict[str, Any]]:
+    """供 AI 聊天:本场相关文章(观点/推荐/事实及核实状态)+ 账号历史命中率。"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT a.id, a.wxid, a.account_name, a.title, a.publish_time, a.summary, x.timing, x.status "
+            "FROM wx_article_match x JOIN wx_article a ON a.id=x.article_id WHERE x.match_id=%s "
+            "ORDER BY a.publish_time DESC LIMIT 6", (match_id,))
+        arts = list(cur.fetchall() or [])
+        if not arts:
+            return []
+        ids = [a["id"] for a in arts]
+        ph = ",".join(["%s"] * len(ids))
+        cur.execute(f"SELECT article_id, market, line, selection, explicit, strength, reasoning, result FROM wx_article_pick "
+                    f"WHERE match_id=%s AND article_id IN ({ph})", (match_id, *ids))
+        picks: Dict[int, List[Dict[str, Any]]] = {}
+        for r in cur.fetchall() or []:
+            picks.setdefault(r["article_id"], []).append(r)
+        cur.execute(f"SELECT article_id, claim_type, side, text, verify_status, verify_note FROM wx_article_claim "
+                    f"WHERE match_id=%s AND article_id IN ({ph}) ORDER BY id", (match_id, *ids))
+        claims: Dict[int, List[Dict[str, Any]]] = {}
+        for r in cur.fetchall() or []:
+            claims.setdefault(r["article_id"], []).append(r)
+    stats = {s["wxid"]: s for s in account_stats()}
+    out = []
+    for a in arts:
+        st = stats.get(a["wxid"]) or {}
+        out.append({"account": a["account_name"], "time": _fmt(a["publish_time"]), "title": a["title"],
+                    "summary": a["summary"], "timing": a["timing"], "linkStatus": a["status"],
+                    "picks": picks.get(a["id"], []), "claims": claims.get(a["id"], []),
+                    "decided": (st.get("picks") or {}).get("decided", 0), "rate": st.get("rate"),
+                    "enough": st.get("enough", False)})
+    return out

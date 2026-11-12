@@ -59,3 +59,11 @@ CREATE TABLE IF NOT EXISTS wx_article_pick (
     INDEX idx_wx (wxid, result),
     INDEX idx_match (match_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 第三批(倾向推测): 给自建的 wx_article_pick 加列。
+-- ALTER TABLE wx_article_pick
+--     ADD COLUMN basis VARCHAR(10) NOT NULL DEFAULT 'result' AFTER market,       -- result胜负 | handicap让球 | goals大小球 | score比分
+--     ADD COLUMN explicit TINYINT NOT NULL DEFAULT 1 AFTER selection,            -- 1=作者明说 0=AI据文意推测
+--     ADD COLUMN strength VARCHAR(8) NOT NULL DEFAULT 'medium' AFTER explicit,   -- strong|medium|weak(weak不计入命中率)
+--     ADD COLUMN reasoning VARCHAR(255) NULL AFTER strength,                     -- 推断依据(≤40字)
+--     ADD COLUMN line_source VARCHAR(8) NULL AFTER line;                         -- author | system

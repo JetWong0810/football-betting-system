@@ -3,6 +3,7 @@
     <view class="al-top">
       <view class="al-tabs">
         <text v-for="t in tabs" :key="t.k" class="al-tab" :class="{ on: link === t.k }" @tap="setLink(t.k)">{{ t.t }}</text>
+        <text class="al-rank" @tap="goStats">公众号榜</text>
       </view>
       <scroll-view v-if="accounts.length > 1" class="al-accs" scroll-x>
         <view class="al-accs-row">
@@ -146,6 +147,7 @@ function loadMore() {
 function setLink(k) { if (link.value !== k) { link.value = k; load() } }
 function setAccount(id) { if (wxid.value !== id) { wxid.value = id; load() } }
 function clearMatch() { matchId.value = ''; load() }
+function goStats() { uni.navigateTo({ url: '/pages/articles/stats' }) }
 function openDetail(a) { uni.navigateTo({ url: `/pages/articles/detail?id=${a.id}` }) }
 
 async function openLink(a) {
@@ -207,6 +209,7 @@ onShow(() => {
   background: #f1f5f9; border: 1rpx solid transparent;
   &.on { color: #0f766e; background: #f0fdfa; border-color: #5eead4; font-weight: 600; }
 }
+.al-rank { margin-left: auto; font-size: 23rpx; color: #7c3aed; background: #f5f3ff; border: 1rpx solid #ddd6fe; padding: 6rpx 20rpx; border-radius: 6rpx; font-weight: 600; }
 .al-accs { white-space: nowrap; margin-top: 12rpx; }
 .al-accs-row { display: inline-flex; gap: 10rpx; }
 .al-acc {

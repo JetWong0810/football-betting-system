@@ -71,11 +71,24 @@ EXTRACT_SYSTEM = """你是体育公众号文章的结构化抽取器,只依据�
    - timing: preview=赛前分析/预测; review=在复盘已完赛的比赛(“昨天…最终…”“已经结束”)。
    - evidence: 文中能证明在谈这场比赛的原句(原样摘录,≤60字)。
    - view: 作者对本场的核心观点(≤60字),没有则空。
-   - picks: 作者对本场【明确的赛前推荐】。只收有明确倾向的推荐;分析中的泛泛判断、复盘里的过去推荐一律不收。
-       market: spf=胜平负(主胜/平/客胜); rqspf=竞彩让球胜平负; ah=亚盘; ou=大小球; score=比分; dc=双选/不败(如“主场不败”); other。
-       selection: 取 home|draw|away|home_draw|away_draw|over|under,比分或其他填原文。
-       line: 原文给出的盘口线(如 -0.5、2.5),没有则空。不要自己推断盘口。
-       quote: 原文原样片段(≤60字)。
+   - leans: 作者对本场的【倾向】。注意:微信平台不允许公众号明说胜负和让球结果,所以多数文章不会直接写“推荐X”,
+     你需要根据文意、语气、论证方向推断作者更看好哪一方,这是正常且必须做的。每条包含:
+       basis: 倾向针对什么 —— result=谁胜/平/不败(只谈胜负); handicap=让球/盘口/上盘下盘; goals=大小球/进球多少; score=比分。
+       selection: result 填 home|away|draw|home_draw(主不败/防平)|away_draw(客不败/防平);
+                  handicap 填 home|away(看好主队/客队在让球盘口下走好,即“上盘/下盘”要换算成主/客);
+                  goals 填 over|under; score 统一写成“主队进球-客队进球”(如 3-2,按候选清单里的主客队顺序,作者倒着写时要换过来)。
+       market: 仅当 basis=handicap 时填 ah(亚盘/盘口)或 rqspf(竞彩让球整数);其他留空。
+       line: 仅当作者明确给出了盘口线/大小球线时填数字(如 -0.5、2.5),否则留空,严禁自己推断或补全。
+       explicit: true=作者直接表达了看好/选择/推荐(如“看好”“选择”“期待X不败”“防平”);false=你根据论证方向推断出来的。
+       strength: strong=表达坚定且论证一致; medium=倾向较明显; weak=只是略有偏向或有模棱两可之处。
+       quotes: 1到2条原文原样片段(各≤60字),必须是支撑这个倾向的最关键的句子。
+       reasoning: 一句话(≤40字)说明为什么得出这个倾向,推断时尤其要写清楚依据。
+     推断规则:
+       · 重点看结论段、结尾期待、反复强调的论点;作者花更多笔墨论证优势/利好的一方,通常是其倾向。
+       · “表面上X稳赢,但可能是陷阱/利用表面战意欺骗球迷/要小心X”这类反向暗示,倾向是反方(非X),不是X。
+       · 只谈“看点”“值得关注”而没有论证偏向,或正反论据均衡、作者明显两边犹豫 => 不给倾向(返回空数组)。
+       · 同一场同一 basis 如果文中前后矛盾、无法判断 => 不给。宁缺毋滥,不要为了凑数编造。
+       · 复盘已完赛比赛时的过去判断一律不收。每场每个 basis 最多 1 条。
    - claims: 作者陈述的、可被核实的【事实】(伤停、停赛、首发/阵容、轮换、战意、赛程、主帅变动、赔率/盘口变化)。不收纯观点和预测。
        type: injury|suspension|lineup|rotation|motivation|schedule|manager|odds|other
        side: home|away|both(以候选清单里的主客队为准)
@@ -84,7 +97,7 @@ EXTRACT_SYSTEM = """你是体育公众号文章的结构化抽取器,只依据�
 
 规则:quote/evidence 必须逐字出现在正文中;字符串内不要出现英文双引号;没有的数组给 []。
 只输出 JSON:
-{"summary":"","matches":[{"match_id":"","timing":"preview","evidence":"","view":"","picks":[],"claims":[]}],"other_matches":[]}"""
+{"summary":"","matches":[{"match_id":"","timing":"preview","evidence":"","view":"","leans":[],"claims":[]}],"other_matches":[]}"""
 
 
 def _client():
@@ -109,9 +122,8 @@ def _parse_json(txt: str) -> Dict[str, Any]:
 def llm_extract(title: str, text: str, publish: datetime, cands: List[Dict[str, Any]]) -> Dict[str, Any]:
     lines = []
     for c in cands:
-        fin = f" 已完赛{c['home_score']}-{c['away_score']}" if c.get("home_score") is not None else ""
         lines.append(f"- match_id={c['match_id']} | {c['match_code']} | {c['league_name']} | "
-                     f"主{c['home_team_name']} vs 客{c['away_team_name']} | 开赛{c['kickoff']:%m-%d %H:%M}{fin}")
+                     f"主{c['home_team_name']} vs 客{c['away_team_name']} | 开赛{c['kickoff']:%m-%d %H:%M}")
     user = (f"发布时间(北京时间): {publish:%Y-%m-%d %H:%M}\n候选比赛:\n" + ("\n".join(lines) or "(无)") +
             f"\n\n标题: {title}\n正文:\n{text[:12000]}")
     last: Optional[Exception] = None
@@ -167,14 +179,48 @@ def verify_extraction(raw: Dict[str, Any], text: str, publish: datetime,
             claims.append({"type": t, "side": s, "subject": str(cl.get("subject") or "")[:60],
                            "text": str(cl["text"])[:250], "quote": q[:250]})
         if timing == "preview" and status == "linked":
-            for pk in m.get("picks") or []:
-                q = (pk.get("quote") or "").strip()
-                mk = pk.get("market") if pk.get("market") in MARKETS else "other"
-                if not q or _norm(q) not in hay or not pk.get("selection"):
-                    dropped.append({"why": "pick引用不在正文", "pick": pk})
+            seen_basis = set()
+            for ln in m.get("leans") or []:
+                basis = ln.get("basis")
+                sel = str(ln.get("selection") or "").strip()
+                if basis not in ("result", "handicap", "goals", "score") or not sel:
                     continue
-                picks.append({"market": mk, "line": (str(pk["line"])[:16] if pk.get("line") not in (None, "") else None),
-                              "selection": str(pk["selection"])[:32], "quote": q[:250]})
+                if basis in seen_basis:
+                    continue
+                qs = [q.strip() for q in (ln.get("quotes") or ([ln["quote"]] if ln.get("quote") else []))
+                      if isinstance(q, str) and q.strip()]
+                good = [q for q in qs if _norm(q) in hay]
+                if not good:
+                    dropped.append({"why": "倾向引用不在正文", "lean": ln})
+                    continue
+                low = sel.lower()
+                if basis == "result":
+                    if low in ("home", "away", "draw"):
+                        market = "spf"
+                    elif low in ("home_draw", "away_draw"):
+                        market = "dc"
+                    else:
+                        continue
+                elif basis == "handicap":
+                    if low not in ("home", "away"):
+                        continue
+                    market = ln.get("market") if ln.get("market") in ("ah", "rqspf") else "ah"
+                elif basis == "goals":
+                    if low not in ("over", "under"):
+                        continue
+                    market = "ou"
+                else:
+                    market = "score"
+                    low = sel
+                line = ln.get("line")
+                line = str(line)[:16] if line not in (None, "") else None
+                strength = ln.get("strength") if ln.get("strength") in ("strong", "medium", "weak") else "weak"
+                explicit = 1 if ln.get("explicit") is True else 0
+                seen_basis.add(basis)
+                picks.append({"market": market, "basis": basis, "line": line,
+                              "line_source": "author" if line else None, "selection": low if basis != "score" else sel[:32],
+                              "explicit": explicit, "strength": strength,
+                              "reasoning": str(ln.get("reasoning") or "")[:200], "quote": " | ".join(good)[:250]})
         out_matches.append({"match_id": mid, "status": status, "confidence": conf, "timing": timing,
                             "evidence": ev[:250], "view": str(m.get("view") or "")[:200],
                             "claims": claims, "picks": picks,
@@ -281,9 +327,11 @@ def save_result(art: Dict[str, Any], res: Dict[str, Any]) -> None:
                      c.get("impact_dir"), c.get("impact_level")))
             for p in m["picks"]:      # 观点入库后不再修改(仅赛后更新 result);重复处理不覆盖
                 cur.execute(
-                    "INSERT IGNORE INTO wx_article_pick (article_id, wxid, match_id, market, line, selection, quote, pre_match) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,1)",
-                    (aid, art.get("wxid") or "", m["match_id"], p["market"], p["line"], p["selection"], p["quote"]))
+                    "INSERT IGNORE INTO wx_article_pick (article_id, wxid, match_id, market, basis, line, line_source, "
+                    "selection, explicit, strength, reasoning, quote, pre_match) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+                    (aid, art.get("wxid") or "", m["match_id"], p["market"], p["basis"], p["line"], p["line_source"],
+                     p["selection"], p["explicit"], p["strength"], p["reasoning"], p["quote"]))
         if art.get("wxid"):
             cur.execute("INSERT INTO wx_account (wxid, name) VALUES (%s,%s) ON DUPLICATE KEY UPDATE name=VALUES(name)",
                         (art["wxid"], art.get("account_name") or ""))
@@ -331,8 +379,13 @@ def process_next() -> bool:
 
 
 def _loop() -> None:
+    from .settle import settle_pending
+    last_settle = 0.0
     while True:
         try:
+            if time.time() - last_settle > 600:        # 每10分钟结算一次已完赛的推荐
+                last_settle = time.time()
+                settle_pending()
             if not process_next():
                 time.sleep(20)
         except Exception:  # noqa: BLE001
