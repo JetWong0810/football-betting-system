@@ -184,8 +184,8 @@ onLoad((q) => {
 </script>
 
 <style lang="scss" scoped>
-.ad-page { height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px)); background: #f0fdf9; }
-.ad-scroll { height: 100%; }
+.ad-page { display: flex; flex-direction: column; height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px)); background: #f0fdf9; }
+.ad-scroll { flex: 1; min-height: 0; height: 0; }
 .ad-inner { padding: 20rpx 24rpx 60rpx; }
 .ad-state { text-align: center; color: #94a3b8; font-size: 24rpx; padding: 80rpx 0; }
 .ad-head { background: #fff; border: 1rpx solid #e2e8f0; border-radius: 6rpx; padding: 22rpx; box-shadow: 0 2rpx 10rpx rgba(15, 23, 42, 0.04); }

@@ -111,8 +111,8 @@ onLoad(async () => {
 </script>
 
 <style lang="scss" scoped>
-.st-page { height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px)); background: #f0fdf9; }
-.st-scroll { height: 100%; }
+.st-page { display: flex; flex-direction: column; height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px)); background: #f0fdf9; }
+.st-scroll { flex: 1; min-height: 0; height: 0; }
 .st-inner { padding: 20rpx 24rpx 60rpx; }
 .st-state { text-align: center; color: #94a3b8; font-size: 24rpx; padding: 70rpx 0; }
 .st-intro { background: #fffbeb; border-radius: 6rpx; padding: 14rpx 18rpx; margin-bottom: 18rpx; }
