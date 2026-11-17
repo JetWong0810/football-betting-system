@@ -83,7 +83,7 @@ def article_detail(article_id: int) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id, wxid, account_name, title, url, publish_time, status, summary, last_error, attempts, "
-                    "analysis_json FROM wx_article WHERE id=%s", (article_id,))
+                    "analysis_json, content FROM wx_article WHERE id=%s", (article_id,))
         a = cur.fetchone()
         if not a:
             return None
@@ -123,6 +123,7 @@ def article_detail(article_id: int) -> Optional[Dict[str, Any]]:
             "publishTime": _fmt(a["publish_time"]), "status": a["status"], "summary": a["summary"],
             "error": a["last_error"] if a["status"] == "failed" else None, "attempts": a["attempts"],
             "matches": ms, "otherMatches": extra.get("other_matches") or [],
+            "content": a.get("content") or "",
             "canReprocess": a["status"] == "failed" or (a["status"] == "done" and not ms)}
 
 
@@ -288,7 +289,7 @@ def match_articles_context(match_id: str) -> List[Dict[str, Any]]:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT a.id, a.wxid, a.account_name, a.title, a.publish_time, a.summary, x.timing, x.status "
+            "SELECT a.id, a.wxid, a.account_name, a.title, a.publish_time, a.summary, LEFT(a.content, 2500) AS body, x.timing, x.status "
             "FROM wx_article_match x JOIN wx_article a ON a.id=x.article_id WHERE x.match_id=%s "
             "ORDER BY a.publish_time DESC LIMIT 6", (match_id,))
         arts = list(cur.fetchall() or [])
@@ -311,7 +312,7 @@ def match_articles_context(match_id: str) -> List[Dict[str, Any]]:
     for a in arts:
         st = stats.get(a["wxid"]) or {}
         out.append({"account": a["account_name"], "time": _fmt(a["publish_time"]), "title": a["title"],
-                    "summary": a["summary"], "timing": a["timing"], "linkStatus": a["status"],
+                    "summary": a["summary"], "body": a.get("body") or "", "timing": a["timing"], "linkStatus": a["status"],
                     "picks": picks.get(a["id"], []), "claims": claims.get(a["id"], []),
                     "decided": (st.get("picks") or {}).get("decided", 0), "rate": st.get("rate"),
                     "enough": st.get("enough", False)})

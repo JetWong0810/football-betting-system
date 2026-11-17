@@ -139,6 +139,69 @@ def llm_extract(title: str, text: str, publish: datetime, cands: List[Dict[str, 
     raise last  # type: ignore[misc]
 
 
+# --------------------------------------------------------------------------- 关联判断(先推理,再决定关联哪场)
+LINK_SYSTEM = """你是体育公众号文章的「比赛关联」裁判。判断这篇文章【真正在分析】候选清单里的哪几场比赛。只依据文章正文,禁止使用自身记忆。
+
+你会收到:发布时间、候选比赛清单(含 match_id、联赛、主客队、开赛时间)、标题与正文。
+
+对每一场【文中出现过相关内容】的候选比赛,先推理再下结论,给出 role:
+- main: 文章对这场对阵做了实质性分析 —— 有专门的段落/小节,围绕“这场比赛”谈两队情况、伤停、战意、走势或预测;或标题/开头点明这场。
+- mention: 只是顺带提及 —— 举例、背景、串场、赛程盘点、只谈了其中一队在别的语境下的事、或只是说“还有X对Y这场”而没有展开。
+- none: 没有谈到这场。
+
+判断要点:
+1. 必须是“这两队之间的这场比赛”。同一队可能在候选里出现多场(如友谊赛和联赛),要靠联赛、日期、语境区分;分不清就不要给 main。
+2. 一句话带过(如“比如威尔士和葡萄牙,威尔士无论如何要打附加赛”)是 mention,不是 main。
+3. 复盘已完赛比赛(“昨天…最终…”)若有实质回顾,也算 main,timing 标 review。
+4. 宁缺毋滥:拿不准就是 mention。
+5. evidence 必须是正文里的原句(≤60字,逐字摘录,不含英文双引号),最好选能证明“在分析这场”的句子。
+6. reasoning 一句话(≤50字),写出判定依据(如“有专门段落谈伤停和战意”“仅举例带过”)。
+
+只输出 JSON:
+{"judgements":[{"match_id":"","role":"main|mention","timing":"preview|review","evidence":"","reasoning":""}]}
+没有任何候选被谈到时 judgements 为 []。不要输出 none 的项。"""
+
+
+def llm_link(title: str, text: str, publish: datetime, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not cands:
+        return []
+    lines = [f"- match_id={c['match_id']} | {c['league_name']} | 主{c['home_team_name']} vs 客{c['away_team_name']} | "
+             f"开赛{c['kickoff']:%m-%d %H:%M}" for c in cands]
+    user = (f"发布时间(北京时间): {publish:%Y-%m-%d %H:%M}\n候选比赛:\n" + "\n".join(lines) +
+            f"\n\n标题: {title}\n正文:\n{text[:12000]}")
+    last: Optional[Exception] = None
+    for _ in range(3):
+        try:
+            r = _client().chat.completions.create(
+                model=MODEL, temperature=0, max_tokens=4000, response_format={"type": "json_object"},
+                messages=[{"role": "system", "content": LINK_SYSTEM}, {"role": "user", "content": user}])
+            return list(_parse_json(r.choices[0].message.content or "").get("judgements") or [])
+        except Exception as e:  # noqa: BLE001
+            last = e
+            logger.warning("wx link retry: %s", e)
+    raise last  # type: ignore[misc]
+
+
+def select_main(judgements: List[Dict[str, Any]], text: str, cands: List[Dict[str, Any]]):
+    """只保留 role=main 且证据句确在正文中的比赛;其余记为 mention(不关联)。"""
+    hay = _norm(text)
+    by_id = {str(c["match_id"]): c for c in cands}
+    main, mentions = [], []
+    for j in judgements:
+        mid = str(j.get("match_id") or "")
+        c = by_id.get(mid)
+        if not c:
+            continue
+        ev = str(j.get("evidence") or "").strip()
+        label = f"{c['home_team_name']} vs {c['away_team_name']}"
+        rec = {"match_id": mid, "label": label, "reasoning": str(j.get("reasoning") or "")[:120], "evidence": ev[:120]}
+        if j.get("role") == "main" and ev and _norm(ev) in hay:
+            main.append(c)
+        else:
+            mentions.append(rec)
+    return main, mentions
+
+
 # --------------------------------------------------------------------------- 校验
 def verify_extraction(raw: Dict[str, Any], text: str, publish: datetime,
                       cands: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -287,10 +350,14 @@ def apply_verification(match_entry: Dict[str, Any], res: List[Dict[str, Any]], s
 
 # --------------------------------------------------------------------------- 主流程
 def analyze(title: str, text: str, publish: datetime, verify: bool = True) -> Dict[str, Any]:
-    cands = candidates(publish)
-    raw = llm_extract(title, text, publish, cands)
+    all_cands = candidates(publish)
+    judgements = llm_link(title, text, publish, all_cands)       # 先推理:这篇文章真正在分析哪几场
+    cands, mentions = select_main(judgements, text, all_cands)
+    raw = llm_extract(title, text, publish, cands)               # 只对确认的比赛做倾向/事实抽取
     res = verify_extraction(raw, text, publish, cands)
-    res["candidates"] = len(cands)
+    res["candidates"] = len(all_cands)
+    res["mentions"] = mentions
+    res["link_judgements"] = judgements
     if verify:
         for m in res["matches"]:
             if m["claims"] and m["timing"] == "preview":
@@ -336,7 +403,7 @@ def save_result(art: Dict[str, Any], res: Dict[str, Any]) -> None:
             cur.execute("INSERT INTO wx_account (wxid, name) VALUES (%s,%s) ON DUPLICATE KEY UPDATE name=VALUES(name)",
                         (art["wxid"], art.get("account_name") or ""))
         cur.execute("UPDATE wx_article SET summary=%s, analysis_json=%s, processed_at=NOW() WHERE id=%s",
-                    (res["summary"], json.dumps({k: res[k] for k in ("other_matches", "dropped", "candidates")},
+                    (res["summary"], json.dumps({k: res.get(k) for k in ("other_matches", "dropped", "candidates", "mentions", "link_judgements")},
                                                 ensure_ascii=False), aid))
 
 

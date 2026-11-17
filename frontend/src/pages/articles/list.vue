@@ -1,6 +1,6 @@
 <template>
   <view class="al-page">
-    <view class="al-top">
+    <view v-if="!matchId" class="al-top">
       <view class="al-tabs">
         <text v-for="t in tabs" :key="t.k" class="al-tab" :class="{ on: link === t.k }" @tap="setLink(t.k)">{{ t.t }}</text>
         <text class="al-rank" @tap="goStats">公众号榜</text>
@@ -17,10 +17,6 @@
           >{{ a.name || a.wxid }} {{ a.count }}</text>
         </view>
       </scroll-view>
-      <view v-if="matchId" class="al-filter">
-        <text>仅看本场相关文章</text>
-        <text class="al-filter-x" @tap="clearMatch">查看全部</text>
-      </view>
     </view>
 
     <scroll-view class="al-list" scroll-y @scrolltolower="loadMore">
@@ -111,6 +107,7 @@ const cands = ref([])
 const candLoading = ref(false)
 let seq = 0
 let inited = false
+let redirected = false
 
 async function load(reset = true) {
   if (reset) {
@@ -128,6 +125,11 @@ async function load(reset = true) {
     if (my !== seq) return
     total.value = res.total || 0
     items.value = reset ? res.items || [] : items.value.concat(res.items || [])
+    if (matchId.value && !redirected && items.value.length === 1) {   // 本场只有一篇: 直接看详情
+      redirected = true
+      uni.redirectTo({ url: `/pages/articles/detail?id=${items.value[0].id}&matchId=${encodeURIComponent(matchId.value)}` })
+      return
+    }
   } catch (e) {
     if (my !== seq) return
     if (e?.statusCode !== 401) errText.value = e?.message || '加载失败'
@@ -148,7 +150,7 @@ function setLink(k) { if (link.value !== k) { link.value = k; load() } }
 function setAccount(id) { if (wxid.value !== id) { wxid.value = id; load() } }
 function clearMatch() { matchId.value = ''; load() }
 function goStats() { uni.navigateTo({ url: '/pages/articles/stats' }) }
-function openDetail(a) { uni.navigateTo({ url: `/pages/articles/detail?id=${a.id}` }) }
+function openDetail(a) { uni.navigateTo({ url: `/pages/articles/detail?id=${a.id}${matchId.value ? '&matchId=' + encodeURIComponent(matchId.value) : ''}` }) }
 
 async function openLink(a) {
   linkTarget.value = a
@@ -186,9 +188,10 @@ function doLink(c) {
 
 onLoad((q) => {
   matchId.value = q?.matchId || ''
+  if (matchId.value) uni.setNavigationBarTitle({ title: '本场相关文章' })
   if (!requireAuth()) return
   inited = true
-  getAccounts().then((r) => { accounts.value = r.items || [] }).catch(() => {})
+  if (!matchId.value) getAccounts().then((r) => { accounts.value = r.items || [] }).catch(() => {})
   load()
 })
 onShow(() => {

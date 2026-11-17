@@ -175,6 +175,8 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
             L.append(f"- [{a['account']}] {a['time']} {tag}{link}《{a['title']}》; {rec}")
             if a.get("summary"):
                 L.append(f"  总结: {a['summary']}")
+            if a.get("body"):
+                L.append(f"  正文节选(供用户针对本文提问时引用,仍是作者观点): {a['body']}")
             ST = {"strong": "强", "medium": "中", "weak": "弱"}
             for p in a["picks"]:
                 kind = "作者明确表达" if p["explicit"] else "AI据文意推测(并非作者原话)"

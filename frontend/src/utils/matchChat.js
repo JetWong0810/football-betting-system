@@ -12,6 +12,14 @@ export function fetchHistory(matchId) {
   return request({ url: `/api/predict/${encodeURIComponent(matchId)}/chat`, timeout: 20000 })
 }
 
+export function fetchIntel(matchId) {
+  return request({ url: `/api/predict/${encodeURIComponent(matchId)}/intel`, timeout: 20000 })
+}
+
+export async function streamIntel(matchId, onEvent) {
+  await streamChat(matchId, null, onEvent, undefined, `/api/predict/${encodeURIComponent(matchId)}/intel/refresh`)
+}
+
 export function clearHistory(matchId) {
   return request({ url: `/api/predict/${encodeURIComponent(matchId)}/chat`, method: 'DELETE' })
 }
@@ -23,11 +31,11 @@ export function clearHistory(matchId) {
  * @param {(ev:Object)=>void} onEvent  事件: status/delta/sources/verdict/notice/done/error
  * @param {AbortSignal} signal
  */
-export async function streamChat(matchId, payload, onEvent, signal) {
-  const resp = await fetch(`${BASE_URL}/api/predict/${encodeURIComponent(matchId)}/chat`, {
+export async function streamChat(matchId, payload, onEvent, signal, path) {
+  const resp = await fetch(`${BASE_URL}${path || `/api/predict/${encodeURIComponent(matchId)}/chat`}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload || {}),
     signal,
   })
   if (!resp.ok) {

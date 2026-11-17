@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional
 
+from . import intel
 from . import repository as store
 from .context import build_context
 from .llm import stream_chat
@@ -41,57 +42,61 @@ SYSTEM_TMPL = """你是竞彩足球盘路分析助手,服务于一个自建的�
    - 多个公众号观点一致不等于独立证据(常互相转引)。
 8. 不迎合:用户追问"是不是该买某方"时,依据证据回答,不因追问改口。仅供参考,不构成投注建议。
 
-## 输出规则(最重要:简洁、结构化、突出重点)
-- 先给结论,再给依据。不要叙述你的思考和搜索过程,不要罗列"我查了哪些页面/站点",不要复述系统数据原文。
-- 日常问答:不超过150字,直接回答要点,必要时用不超过4条的短列表。不要写大标题。
-- 当用户要求分析,或你给出方向判断时:
-  - 正文只写1到2句「结论说明」(不超过80字):方向、置信,以及最关键的一个原因。
-  - 减员名单、赛程、数据等具体内容一律放进 verdict 块(界面会渲染成卡片),正文禁止重复其中任何内容。
-- 只保留影响判断的要点。次要信息、来源存疑的二手站点不必提;仅当它与结论冲突时用一句话带过。
-- 语言精炼,多用短句和数字,不要大段加粗,不要长段落。
-- 凡给出方向判断时,在回答最后另起一段输出机器可读结论,格式严格如下(界面自动解析隐藏):
-```verdict
-{{"headline":"一句话结论","direction":"upper|lower|neutral","confidence":"high|medium|low","supports":["【盘口】..."],"risks":["..."],"facts":[{{"text":"...","source":"站点","date":"MM-DD","status":"confirmed|pending"}}]}}
+## 输出规则(最重要:简洁、只讲重点)
+- 界面已经把「已收集情报」列给用户了。你的任务是回答用户对某条情报或本场的追问,不要重复罗列情报。
+- 不叙述搜索过程,不复述系统数据原文,不大段加粗。
+- 当用户追问某条情报(消息以【情报】开头)的影响时:
+  - 正文只写一句话结论(不超过40字)。
+  - 然后在最后输出机器可读的分析块(界面渲染成卡片):
+```impact
+{{"effect":"home|away|neutral|unclear","level":"high|mid|low|none","steps":[{{"k":"事实","t":"..."}},{{"k":"作用","t":"..."}},{{"k":"盘口","t":"..."}},{{"k":"不确定","t":"..."}}]}}
 ```
-  字段要求:
-  - headline: 一句话结论,不超过30字,含方向与关键理由。
-  - direction: 亚盘盘路方向。upper=上盘(让球方)赢盘,lower=下盘,neutral=无明确倾向。
-  - supports: 最多3条,每条不超过28字,开头用【盘口】【同赔】【多因子】【基本面】之一标注类型。
-  - risks: 最多2条,每条不超过28字。
-  - facts: 联网查到的、与本场直接相关且近期的关键基本面,最多4条;status 为 confirmed(多个来源一致或官方来源)或 pending(单一来源/待核实)。没联网或没查到则给空数组 []。
-  没有给出方向判断时不要输出该段。
+  - effect: 这条情报在基本面上对哪一方有利(home=利主队,away=利客队,neutral=影响相当,unclear=无法判断);level: 影响程度 high/mid/low/none。
+  - steps 是分析过程,2到4步,每步不超过50字,k 依次取:事实(情报本身及可靠性,单源要点明)、作用(对球队实力/打法/战意的具体影响,如替补质量差距)、盘口(与当前亚盘、同赔方向的关系:是否已被盘口消化、是否与同赔方向一致)、不确定(最大变数,如首发未定)。没有内容的步骤省略,不要凑数。
+  - 影响程度必须有依据(球员重要性、替补差距、盘口是否已反映),判断不了就说"无法判断",不要硬给 high。
+  - 情报状态为待核实/单源时,level 不得为 high,并在"事实"步骤说明。
+- 其他问题:直接回答,不超过150字,必要时用不超过4条的短列表,不输出 impact 块。
+- 不输出方向性投注结论(买哪边),除非用户明确问;问了就基于数据给出方向与置信,并说明理由,仍不构成投注建议。
 
 ## 系统数据(生成于 {now})
 {ctx}
 """
 
-_VERDICT_RE = re.compile(r"```verdict\s*(\{.*?\})\s*```", re.S)
+_VERDICT_RE = re.compile(r"```impact\s*(\{.*?\})\s*```", re.S)
+
+
+_ANY_BLOCK_RE = re.compile(r"```impact.*?(```|$)", re.S)
 
 
 def split_verdict(text: str):
+    """切出 impact 块(沿用 verdict 字段名落库)。解析失败也要把块从正文剥掉。"""
     m = None
     for m in _VERDICT_RE.finditer(text):
         pass
     if not m:
-        return text.strip(), None
+        return _ANY_BLOCK_RE.sub("", text).strip(), None
     try:
         v = json.loads(m.group(1))
     except json.JSONDecodeError:
         v = None
     clean = (text[:m.start()] + text[m.end():]).strip()
-    if v and v.get("direction") not in ("upper", "lower", "neutral"):
-        v = None
+    if v is not None:
+        if not isinstance(v, dict):
+            v = None
     if v:
-        v["supports"] = [str(x)[:60] for x in (v.get("supports") or [])][:3]
-        v["risks"] = [str(x)[:60] for x in (v.get("risks") or [])][:2]
-        facts = []
-        for f in (v.get("facts") or [])[:4]:
-            if isinstance(f, dict) and f.get("text"):
-                facts.append({"text": str(f["text"])[:60], "source": str(f.get("source") or "")[:30],
-                              "date": str(f.get("date") or "")[:10],
-                              "status": "confirmed" if f.get("status") == "confirmed" else "pending"})
-        v["facts"] = facts
-        v["headline"] = str(v.get("headline") or "")[:60]
+        steps = []
+        raw = v.get("steps") or []
+        flat = []
+        for x in raw if isinstance(raw, list) else []:     # 模型偶尔输出多层数组,拍平
+            flat.extend(x if isinstance(x, list) else [x])
+        for st in flat[:4]:
+            if isinstance(st, dict) and st.get("t"):
+                steps.append({"k": str(st.get("k") or "")[:6], "t": str(st["t"])[:80]})
+        v = {"effect": v.get("effect") if v.get("effect") in ("home", "away", "neutral", "unclear") else "unclear",
+             "level": v.get("level") if v.get("level") in ("high", "mid", "low", "none") else "low",
+             "steps": steps}
+        if not steps:
+            v = None
     return clean, v
 
 
@@ -119,10 +124,22 @@ def _hist_messages(user_id: int, match_id: str) -> List[Dict[str, Any]]:
 
 
 def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]],
-             web: bool = True, persist: bool = True) -> Iterator[Dict[str, Any]]:
+             web: bool = False, persist: bool = True, focus: Optional[str] = None) -> Iterator[Dict[str, Any]]:
     """产出事件 dict: status/delta/sources/verdict/done/error。"""
     ctx = build_context(match_id)
-    system = SYSTEM_TMPL.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), ctx=ctx["text"])
+    try:
+        intel_all = intel.list_items(match_id)["items"]
+    except Exception:  # noqa: BLE001  情报表不可用不影响聊天
+        intel_all = []
+    if focus:
+        it = next((x for x in intel_all if x["id"] == focus), None)
+        if it:
+            SIDE = {"home": "主队", "away": "客队", "neutral": "整体"}
+            st = "已核实" if it["status"] == "confirmed" else "待核实(单源)"
+            head = f"【情报】{SIDE[it['side']]}·{it['category']}·{st}:{it['text']}({it['source']} {it['date']})"
+            text = head + "\n" + (text or "这条情报对本场有什么影响?影响有多大?")
+    system = SYSTEM_TMPL.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                ctx=ctx["text"] + intel.render_for_prompt(intel_all))
 
     history = _hist_messages(user_id, match_id) if persist else []
     content: Any = text

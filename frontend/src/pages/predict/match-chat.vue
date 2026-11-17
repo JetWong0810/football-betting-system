@@ -29,92 +29,56 @@
         <view v-if="loadingHistory" class="mc-state">读取会话…</view>
         <view v-else-if="storeError" class="mc-state">{{ storeError }}</view>
 
-        <view v-else-if="!messages.length && !streaming" class="mc-empty">
-          <view class="mc-empty-head">
-            <view class="mc-badge"><view class="ico ico-spark"></view></view>
-            <view class="mc-empty-titles">
-              <text class="mc-empty-title">本场 AI 分析</text>
-              <text class="mc-empty-sub">数据为主,联网为辅,结论附依据与风险</text>
+        <template v-else>
+          <view class="it-sec">
+            <view class="it-head">
+              <text class="it-title">情报</text>
+              <text v-if="items.length" class="it-n">{{ items.length }} 条</text>
+              <text v-if="updatedAt" class="it-upd">更新 {{ updatedAt }}</text>
+              <view class="it-refresh" :class="{ off: intelBusy || streaming }" @tap="refreshIntel">{{ intelBusy ? '搜集中' : '重新搜集' }}</view>
             </view>
-          </view>
-          <view class="mc-caps">
-            <text class="mc-cap">盘口变动</text>
-            <text class="mc-cap">历史同赔</text>
-            <text class="mc-cap">七因子预测</text>
-            <text class="mc-cap web">联网情报</text>
-            <text class="mc-cap img">截图 / 文章</text>
-          </view>
-          <text class="mc-starter-label">从这里开始</text>
-          <view class="mc-starters">
-            <view v-for="st in starters" :key="st.t" class="mc-starter" @tap="send(st.t)">
-              <view class="mc-st-main">
-                <text class="mc-st-t">{{ st.t }}</text>
-                <text class="mc-st-d">{{ st.d }}</text>
+            <view v-if="intelBusy && !items.length" class="it-state">
+              <text>正在联网搜集本场情报,约需半分钟…</text>
+              <text v-if="intelStep" class="it-step">{{ intelStep }}</text>
+            </view>
+            <view v-else-if="intelErr" class="it-state">{{ intelErr }}</view>
+            <view v-else-if="!items.length" class="it-state">{{ searched ? '没有搜到与本场直接相关的近期情报。' : '尚未搜集。' }}可点右上角重新搜集,或直接在下方提问。</view>
+            <view v-for="it in items" :key="it.id" class="it-card" :class="{ sel: focus && focus.id === it.id }" @tap="pickFocus(it)">
+              <view class="it-top">
+                <text class="it-side" :class="it.side">{{ SIDE[it.side] }}</text>
+                <text class="it-cat">{{ it.category }}</text>
+                <text class="it-st" :class="it.status">{{ it.status === 'confirmed' ? '已核实' : '待核实' }}</text>
               </view>
-              <text class="mc-st-go">›</text>
+              <text class="it-text">{{ it.text }}</text>
+              <text v-if="it.note" class="it-note">{{ it.note }}</text>
+              <view class="it-foot">
+                <text class="it-src" :class="{ link: it.url || it.articleId }" @tap.stop="openSrc(it)">{{ [it.source, it.date].filter(Boolean).join(' · ') }}</text>
+                <text class="it-ask" @tap.stop="askItem(it)">分析影响</text>
+              </view>
             </view>
           </view>
-          <text class="mc-empty-note">仅供参考,不构成投注建议。联网信息未经校验,请以官方首发和赛前公告为准。</text>
-        </view>
+          <text v-if="messages.length || streaming" class="mc-sep">追问与分析</text>
+        </template>
 
         <view v-for="m in messages" :key="m.id || m.tmp" class="mc-msg" :class="m.role">
           <view v-if="m.role === 'user'" class="mc-user">
-            <text class="mc-user-text">{{ m.content }}</text>
+            <text v-if="userParts(m).quote" class="mc-quote">{{ userParts(m).quote }}</text>
+            <text class="mc-user-text">{{ userParts(m).text }}</text>
             <text v-if="m.attachments" class="mc-user-att">含 {{ m.attachments }} 张图片</text>
           </view>
           <view v-else class="mc-ai">
-            <view v-if="m.verdict" class="mc-verdict" :class="m.verdict.direction">
-              <view class="mc-v-top">
-                <text class="mc-v-dir">{{ dirLabel(m.verdict.direction) }}</text>
-                <text class="mc-v-conf" :class="m.verdict.confidence">置信 {{ confLabel(m.verdict.confidence) }}</text>
-              </view>
-              <text v-if="m.verdict.headline" class="mc-v-head">{{ m.verdict.headline }}</text>
-
-              <view v-if="(m.verdict.supports || []).length" class="mc-v-block">
-                <text class="mc-v-title">依据</text>
-                <view v-for="(sp, i) in m.verdict.supports" :key="'s' + i" class="mc-v-row">
-                  <text v-if="tagOf(sp).tag" class="mc-v-tag" :class="tagOf(sp).cls">{{ tagOf(sp).tag }}</text>
-                  <text class="mc-v-item">{{ tagOf(sp).text }}</text>
-                </view>
-              </view>
-
-              <view v-if="(m.verdict.facts || []).length" class="mc-v-block">
-                <text class="mc-v-title">联网基本面</text>
-                <view v-for="(f, i) in m.verdict.facts" :key="'f' + i" class="mc-v-row">
-                  <text class="mc-v-st" :class="f.status">{{ f.status === 'confirmed' ? '已核实' : '待核实' }}</text>
-                  <view class="mc-v-fact">
-                    <text class="mc-v-item">{{ f.text }}</text>
-                    <text v-if="f.source || f.date" class="mc-v-src">{{ [f.source, f.date].filter(Boolean).join(' · ') }}</text>
-                  </view>
-                </view>
-              </view>
-
-              <view v-if="(m.verdict.risks || []).length" class="mc-v-block risk">
-                <text class="mc-v-title">可能出错</text>
-                <view v-for="(r, i) in m.verdict.risks" :key="'r' + i" class="mc-v-row">
-                  <text class="mc-v-dot"></text>
-                  <text class="mc-v-item">{{ r }}</text>
-                </view>
-              </view>
-            </view>
-
-            <view class="mc-body" :class="{ clamp: isLong(m) && !m._full }">
+            <view class="mc-body">
               <view class="mc-md" v-html="renderMd(m.content)"></view>
             </view>
-            <view v-if="isLong(m)" class="mc-more" @tap="m._full = !m._full">{{ m._full ? '收起' : '展开全文' }}</view>
-            <view v-if="(m.sources || []).length" class="mc-src">
-              <view class="mc-src-head" @tap="toggleSrc(m)">
-                <view class="ico ico-globe"></view>
-                <text>联网来源 {{ m.sources.length }} 条(未经校验)</text>
-                <text class="mc-src-arrow">{{ m._open ? '收起' : '展开' }}</text>
+            <view v-if="m.verdict" class="ip">
+              <view class="ip-top">
+                <text class="ip-eff" :class="m.verdict.effect">{{ EFFECT[m.verdict.effect] }}</text>
+                <text class="ip-lv" :class="m.verdict.level">影响 {{ LEVEL[m.verdict.level] }}</text>
               </view>
-              <view v-if="m._open" class="mc-src-list">
-                <text
-                  v-for="(s, i) in m.sources"
-                  :key="i"
-                  class="mc-src-item"
-                  @tap="openLink(s.url)"
-                >{{ i + 1 }}. {{ s.title }}</text>
+              <text class="ip-title">分析过程</text>
+              <view v-for="(s, i) in m.verdict.steps" :key="i" class="ip-step">
+                <text class="ip-k">{{ s.k || (i + 1) }}</text>
+                <text class="ip-t">{{ s.t }}</text>
               </view>
             </view>
           </view>
@@ -126,8 +90,9 @@
             <view class="mc-steps">
               <text v-for="(s, i) in steps" :key="i" class="mc-step" :class="{ last: i === steps.length - 1 }">{{ s }}</text>
             </view>
-            <view v-if="liveText" class="mc-md" v-html="renderMd(liveText)"></view>
-            <view v-else class="mc-wait">
+            <view v-if="liveClean" class="mc-md" v-html="renderMd(liveClean)"></view>
+            <text v-if="liveHasBlock" class="mc-step last">整理分析过程…</text>
+            <view v-if="!liveText" class="mc-wait">
               <view class="mc-dot"></view><view class="mc-dot"></view><view class="mc-dot"></view>
             </view>
           </view>
@@ -140,11 +105,10 @@
     </scroll-view>
 
     <view class="mc-bottom">
-      <scroll-view v-if="!streaming && messages.length" class="mc-quick" scroll-x>
-        <view class="mc-quick-row">
-          <text v-for="q in quicks" :key="q" class="mc-q" @tap="send(q)">{{ q }}</text>
-        </view>
-      </scroll-view>
+      <view v-if="focus" class="mc-focus">
+        <text class="mc-focus-t">追问: {{ focus.text }}</text>
+        <view class="mc-focus-x" @tap="focus = null"><view class="ico ico-x"></view></view>
+      </view>
 
       <view class="mc-composer" :class="{ focus: focused, busy: streaming }">
         <view v-if="images.length" class="mc-previews">
@@ -157,7 +121,7 @@
           v-model="draft"
           class="mc-ta"
           :disabled="streaming"
-          placeholder="问点什么,或粘贴文章内容"
+          :placeholder="focus ? '针对这条情报追问,如影响多大、是否已被盘口消化' : '问点什么,或粘贴文章内容'"
           placeholder-class="mc-ph"
           auto-height
           :maxlength="4000"
@@ -193,7 +157,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
 import { onLoad, onReady } from '@dcloudio/uni-app'
 import { requireAuth } from '@/utils/auth'
 import { renderMarkdown } from '@/utils/miniMarkdown'
-import { fetchHistory, clearHistory, streamChat, compressImage } from '@/utils/matchChat'
+import { fetchHistory, clearHistory, streamChat, compressImage, fetchIntel, streamIntel } from '@/utils/matchChat'
 
 const matchId = ref('')
 const home = ref('')
@@ -210,7 +174,7 @@ const loadingHistory = ref(true)
 const storeError = ref('')
 const draft = ref('')
 const images = ref([])
-const web = ref(true)
+const web = ref(false)
 const streaming = ref(false)
 const liveText = ref('')
 const steps = ref([])
@@ -224,25 +188,17 @@ let stick = true
 let listH = 0
 let tmpSeq = 0
 
-const starters = [
-  { t: '综合分析这场', d: '盘口、同赔、多因子、基本面一起看,给出结论和风险点' },
-  { t: '同赔样本可靠吗', d: '检查样本量与置信区间,判断是否只是小样本巧合' },
-  { t: '联网查一下阵容伤停和轮换', d: '核实核心球员缺阵、赛程密度与战意' },
-  { t: '七因子和实时数据有冲突吗', d: '对比已存预测与当前盘口、同赔是否一致' },
-]
+const SIDE = { home: '主队', away: '客队', neutral: '整体' }
+const EFFECT = { home: '利主队', away: '利客队', neutral: '影响均衡', unclear: '无法判断' }
+const LEVEL = { high: '大', mid: '中', low: '小', none: '无' }
 
-const quicks = [
-  '综合分析这场',
-  '同赔样本可靠吗',
-  '联网查一下阵容伤停和轮换',
-  '七因子和实时数据有冲突吗',
-  '最可能出错的点是什么',
-]
-
-const DIR = { upper: '上盘(让球方)', lower: '下盘(受让方)', neutral: '无明确倾向' }
-const CONF = { high: '高', medium: '中', low: '低' }
-const dirLabel = (d) => DIR[d] || d
-const confLabel = (c) => CONF[c] || c
+const items = ref([])
+const searched = ref(false)
+const updatedAt = ref('')
+const intelBusy = ref(false)
+const intelStep = ref('')
+const intelErr = ref('')
+const focus = ref(null)
 
 const ahText = computed(() => {
   const f = (v) => {
@@ -260,16 +216,63 @@ const f6Text = computed(() => {
   if (!f6dir.value) return ''
   return m[f6dir.value] + (f6score.value ? ` ${f6score.value}` : '')
 })
+const liveHasBlock = computed(() => liveText.value.indexOf('```') >= 0)
+const liveClean = computed(() => liveText.value.split('```')[0].trim())
 const canSend = computed(() => !streaming.value && (draft.value.trim() || images.value.length))
 
-const TAGS = { '盘口': 'ah', '同赔': 'f6', '多因子': 'mf', '基本面': 'fund' }
-function tagOf(t) {
-  const m = String(t || '').match(/^【(盘口|同赔|多因子|基本面)】\s*(.*)$/)
-  return m ? { tag: m[1], cls: TAGS[m[1]], text: m[2] } : { tag: '', cls: '', text: String(t || '') }
+function userParts(m) {
+  const t = String(m.content || '')
+  if (!t.startsWith('【情报】')) return { quote: '', text: t }
+  const i = t.indexOf('\n')
+  return { quote: t.slice(0, i < 0 ? t.length : i).replace('【情报】', ''), text: i < 0 ? '' : t.slice(i + 1) }
 }
-function isLong(m) {
-  const n = String(m.content || '').length
-  return m.verdict ? n > 160 : n > 420
+
+function pickFocus(it) {
+  focus.value = focus.value && focus.value.id === it.id ? null : it
+}
+function askItem(it) {
+  if (streaming.value) return
+  focus.value = it
+  send('这条情报对本场有什么影响?影响有多大?是否已被盘口消化?')
+}
+function openSrc(it) {
+  if (it.articleId) uni.navigateTo({ url: `/pages/articles/detail?id=${it.articleId}` })
+  else openLink(it.url)
+}
+
+async function loadIntel() {
+  try {
+    const r = await fetchIntel(matchId.value)
+    items.value = r.items || []
+    searched.value = !!r.searched
+    updatedAt.value = r.updatedAt || ''
+  } catch (e) {
+    if (e?.statusCode === 503) intelErr.value = '情报功能尚未初始化'
+    else if (e?.statusCode !== 401) intelErr.value = e?.message || '读取情报失败'
+    return false
+  }
+  return true
+}
+
+async function refreshIntel() {
+  if (intelBusy.value || streaming.value) return
+  intelBusy.value = true
+  intelErr.value = ''
+  intelStep.value = ''
+  try {
+    await streamIntel(matchId.value, (ev) => {
+      if (ev.type === 'status') intelStep.value = ev.text
+      else if (ev.type === 'items') {
+        items.value = ev.items || []
+        searched.value = true
+        updatedAt.value = ev.updatedAt || ''
+      } else if (ev.type === 'error') intelErr.value = ev.text
+    })
+  } catch (e) {
+    if (e?.statusCode === 401) requireAuth()
+    else intelErr.value = e?.message || '网络异常'
+  }
+  intelBusy.value = false
 }
 
 function renderMd(t) {
@@ -357,7 +360,9 @@ async function send(preset) {
   let failed = false
   ctrl = new AbortController()
   try {
-    await streamChat(matchId.value, { message: text, images: imgs, web: web.value }, (ev) => {
+    const fid = focus.value ? focus.value.id : null
+    focus.value = null
+    await streamChat(matchId.value, { message: text, images: imgs, web: web.value, focus: fid }, (ev) => {
       if (ev.type === 'delta') {
         liveText.value += ev.text
         toBottom()
@@ -437,6 +442,7 @@ onLoad((q) => {
   }
   if (!requireAuth()) return
   loadHistory()
+  loadIntel().then((ok) => { if (ok && !searched.value && !items.value.length) refreshIntel() })
 })
 
 onReady(() => {
@@ -516,57 +522,6 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
   padding: 18rpx 22rpx; box-shadow: 0 2rpx 10rpx rgba(15, 23, 42, 0.04);
 }
 
-/* 结论卡 */
-.mc-verdict {
-  border-radius: 6rpx; padding: 18rpx 20rpx 16rpx; margin-bottom: 14rpx;
-  background: #f8fafc; border-left: 6rpx solid #94a3b8;
-  &.upper { background: #fef2f2; border-left-color: #dc2626; .mc-v-dir { color: #dc2626; } }
-  &.lower { background: #ecfdf5; border-left-color: #059669; .mc-v-dir { color: #059669; } }
-}
-.mc-v-top { display: flex; align-items: center; gap: 14rpx; }
-.mc-v-dir { font-size: 32rpx; font-weight: 800; color: #475569; letter-spacing: 1rpx; }
-.mc-v-conf {
-  font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx;
-  color: #64748b; background: rgba(255, 255, 255, 0.8); border: 1rpx solid #e2e8f0;
-  &.high { color: #b91c1c; border-color: #fecaca; }
-  &.medium { color: #b45309; border-color: #fde68a; }
-  &.low { color: #64748b; }
-}
-.mc-v-head { display: block; font-size: 25rpx; font-weight: 600; color: #0f172a; line-height: 1.5; margin-top: 8rpx; }
-.mc-v-block {
-  display: flex; flex-direction: column; gap: 8rpx;
-  margin-top: 14rpx; padding-top: 12rpx; border-top: 1rpx solid rgba(15, 23, 42, 0.08);
-}
-.mc-v-title { font-size: 20rpx; font-weight: 700; color: #64748b; letter-spacing: 2rpx; }
-.mc-v-row { display: flex; align-items: flex-start; gap: 10rpx; }
-.mc-v-item { font-size: 23rpx; color: #1e293b; line-height: 1.55; word-break: break-all; }
-.mc-v-fact { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2rpx; }
-.mc-v-src { font-size: 19rpx; color: #94a3b8; }
-.mc-v-tag, .mc-v-st {
-  flex-shrink: 0; font-size: 19rpx; font-weight: 600; line-height: 1;
-  padding: 5rpx 10rpx; border-radius: 6rpx; margin-top: 4rpx;
-}
-.mc-v-tag {
-  color: #475569; background: #e2e8f0;
-  &.ah { color: #1d4ed8; background: #dbeafe; }
-  &.f6 { color: #7c3aed; background: #ede9fe; }
-  &.mf { color: #0f766e; background: #ccfbf1; }
-  &.fund { color: #b45309; background: #fef3c7; }
-}
-.mc-v-st {
-  &.confirmed { color: #047857; background: #d1fae5; }
-  &.pending { color: #b45309; background: #fef3c7; }
-}
-.mc-v-dot { flex-shrink: 0; width: 8rpx; height: 8rpx; border-radius: 50%; background: #f59e0b; margin: 14rpx 4rpx 0; }
-.mc-body.clamp {
-  max-height: 210rpx; overflow: hidden; position: relative;
-  &::after {
-    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 70rpx;
-    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), #fff);
-  }
-}
-.mc-more { font-size: 22rpx; color: #0d9488; padding: 8rpx 0 2rpx; font-weight: 600; }
-
 /* markdown */
 .mc-md {
   font-size: 25rpx; color: #1e293b; line-height: 1.75; word-break: break-word;
@@ -585,16 +540,6 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
   :deep(.md-table th), :deep(.md-table td) { border: 1rpx solid #e2e8f0; padding: 8rpx 12rpx; text-align: left; vertical-align: top; }
   :deep(.md-table th) { background: #f8fafc; font-weight: 600; }
 }
-
-/* 联网来源 */
-.mc-src { margin-top: 12rpx; border-top: 1rpx dashed #e2e8f0; padding-top: 10rpx; }
-.mc-src-head {
-  display: flex; align-items: center; gap: 8rpx; font-size: 21rpx; color: #64748b;
-  .ico { width: 24rpx; height: 24rpx; }
-}
-.mc-src-arrow { margin-left: auto; color: #0d9488; }
-.mc-src-list { display: flex; flex-direction: column; gap: 6rpx; margin-top: 8rpx; }
-.mc-src-item { font-size: 21rpx; color: #0d9488; line-height: 1.5; word-break: break-all; }
 
 /* 生成中 */
 .mc-steps { display: flex; flex-direction: column; gap: 4rpx; margin-bottom: 10rpx; }
@@ -615,52 +560,7 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
 /* ===== 底部输入区 ===== */
 .mc-bottom { flex-shrink: 0; background: #fff; border-top: 1rpx solid #e2e8f0; padding-bottom: env(safe-area-inset-bottom); }
 
-/* ===== 空状态 ===== */
-.mc-empty {
-  display: flex; flex-direction: column; gap: 18rpx;
-  background: #fff; border: 1rpx solid #d9ece8; border-radius: 6rpx;
-  padding: 28rpx 26rpx 24rpx; margin-top: 6rpx;
-  box-shadow: 0 4rpx 16rpx rgba(13, 148, 136, 0.06);
-}
-.mc-empty-head { display: flex; align-items: center; gap: 18rpx; }
-.mc-badge {
-  width: 72rpx; height: 72rpx; border-radius: 6rpx; flex-shrink: 0;
-  background: linear-gradient(135deg, #0d9488, #14b8a6); color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4rpx 12rpx rgba(13, 148, 136, 0.3);
-  .ico { width: 40rpx; height: 40rpx; }
-}
-.mc-empty-titles { display: flex; flex-direction: column; gap: 4rpx; }
-.mc-empty-title { font-size: 32rpx; font-weight: 700; color: #0f172a; }
-.mc-empty-sub { font-size: 22rpx; color: #64748b; }
-.mc-caps { display: flex; flex-wrap: wrap; gap: 10rpx; }
-.mc-cap {
-  font-size: 21rpx; color: #334155; background: #f1f5f9;
-  padding: 4rpx 14rpx; border-radius: 6rpx;
-  &.web { color: #0f766e; background: #f0fdfa; }
-  &.img { color: #b45309; background: #fffbeb; }
-}
-.mc-starter-label { font-size: 22rpx; color: #94a3b8; margin-top: 6rpx; }
-.mc-starters { display: flex; flex-direction: column; gap: 12rpx; }
-.mc-starter {
-  display: flex; align-items: center; gap: 12rpx;
-  padding: 18rpx 20rpx; border-radius: 6rpx;
-  background: #f8fafc; border: 1rpx solid #e2e8f0;
-  &:active { background: #f0fdfa; border-color: #99f6e4; }
-}
-.mc-st-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
-.mc-st-t { font-size: 26rpx; font-weight: 600; color: #0f172a; }
-.mc-st-d { font-size: 21rpx; color: #64748b; line-height: 1.5; }
-.mc-st-go { font-size: 34rpx; color: #94a3b8; flex-shrink: 0; }
-.mc-empty-note { font-size: 20rpx; color: #94a3b8; line-height: 1.6; margin-top: 4rpx; }
-
 /* ===== 底部输入区 ===== */
-.mc-quick { white-space: nowrap; padding: 14rpx 0 0; }
-.mc-quick-row { display: inline-flex; gap: 10rpx; padding: 0 24rpx; }
-.mc-q {
-  font-size: 22rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4;
-  border-radius: 6rpx; padding: 6rpx 16rpx; white-space: nowrap;
-}
 .mc-composer {
   margin: 14rpx 24rpx 16rpx; background: #f8fafc;
   border: 1rpx solid #cbd5e1; border-radius: 6rpx; overflow: hidden;
@@ -702,4 +602,42 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
   &.off { opacity: 0.4; }
   &.stop { background: #475569; }
 }
+
+/* ===== 情报 ===== */
+.it-sec { margin-bottom: 18rpx; }
+.it-head { display: flex; align-items: center; gap: 12rpx; padding: 4rpx 4rpx 12rpx; }
+.it-title { font-size: 28rpx; font-weight: 700; color: #0f172a; }
+.it-n { font-size: 21rpx; color: #94a3b8; }
+.it-refresh { margin-left: auto; font-size: 21rpx; color: #0f766e; border: 1rpx solid #99f6e4; background: #f0fdfa; border-radius: 6rpx; padding: 4rpx 16rpx; &.off { opacity: 0.4; } }
+.it-upd { font-size: 20rpx; color: #94a3b8; }
+.it-state { font-size: 23rpx; color: #64748b; background: #fff; border: 1rpx dashed #cbd5e1; border-radius: 6rpx; padding: 26rpx 22rpx; line-height: 1.7; }
+.it-step { display: block; font-size: 21rpx; color: #0d9488; margin-top: 6rpx; }
+.it-card {
+  background: #fff; border: 1rpx solid #e2e8f0; border-radius: 6rpx; padding: 18rpx 20rpx 14rpx; margin-bottom: 12rpx;
+  &.sel { border-color: #14b8a6; background: #f0fdfa; }
+}
+.it-top { display: flex; align-items: center; gap: 10rpx; }
+.it-side { font-size: 20rpx; font-weight: 700; &.home { color: #dc2626; } &.away { color: #0284c7; } &.neutral { color: #b45309; } }
+.it-cat { font-size: 19rpx; font-weight: 600; color: #fff; background: #64748b; padding: 3rpx 10rpx; border-radius: 6rpx; }
+.it-st { margin-left: auto; font-size: 19rpx; &.confirmed { color: #047857; } &.pending { color: #b45309; } }
+.it-text { display: block; font-size: 26rpx; color: #0f172a; line-height: 1.6; margin-top: 10rpx; word-break: break-all; }
+.it-foot { display: flex; align-items: center; margin-top: 10rpx; gap: 12rpx; }
+.it-src { flex: 1; min-width: 0; font-size: 20rpx; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; &.link { color: #0d9488; } }
+.it-ask { flex-shrink: 0; font-size: 21rpx; font-weight: 600; color: #0f766e; padding: 4rpx 14rpx; border: 1rpx solid #99f6e4; border-radius: 6rpx; background: #f0fdfa; &:active { background: #ccfbf1; } }
+.it-note { display: block; font-size: 20rpx; color: #94a3b8; line-height: 1.5; margin-top: 6rpx; }
+.mc-sep { font-size: 21rpx; color: #94a3b8; padding: 6rpx 4rpx 14rpx; }
+
+/* 追问引用 + 分析卡 */
+.mc-quote { font-size: 21rpx; line-height: 1.5; opacity: 0.88; padding-bottom: 8rpx; border-bottom: 1rpx solid rgba(255, 255, 255, 0.35); }
+.ip { margin-top: 12rpx; background: #f8fafc; border-radius: 6rpx; padding: 14rpx 18rpx 8rpx; }
+.ip-top { display: flex; align-items: center; gap: 12rpx; margin-bottom: 8rpx; }
+.ip-eff { font-size: 26rpx; font-weight: 800; color: #475569; &.home { color: #dc2626; } &.away { color: #0284c7; } }
+.ip-lv { font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx; color: #64748b; background: #fff; border: 1rpx solid #e2e8f0; &.high { color: #b91c1c; border-color: #fecaca; } &.mid { color: #b45309; border-color: #fde68a; } }
+.ip-title { font-size: 19rpx; color: #94a3b8; letter-spacing: 2rpx; margin-bottom: 4rpx; display: block; }
+.ip-step { display: flex; gap: 12rpx; padding: 8rpx 0; border-top: 1rpx solid #eef2f6; }
+.ip-k { flex-shrink: 0; width: 76rpx; font-size: 21rpx; font-weight: 700; color: #0f766e; line-height: 1.6; }
+.ip-t { flex: 1; min-width: 0; font-size: 23rpx; color: #1e293b; line-height: 1.6; word-break: break-all; }
+.mc-focus { display: flex; align-items: center; gap: 10rpx; margin: 14rpx 24rpx 0; padding: 8rpx 14rpx; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; }
+.mc-focus-t { flex: 1; min-width: 0; font-size: 21rpx; color: #0f766e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-focus-x { width: 32rpx; height: 32rpx; color: #0f766e; display: flex; align-items: center; justify-content: center; .ico { width: 18rpx; height: 18rpx; } }
 </style>

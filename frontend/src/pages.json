@@ -70,7 +70,7 @@
     {
       "path": "pages/articles/detail",
       "style": {
-        "navigationBarTitleText": "文章分析",
+        "navigationBarTitleText": "文章详情",
         "navigationBarBackgroundColor": "#0d9488",
         "navigationBarTextStyle": "white",
         "backgroundColorTop": "#e8f8f5",
