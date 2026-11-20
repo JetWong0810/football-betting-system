@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from auth import require_auth
 
-from . import intel
 from . import repository as store
 from . import service
 from .context import MatchNotFound, build_context
@@ -32,7 +31,6 @@ class ChatIn(BaseModel):
     message: str = Field("", max_length=service.MAX_TEXT)
     images: List[ImageIn] = Field(default_factory=list)
     web: bool = False
-    focus: Optional[str] = Field(None, max_length=32)
 
 
 def _sse(obj: Dict[str, Any]) -> str:
@@ -62,7 +60,7 @@ def chat_context(match_id: str, user_id: int = Depends(require_auth)):
         c = build_context(match_id)
     except MatchNotFound:
         raise HTTPException(status_code=404, detail="未找到比赛")
-    return {"text": c["text"], "hash": c["hash"]}
+    return {"text": c["text"], "hash": c["hash"], "summary": c["summary"]}
 
 
 @router.post("/{match_id}/chat")
@@ -93,7 +91,7 @@ def post_chat(match_id: str, req: ChatIn, user_id: int = Depends(require_auth)):
 
     def gen():
         try:
-            for ev in service.run_turn(user_id, match_id, text, imgs, web=req.web, focus=req.focus):
+            for ev in service.run_turn(user_id, match_id, text, imgs, web=req.web):
                 yield _sse(ev)
         except MatchNotFound:
             yield _sse({"type": "error", "text": "未找到比赛"})
@@ -104,37 +102,3 @@ def post_chat(match_id: str, req: ChatIn, user_id: int = Depends(require_auth)):
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-
-@router.get("/{match_id}/intel")
-def get_intel(match_id: str, user_id: int = Depends(require_auth)):
-    try:
-        return intel.list_items(match_id)
-    except intel.IntelUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-
-@router.post("/{match_id}/intel/refresh")
-def refresh_intel(match_id: str, user_id: int = Depends(require_auth)):
-    """联网搜集本场情报并落库(SSE)。同一场所有用户共享结果。"""
-    try:
-        ctx = build_context(match_id)
-        intel.list_items(match_id)                   # 表是否存在
-    except MatchNotFound:
-        raise HTTPException(status_code=404, detail="未找到比赛")
-    except intel.IntelUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    if not service.check_quota(user_id):
-        raise HTTPException(status_code=429, detail="今日次数已达上限")
-    it = ctx["item"]
-    kickoff = f"{it.get('matchDate')} {it.get('matchTime')}"
-
-    def gen():
-        try:
-            for ev in intel.refresh(match_id, ctx["home"], ctx["away"], str(it.get("league") or ""), kickoff):
-                yield _sse(ev)
-        except Exception as e:  # noqa: BLE001
-            logger.exception("intel refresh failed %s", match_id)
-            yield _sse({"type": "error", "text": f"情报获取失败: {type(e).__name__}"})
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

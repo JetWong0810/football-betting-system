@@ -29,57 +29,30 @@
         <view v-if="loadingHistory" class="mc-state">读取会话…</view>
         <view v-else-if="storeError" class="mc-state">{{ storeError }}</view>
 
-        <template v-else>
-          <view class="it-sec">
-            <view class="it-head">
-              <text class="it-title">情报</text>
-              <text v-if="items.length" class="it-n">{{ items.length }} 条</text>
-              <text v-if="updatedAt" class="it-upd">更新 {{ updatedAt }}</text>
-              <view class="it-refresh" :class="{ off: intelBusy || streaming }" @tap="refreshIntel">{{ intelBusy ? '搜集中' : '重新搜集' }}</view>
-            </view>
-            <view v-if="intelBusy && !items.length" class="it-state">
-              <text>正在联网搜集本场情报,约需半分钟…</text>
-              <text v-if="intelStep" class="it-step">{{ intelStep }}</text>
-            </view>
-            <view v-else-if="intelErr" class="it-state">{{ intelErr }}</view>
-            <view v-else-if="!items.length" class="it-state">{{ searched ? '没有搜到与本场直接相关的近期情报。' : '尚未搜集。' }}可点右上角重新搜集,或直接在下方提问。</view>
-            <view v-for="it in items" :key="it.id" class="it-card" :class="{ sel: focus && focus.id === it.id }" @tap="pickFocus(it)">
-              <view class="it-top">
-                <text class="it-side" :class="it.side">{{ SIDE[it.side] }}</text>
-                <text class="it-cat">{{ it.category }}</text>
-                <text class="it-st" :class="it.status">{{ it.status === 'confirmed' ? '已核实' : '待核实' }}</text>
-              </view>
-              <text class="it-text">{{ it.text }}</text>
-              <text v-if="it.note" class="it-note">{{ it.note }}</text>
-              <view class="it-foot">
-                <text class="it-src" :class="{ link: it.url || it.articleId }" @tap.stop="openSrc(it)">{{ [it.source, it.date].filter(Boolean).join(' · ') }}</text>
-                <text class="it-ask" @tap.stop="askItem(it)">分析影响</text>
-              </view>
+        <view v-else-if="!messages.length && !streaming" class="cx">
+          <text class="cx-title">已载入本场数据</text>
+          <text class="cx-sub">不会自动联网或查询,直接提问即可</text>
+          <view class="cx-list">
+            <view v-for="r in ctxRows" :key="r.k" class="cx-row" :class="{ off: !r.ok }">
+              <text class="cx-k">{{ r.k }}</text>
+              <text class="cx-v">{{ r.v }}</text>
             </view>
           </view>
-          <text v-if="messages.length || streaming" class="mc-sep">追问与分析</text>
-        </template>
+          <text v-if="ctxText" class="cx-view" @tap="showCtx = !showCtx">{{ showCtx ? '收起数据' : '查看喂给 AI 的全部数据' }}</text>
+          <text v-if="showCtx" class="cx-raw">{{ ctxText }}</text>
+          <view class="cx-ex">
+            <text v-for="q in examples" :key="q" class="cx-q" @tap="send(q)">{{ q }}</text>
+          </view>
+        </view>
 
         <view v-for="m in messages" :key="m.id || m.tmp" class="mc-msg" :class="m.role">
           <view v-if="m.role === 'user'" class="mc-user">
-            <text v-if="userParts(m).quote" class="mc-quote">{{ userParts(m).quote }}</text>
-            <text class="mc-user-text">{{ userParts(m).text }}</text>
+            <text class="mc-user-text">{{ m.content }}</text>
             <text v-if="m.attachments" class="mc-user-att">含 {{ m.attachments }} 张图片</text>
           </view>
           <view v-else class="mc-ai">
             <view class="mc-body">
               <view class="mc-md" v-html="renderMd(m.content)"></view>
-            </view>
-            <view v-if="m.verdict" class="ip">
-              <view class="ip-top">
-                <text class="ip-eff" :class="m.verdict.effect">{{ EFFECT[m.verdict.effect] }}</text>
-                <text class="ip-lv" :class="m.verdict.level">影响 {{ LEVEL[m.verdict.level] }}</text>
-              </view>
-              <text class="ip-title">分析过程</text>
-              <view v-for="(s, i) in m.verdict.steps" :key="i" class="ip-step">
-                <text class="ip-k">{{ s.k || (i + 1) }}</text>
-                <text class="ip-t">{{ s.t }}</text>
-              </view>
             </view>
           </view>
         </view>
@@ -90,8 +63,7 @@
             <view class="mc-steps">
               <text v-for="(s, i) in steps" :key="i" class="mc-step" :class="{ last: i === steps.length - 1 }">{{ s }}</text>
             </view>
-            <view v-if="liveClean" class="mc-md" v-html="renderMd(liveClean)"></view>
-            <text v-if="liveHasBlock" class="mc-step last">整理分析过程…</text>
+            <view v-if="liveText" class="mc-md" v-html="renderMd(liveText)"></view>
             <view v-if="!liveText" class="mc-wait">
               <view class="mc-dot"></view><view class="mc-dot"></view><view class="mc-dot"></view>
             </view>
@@ -105,11 +77,6 @@
     </scroll-view>
 
     <view class="mc-bottom">
-      <view v-if="focus" class="mc-focus">
-        <text class="mc-focus-t">追问: {{ focus.text }}</text>
-        <view class="mc-focus-x" @tap="focus = null"><view class="ico ico-x"></view></view>
-      </view>
-
       <view class="mc-composer" :class="{ focus: focused, busy: streaming }">
         <view v-if="images.length" class="mc-previews">
           <view v-for="(im, i) in images" :key="i" class="mc-prev">
@@ -121,7 +88,7 @@
           v-model="draft"
           class="mc-ta"
           :disabled="streaming"
-          :placeholder="focus ? '针对这条情报追问,如影响多大、是否已被盘口消化' : '问点什么,或粘贴文章内容'"
+          placeholder="就本场数据提问,或粘贴文章内容"
           placeholder-class="mc-ph"
           auto-height
           :maxlength="4000"
@@ -157,7 +124,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
 import { onLoad, onReady } from '@dcloudio/uni-app'
 import { requireAuth } from '@/utils/auth'
 import { renderMarkdown } from '@/utils/miniMarkdown'
-import { fetchHistory, clearHistory, streamChat, compressImage, fetchIntel, streamIntel } from '@/utils/matchChat'
+import { fetchHistory, clearHistory, streamChat, compressImage, fetchContext } from '@/utils/matchChat'
 
 const matchId = ref('')
 const home = ref('')
@@ -188,17 +155,23 @@ let stick = true
 let listH = 0
 let tmpSeq = 0
 
-const SIDE = { home: '主队', away: '客队', neutral: '整体' }
-const EFFECT = { home: '利主队', away: '利客队', neutral: '影响均衡', unclear: '无法判断' }
-const LEVEL = { high: '大', mid: '中', low: '小', none: '无' }
-
-const items = ref([])
-const searched = ref(false)
-const updatedAt = ref('')
-const intelBusy = ref(false)
-const intelStep = ref('')
-const intelErr = ref('')
-const focus = ref(null)
+const ctx = ref(null)
+const ctxText = ref('')
+const showCtx = ref(false)
+const examples = ['这场盘口和赔率有什么矛盾?', '近期状态和交锋怎么看?', '同赔样本可靠吗?', '关联文章里哪些观点可信?']
+const ctxRows = computed(() => {
+  const c = ctx.value
+  if (!c) return []
+  return [
+    { k: '亚盘', ok: c.ah, v: c.ah ? '初盘/终盘及变动' : '暂无' },
+    { k: '竞彩赔率', ok: c.jczq, v: c.jczq ? '胜平负、让球胜平负及变动' : '暂无' },
+    { k: '历史同赔', ok: c.f6 > 0, v: c.f6 > 0 ? `${c.f6} 场样本及盘路统计` : '无匹配样本' },
+    { k: '七因子预测', ok: c.prediction, v: c.prediction ? '已存预测' : '暂无' },
+    { k: '交锋历史', ok: c.h2h > 0, v: c.h2h > 0 ? `共 ${c.h2h} 场,取最近 10 场` : '暂无' },
+    { k: '近期战绩', ok: c.homeRecent + c.awayRecent > 0, v: `主 ${c.homeRecent} / 客 ${c.awayRecent} 场,取最近 10 场及未来赛程` },
+    { k: '关联文章', ok: c.articles > 0, v: c.articles > 0 ? `${c.articles} 篇公众号文章` : '无' },
+  ]
+})
 
 const ahText = computed(() => {
   const f = (v) => {
@@ -216,63 +189,14 @@ const f6Text = computed(() => {
   if (!f6dir.value) return ''
   return m[f6dir.value] + (f6score.value ? ` ${f6score.value}` : '')
 })
-const liveHasBlock = computed(() => liveText.value.indexOf('```') >= 0)
-const liveClean = computed(() => liveText.value.split('```')[0].trim())
 const canSend = computed(() => !streaming.value && (draft.value.trim() || images.value.length))
 
-function userParts(m) {
-  const t = String(m.content || '')
-  if (!t.startsWith('【情报】')) return { quote: '', text: t }
-  const i = t.indexOf('\n')
-  return { quote: t.slice(0, i < 0 ? t.length : i).replace('【情报】', ''), text: i < 0 ? '' : t.slice(i + 1) }
-}
-
-function pickFocus(it) {
-  focus.value = focus.value && focus.value.id === it.id ? null : it
-}
-function askItem(it) {
-  if (streaming.value) return
-  focus.value = it
-  send('这条情报对本场有什么影响?影响有多大?是否已被盘口消化?')
-}
-function openSrc(it) {
-  if (it.articleId) uni.navigateTo({ url: `/pages/articles/detail?id=${it.articleId}` })
-  else openLink(it.url)
-}
-
-async function loadIntel() {
+async function loadCtx() {
   try {
-    const r = await fetchIntel(matchId.value)
-    items.value = r.items || []
-    searched.value = !!r.searched
-    updatedAt.value = r.updatedAt || ''
-  } catch (e) {
-    if (e?.statusCode === 503) intelErr.value = '情报功能尚未初始化'
-    else if (e?.statusCode !== 401) intelErr.value = e?.message || '读取情报失败'
-    return false
-  }
-  return true
-}
-
-async function refreshIntel() {
-  if (intelBusy.value || streaming.value) return
-  intelBusy.value = true
-  intelErr.value = ''
-  intelStep.value = ''
-  try {
-    await streamIntel(matchId.value, (ev) => {
-      if (ev.type === 'status') intelStep.value = ev.text
-      else if (ev.type === 'items') {
-        items.value = ev.items || []
-        searched.value = true
-        updatedAt.value = ev.updatedAt || ''
-      } else if (ev.type === 'error') intelErr.value = ev.text
-    })
-  } catch (e) {
-    if (e?.statusCode === 401) requireAuth()
-    else intelErr.value = e?.message || '网络异常'
-  }
-  intelBusy.value = false
+    const r = await fetchContext(matchId.value)
+    ctx.value = r.summary || null
+    ctxText.value = r.text || ''
+  } catch (e) { /* 概览失败不影响提问 */ }
 }
 
 function renderMd(t) {
@@ -354,15 +278,12 @@ async function send(preset) {
   stick = true
   toBottom(true)
 
-  let verdict = null
   let sources = []
   let finalText = ''
   let failed = false
   ctrl = new AbortController()
   try {
-    const fid = focus.value ? focus.value.id : null
-    focus.value = null
-    await streamChat(matchId.value, { message: text, images: imgs, web: web.value, focus: fid }, (ev) => {
+    await streamChat(matchId.value, { message: text, images: imgs, web: web.value }, (ev) => {
       if (ev.type === 'delta') {
         liveText.value += ev.text
         toBottom()
@@ -372,8 +293,6 @@ async function send(preset) {
         toBottom()
       } else if (ev.type === 'sources') {
         sources = ev.items || []
-      } else if (ev.type === 'verdict') {
-        verdict = ev.verdict
       } else if (ev.type === 'notice') {
         notice.value = ev.text
       } else if (ev.type === 'done') {
@@ -394,7 +313,7 @@ async function send(preset) {
   }
   const body = finalText || (failed ? '' : liveText.value)
   if (body) {
-    messages.value.push(reactive({ tmp: ++tmpSeq, role: 'assistant', content: body, verdict, sources, _open: false }))
+    messages.value.push(reactive({ tmp: ++tmpSeq, role: 'assistant', content: body, sources, _open: false }))
   }
   streaming.value = false
   liveText.value = ''
@@ -442,7 +361,7 @@ onLoad((q) => {
   }
   if (!requireAuth()) return
   loadHistory()
-  loadIntel().then((ok) => { if (ok && !searched.value && !items.value.length) refreshIntel() })
+  loadCtx()
 })
 
 onReady(() => {
@@ -603,41 +522,16 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
   &.stop { background: #475569; }
 }
 
-/* ===== 情报 ===== */
-.it-sec { margin-bottom: 18rpx; }
-.it-head { display: flex; align-items: center; gap: 12rpx; padding: 4rpx 4rpx 12rpx; }
-.it-title { font-size: 28rpx; font-weight: 700; color: #0f172a; }
-.it-n { font-size: 21rpx; color: #94a3b8; }
-.it-refresh { margin-left: auto; font-size: 21rpx; color: #0f766e; border: 1rpx solid #99f6e4; background: #f0fdfa; border-radius: 6rpx; padding: 4rpx 16rpx; &.off { opacity: 0.4; } }
-.it-upd { font-size: 20rpx; color: #94a3b8; }
-.it-state { font-size: 23rpx; color: #64748b; background: #fff; border: 1rpx dashed #cbd5e1; border-radius: 6rpx; padding: 26rpx 22rpx; line-height: 1.7; }
-.it-step { display: block; font-size: 21rpx; color: #0d9488; margin-top: 6rpx; }
-.it-card {
-  background: #fff; border: 1rpx solid #e2e8f0; border-radius: 6rpx; padding: 18rpx 20rpx 14rpx; margin-bottom: 12rpx;
-  &.sel { border-color: #14b8a6; background: #f0fdfa; }
-}
-.it-top { display: flex; align-items: center; gap: 10rpx; }
-.it-side { font-size: 20rpx; font-weight: 700; &.home { color: #dc2626; } &.away { color: #0284c7; } &.neutral { color: #b45309; } }
-.it-cat { font-size: 19rpx; font-weight: 600; color: #fff; background: #64748b; padding: 3rpx 10rpx; border-radius: 6rpx; }
-.it-st { margin-left: auto; font-size: 19rpx; &.confirmed { color: #047857; } &.pending { color: #b45309; } }
-.it-text { display: block; font-size: 26rpx; color: #0f172a; line-height: 1.6; margin-top: 10rpx; word-break: break-all; }
-.it-foot { display: flex; align-items: center; margin-top: 10rpx; gap: 12rpx; }
-.it-src { flex: 1; min-width: 0; font-size: 20rpx; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; &.link { color: #0d9488; } }
-.it-ask { flex-shrink: 0; font-size: 21rpx; font-weight: 600; color: #0f766e; padding: 4rpx 14rpx; border: 1rpx solid #99f6e4; border-radius: 6rpx; background: #f0fdfa; &:active { background: #ccfbf1; } }
-.it-note { display: block; font-size: 20rpx; color: #94a3b8; line-height: 1.5; margin-top: 6rpx; }
-.mc-sep { font-size: 21rpx; color: #94a3b8; padding: 6rpx 4rpx 14rpx; }
-
-/* 追问引用 + 分析卡 */
-.mc-quote { font-size: 21rpx; line-height: 1.5; opacity: 0.88; padding-bottom: 8rpx; border-bottom: 1rpx solid rgba(255, 255, 255, 0.35); }
-.ip { margin-top: 12rpx; background: #f8fafc; border-radius: 6rpx; padding: 14rpx 18rpx 8rpx; }
-.ip-top { display: flex; align-items: center; gap: 12rpx; margin-bottom: 8rpx; }
-.ip-eff { font-size: 26rpx; font-weight: 800; color: #475569; &.home { color: #dc2626; } &.away { color: #0284c7; } }
-.ip-lv { font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx; color: #64748b; background: #fff; border: 1rpx solid #e2e8f0; &.high { color: #b91c1c; border-color: #fecaca; } &.mid { color: #b45309; border-color: #fde68a; } }
-.ip-title { font-size: 19rpx; color: #94a3b8; letter-spacing: 2rpx; margin-bottom: 4rpx; display: block; }
-.ip-step { display: flex; gap: 12rpx; padding: 8rpx 0; border-top: 1rpx solid #eef2f6; }
-.ip-k { flex-shrink: 0; width: 76rpx; font-size: 21rpx; font-weight: 700; color: #0f766e; line-height: 1.6; }
-.ip-t { flex: 1; min-width: 0; font-size: 23rpx; color: #1e293b; line-height: 1.6; word-break: break-all; }
-.mc-focus { display: flex; align-items: center; gap: 10rpx; margin: 14rpx 24rpx 0; padding: 8rpx 14rpx; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; }
-.mc-focus-t { flex: 1; min-width: 0; font-size: 21rpx; color: #0f766e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mc-focus-x { width: 32rpx; height: 32rpx; color: #0f766e; display: flex; align-items: center; justify-content: center; .ico { width: 18rpx; height: 18rpx; } }
+/* ===== 已载入数据 ===== */
+.cx { background: #fff; border: 1rpx solid #d9ece8; border-radius: 6rpx; padding: 26rpx 24rpx 22rpx; }
+.cx-title { display: block; font-size: 30rpx; font-weight: 700; color: #0f172a; }
+.cx-sub { display: block; font-size: 22rpx; color: #64748b; margin-top: 4rpx; }
+.cx-list { margin-top: 16rpx; }
+.cx-row { display: flex; gap: 16rpx; padding: 10rpx 0; border-top: 1rpx solid #f1f5f9; &.off { opacity: 0.45; } }
+.cx-k { flex-shrink: 0; width: 140rpx; font-size: 23rpx; font-weight: 600; color: #0f766e; }
+.cx-v { flex: 1; min-width: 0; font-size: 23rpx; color: #475569; line-height: 1.5; }
+.cx-view { display: block; font-size: 22rpx; color: #0d9488; margin-top: 12rpx; }
+.cx-raw { display: block; margin-top: 10rpx; padding: 14rpx 16rpx; background: #f8fafc; border-radius: 6rpx; font-size: 20rpx; color: #475569; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+.cx-ex { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 18rpx; }
+.cx-q { font-size: 22rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 8rpx 16rpx; }
 </style>

@@ -12,12 +12,8 @@ export function fetchHistory(matchId) {
   return request({ url: `/api/predict/${encodeURIComponent(matchId)}/chat`, timeout: 20000 })
 }
 
-export function fetchIntel(matchId) {
-  return request({ url: `/api/predict/${encodeURIComponent(matchId)}/intel`, timeout: 20000 })
-}
-
-export async function streamIntel(matchId, onEvent) {
-  await streamChat(matchId, null, onEvent, undefined, `/api/predict/${encodeURIComponent(matchId)}/intel/refresh`)
+export function fetchContext(matchId) {
+  return request({ url: `/api/predict/${encodeURIComponent(matchId)}/chat/context`, timeout: 20000 })
 }
 
 export function clearHistory(matchId) {

@@ -4,9 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from database import get_db
+
+
+CST = timezone(timedelta(hours=8))
 
 
 class MatchNotFound(Exception):
@@ -106,6 +111,81 @@ def _f6_stats(f6: Dict[str, Any]) -> Dict[str, Any]:
             "ci": [round(lo_ci * 100), round(hi_ci * 100)]}
 
 
+def _load_full_match(match_id: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM matches WHERE match_id=%s", (match_id,))
+        return cur.fetchone()
+
+
+def _score_of(txt: str) -> Optional[Tuple[str, int, int, str]]:
+    m = re.match(r"^(.*?)(\d+)\s*[:：]\s*(\d+)(.*)$", (txt or "").strip())
+    return (m.group(1).strip(), int(m.group(2)), int(m.group(3)), m.group(4).strip()) if m else None
+
+
+def _rows_before(rows: List[Dict[str, Any]], cutoff: str) -> List[Dict[str, Any]]:
+    return [r for r in (rows or []) if str(r.get("date") or "") < cutoff]
+
+
+def _form_stats(rows: List[Dict[str, Any]], team: str) -> str:
+    w = d = l = gf = ga = n = 0
+    for r in rows:
+        res = r.get("result")
+        w += res == "胜"
+        d += res == "平"
+        l += res == "负"
+        sc = _score_of(r.get("match") or "")
+        if sc and team:
+            left, a, b, right = sc
+            if team[:2] in left:
+                gf += a; ga += b; n += 1
+            elif team[:2] in right:
+                gf += b; ga += a; n += 1
+    s = f"{w}胜{d}平{l}负"
+    if n:
+        s += f",场均进{gf / n:.1f}失{ga / n:.1f}"
+    return s
+
+
+def _rows_text(rows: List[Dict[str, Any]], with_hc: bool = True) -> List[str]:
+    out = []
+    for r in rows:
+        hc = f" | 盘口{r.get('handicap')}" if with_hc and r.get("handicap") not in (None, "") else ""
+        ht = f" | 半场{r.get('halfScore')}" if r.get("halfScore") else ""
+        out.append(f"{r.get('date')} {r.get('competition')} {r.get('match')}{ht}{hc} | {r.get('result') or ''}")
+    return out
+
+
+def render_form(match: Dict[str, Any], form: Optional[Dict[str, Any]], n_h2h: int = 10, n_rec: int = 10) -> Tuple[str, Dict[str, Any]]:
+    """交锋历史 / 双方近期战绩 / 未来赛程(只读缓存,无联网)。已完赛场次只取开赛日之前的记录。"""
+    if not form:
+        return "\n【交锋/近期战绩】暂无数据。", {"h2h": 0, "home": 0, "away": 0}
+    ht, at = match.get("home_team_name") or "主队", match.get("away_team_name") or "客队"
+    ts = match.get("match_timestamp")
+    cutoff = datetime.fromtimestamp(int(ts), CST).strftime("%Y-%m-%d") if ts else "9999-99-99"
+    h2h = _rows_before(form.get("h2h"), cutoff)
+    hr = _rows_before(form.get("homeRecent"), cutoff)
+    ar = _rows_before(form.get("awayRecent"), cutoff)
+    L: List[str] = []
+    rk = f"(联赛排名 {form.get('homeRank')} / {form.get('awayRank')})" if form.get("homeRank") or form.get("awayRank") else ""
+    L.append(f"\n【交锋历史】{ht}(本场主队)视角,共 {len(h2h)} 场,列最近 {min(n_h2h, len(h2h))} 场;"
+             f"最近{min(n_h2h, len(h2h))}场: {_form_stats(h2h[:n_h2h], ht)} {rk}")
+    L.append("说明: 盘口为数据源原值,方向符号不保证与本系统亚盘口径一致,不要据此判断历史让球方。")
+    L.extend(_rows_text(h2h[:n_h2h]) or ["(无交锋记录)"])
+    for tag, name, rows in (("主队", ht, hr), ("客队", at, ar)):
+        L.append(f"\n【{tag}近期战绩】{name},该队视角,最近 {min(n_rec, len(rows))} 场: {_form_stats(rows[:n_rec], name)}")
+        L.extend(_rows_text(rows[:n_rec]) or ["(无记录)"])
+    fut = []
+    for tag, rows in (("主队", form.get("homeFuture")), ("客队", form.get("awayFuture"))):
+        rs = [f"{r.get('date')} {r.get('competition')} {r.get('match')}" for r in (rows or []) if str(r.get("date") or "") >= cutoff][:3]
+        if rs:
+            fut.append(f"{tag}: " + "; ".join(rs))
+    if fut:
+        L.append("\n【未来赛程】(赛程密度/轮换参考)")
+        L.extend(fut)
+    return "\n".join(L), {"h2h": len(h2h), "home": len(hr), "away": len(ar)}
+
+
 def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Optional[List[Dict[str, Any]]] = None) -> str:
     L: List[str] = []
     ht, at = it["homeTeam"]["name"], it["awayTeam"]["name"]
@@ -200,7 +280,22 @@ def build_context(match_id: str) -> Dict[str, Any]:
         arts = match_articles_context(match_id)
     except Exception:  # 文章表不可用不影响聊天
         arts = []
-    text = render_text(it, pred, arts)
-    return {"item": it, "prediction": pred, "text": text,
+    form_text, form_n = "", {"h2h": 0, "home": 0, "away": 0}
+    try:
+        from zgzcw_cache import load_match_form
+        full = _load_full_match(match_id)
+        form_text, form_n = render_form(full, load_match_form(full)) if full else ("", form_n)
+    except Exception:  # noqa: BLE001  缓存不可用不影响聊天
+        pass
+    text = render_text(it, pred, arts) + form_text
+    f6 = it.get("f6") or {}
+    summary = {
+        "ah": it.get("ahHandicapClose") is not None,
+        "jczq": bool(it.get("spf") or it.get("nspf")),
+        "f6": len(f6.get("matches") or []),
+        "h2h": form_n["h2h"], "homeRecent": form_n["home"], "awayRecent": form_n["away"],
+        "articles": len(arts), "prediction": bool(pred),
+    }
+    return {"item": it, "prediction": pred, "text": text, "summary": summary,
             "hash": hashlib.sha1(text.encode()).hexdigest()[:16],
             "home": it["homeTeam"]["name"], "away": it["awayTeam"]["name"]}
