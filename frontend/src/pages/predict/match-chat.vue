@@ -167,7 +167,7 @@ const ctxRows = computed(() => {
   const c = ctx.value
   if (!c) return []
   return [
-    { k: '盘口赔率', ok: c.ah || c.jczq, v: c.ah || c.jczq ? '亚盘、竞彩赔率及变动' : '暂无' },
+    { k: '盘口赔率', ok: c.asian + c.euro > 0, v: `亚盘 ${c.asian} 家 / 欧赔 ${c.euro} 家 / 大小球 ${c.ou} 家,Bet365 亚盘变动 ${c.ticks} 次` },
     { k: '历史同赔', ok: c.f6 > 0, v: c.f6 > 0 ? `${c.f6} 场样本及盘路统计` : '无匹配样本' },
     { k: '七因子预测', ok: c.prediction, v: c.prediction ? '已存预测' : '暂无' },
     { k: '交锋历史', ok: c.h2h > 0, v: c.h2h > 0 ? `共 ${c.h2h} 场,取最近 10 场` : '暂无' },

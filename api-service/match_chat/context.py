@@ -186,6 +186,101 @@ def render_form(match: Dict[str, Any], form: Optional[Dict[str, Any]], n_h2h: in
     return "\n".join(L), {"h2h": len(h2h), "home": len(hr), "away": len(ar)}
 
 
+def _ah_txt(h: Optional[float], text: str = "") -> str:
+    """数据源原值: 正=主让, 负=主受让。输出用文字避免符号歧义。"""
+    if h is None:
+        return "-"
+    t = f"({text})" if text else ""
+    if h == 0:
+        return "平手" + t
+    return (f"主让{abs(h):g}" if h > 0 else f"主受让{abs(h):g}") + t
+
+
+def _w(a, b) -> str:
+    f = lambda v: "-" if v is None else f"{v:g}"
+    return f"{f(a)}→{f(b)}"
+
+
+def _probs(o: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float]]:
+    try:
+        w, d, l = float(o["win"]), float(o["draw"]), float(o["lose"])
+        s = 1 / w + 1 / d + 1 / l
+        return 100 / w / s, 100 / d / s, 100 / l / s
+    except (TypeError, KeyError, ValueError, ZeroDivisionError):
+        return None
+
+
+def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """多家公司亚盘 / 欧赔 / 大小球 + Bet365 亚盘逐次变动。只读缓存,无联网。竞彩赔率口径不同,不纳入。"""
+    from zgzcw_cache import get_fenxi_cache, list_ah_ticks, load_predict_inputs, _companies
+    cache = get_fenxi_cache(match_id) or {}
+    _, asian, euro = load_predict_inputs(match)
+    euro_c = [x for x in ((euro or {}).get("companies") or []) if x.get("bookmaker") != "竞彩官方"]
+    ou_c = _companies(cache.get("ou_json"))
+    ticks = list_ah_ticks(match_id, cid=2)
+    n = {"asian": len(asian or []), "euro": len(euro_c), "ou": len(ou_c), "ticks": len(ticks)}
+    L: List[str] = []
+
+    def ts(k):
+        v = cache.get(k)
+        return f",抓取于 {v:%m-%d %H:%M}" if hasattr(v, "strftime") else ""
+
+    L.append(f"\n【盘口】亚盘·多家公司初盘→即时盘{ts('asian_fetched_at')}。盘口用文字表示:主让=主队让球,主受让=主队受让;水位为主队水/客队水。")
+    up = down = same = 0
+    for a in asian or []:
+        i, cu = a.get("initial") or {}, a.get("current") or {}
+        hi, hc = i.get("handicap"), cu.get("handicap")
+        if hi is None or hc is None:
+            mv = "无法比较"
+        elif hc > hi:
+            mv, up = "升盘(主队更被看好)", up + 1
+        elif hc < hi:
+            mv, down = "降盘(主队热度下降)", down + 1
+        else:
+            mv, same = "盘口不变", same + 1
+        L.append(f"- {a.get('bookmaker')}: {_ah_txt(hi, i.get('handicapText'))}→{_ah_txt(hc, cu.get('handicapText'))} | {mv} | "
+                 f"主水{_w(i.get('home'), cu.get('home'))} 客水{_w(i.get('away'), cu.get('away'))}")
+    if asian:
+        L.append(f"汇总: {len(asian)}家公司中 升盘{up} 降盘{down} 不变{same}")
+    else:
+        L.append("(暂无亚盘抓取数据)")
+
+    if ticks:
+        asc = list(reversed(ticks))
+        pick = asc if len(asc) <= 11 else [asc[0]] + asc[-10:]
+        L.append(f"\nBet365 亚盘逐次变动(共{len(ticks)}次,时间从早到晚" + (",首条为最早记录,其后为最近10次" if len(asc) > 11 else "") + "):")
+        prev = None
+        for t in pick:
+            tag = "" if prev is None else (" 升盘" if (t.get("handicap") or 0) > (prev or 0) else (" 降盘" if (t.get("handicap") or 0) < (prev or 0) else ""))
+            L.append(f"- {t.get('time')} {_ah_txt(t.get('handicap'), t.get('handicapText'))} 主水{t.get('home')} 客水{t.get('away')}{tag}")
+            prev = t.get("handicap")
+
+    L.append(f"\n【欧赔】多家公司初赔→即时赔率(胜/平/负){ts('euro_fetched_at')}。已排除竞彩官方(竞彩让球与赔率口径不同)。隐含概率已去除返还率。")
+    sw = sd = sl = 0.0
+    k = 0
+    for e in euro_c:
+        i, cu = e.get("initial") or {}, e.get("current") or {}
+        pi, pc = _probs(i), _probs(cu)
+        ch = ""
+        if pi and pc:
+            d = [pc[x] - pi[x] for x in range(3)]
+            ch = f" | 隐含概率 胜{pi[0]:.1f}→{pc[0]:.1f} 平{pi[1]:.1f}→{pc[1]:.1f} 负{pi[2]:.1f}→{pc[2]:.1f}"
+            sw, sd, sl, k = sw + d[0], sd + d[1], sl + d[2], k + 1
+        rr = f" | 返还率{e.get('returnRate')}%" if e.get("returnRate") else ""
+        L.append(f"- {e.get('bookmaker')}: 初 {i.get('win')}/{i.get('draw')}/{i.get('lose')} → 即 {cu.get('win')}/{cu.get('draw')}/{cu.get('lose')}{rr}{ch}")
+    if k:
+        L.append(f"汇总: {k}家公司平均隐含概率变化 胜{sw / k:+.1f}pp 平{sd / k:+.1f}pp 负{sl / k:+.1f}pp")
+    elif not euro_c:
+        L.append("(暂无欧赔抓取数据)")
+
+    if ou_c:
+        L.append(f"\n【大小球】多家公司初盘→即时盘(大球水/小球水){ts('ou_fetched_at')}")
+        for o in ou_c:
+            i, cu = o.get("initial") or {}, o.get("current") or {}
+            L.append(f"- {o.get('bookmaker')}: {i.get('line')}→{cu.get('line')} | 大水{_w(i.get('over'), cu.get('over'))} 小水{_w(i.get('under'), cu.get('under'))}")
+    return "\n".join(L), n
+
+
 def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Optional[List[Dict[str, Any]]] = None) -> str:
     L: List[str] = []
     ht, at = it["homeTeam"]["name"], it["awayTeam"]["name"]
@@ -194,23 +289,6 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
              f"期号 {it.get('matchNumber')} | {'单关' if it.get('isSingle') else '非单关'}")
     if it.get("status") == "finished" or it.get("actualScore"):
         L.append(f"已完赛: 比分 {it.get('actualScore')} ({it.get('actualResult')}), 实际盘路 {it.get('actualAh') or '无'}")
-
-    L.append("\n【盘口】(亚盘符号: 负=主让, 正=主受让; 上盘=让球方, 下盘=受让方)")
-    ao, ac = it.get("ahHandicapOpen"), it.get("ahHandicapClose")
-    move = ""
-    if ao is not None and ac is not None:
-        move = "不变" if ao == ac else ("盘口向主队倾斜(主队更被看好)" if ac < ao else "盘口向客队倾斜(客队更被看好)")
-    L.append(f"亚盘(Bet365) 初 {_fmt_ah(ao)} -> 终 {_fmt_ah(ac)} {move}")
-    if it.get("handicap") is not None:
-        L.append(f"竞彩让球(整数,仅参考,非亚盘): {it['handicap']:+g}")
-    spf, nspf = it.get("spf"), it.get("nspf")
-    for tag, o in (("竞彩胜平负(spf)", spf), ("竞彩让球胜平负(nspf)", nspf)):
-        if o:
-            L.append(f"{tag} 初 {_odds3(o.get('initial'))} -> 终 {_odds3(o.get('current'))} (主胜/平/客胜)")
-    if it.get("beidanDeep"):
-        L.append("北单让球标记: 深盘1.5")
-    if it.get("beidanFlip"):
-        L.append("北单让球标记: 与竞彩让球方向相反")
 
     f6 = it.get("f6") or {}
     L.append("\n【历史同赔 F6】(池为2018-2026已完赛; 匹配: 低赔方±0.03+高赔方±0.1, 同侧、变动方向一致, 剔除本场)")
@@ -269,7 +347,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
              ("交锋历史", "h2h"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}
@@ -306,11 +384,16 @@ def build_context(match_id: str) -> Dict[str, Any]:
         form_text, form_n = render_form(full, load_match_form(full)) if full else ("", form_n)
     except Exception:  # noqa: BLE001  缓存不可用不影响聊天
         pass
-    text = render_text(it, pred, arts) + form_text
+    market_text, mk = "", {"asian": 0, "euro": 0, "ou": 0, "ticks": 0}
+    try:
+        full2 = _load_full_match(match_id)
+        market_text, mk = render_market(match_id, full2) if full2 else ("", mk)
+    except Exception:  # noqa: BLE001
+        pass
+    text = render_text(it, pred, arts) + market_text + form_text
     f6 = it.get("f6") or {}
     summary = {
-        "ah": it.get("ahHandicapClose") is not None,
-        "jczq": bool(it.get("spf") or it.get("nspf")),
+        "asian": mk["asian"], "euro": mk["euro"], "ou": mk["ou"], "ticks": mk["ticks"],
         "f6": len(f6.get("matches") or []),
         "h2h": form_n["h2h"], "homeRecent": form_n["home"], "awayRecent": form_n["away"],
         "articles": len(arts), "prediction": bool(pred),
