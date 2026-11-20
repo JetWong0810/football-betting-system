@@ -536,6 +536,7 @@ def get_match_indices(match_id: str):
     return {
         "match": format_match(match),
         "fid": packed.get("fid") or "",
+        "fetchedAt": packed.get("fetchedAt") or {},
         "indices": packed.get("indices") or {},
     }
 

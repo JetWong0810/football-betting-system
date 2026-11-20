@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from database import get_db
@@ -353,6 +354,18 @@ def _euro_summary_rows(companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows + companies
 
 
+_CST = timezone(timedelta(hours=8))
+
+
+def fmt_cst(ts) -> Optional[str]:
+    """fenxi 缓存的 *_fetched_at 由 MySQL NOW() 写入, 容器时区是 UTC。转成北京时间字符串。"""
+    if not ts or not hasattr(ts, "strftime"):
+        return None
+    if getattr(ts, "tzinfo", None) is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(_CST).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def load_indices(match: Dict[str, Any]) -> Dict[str, Any]:
     """指数页只读库, 不开浏览器。fid 返回 fid_zgzcw 供前端 history 查询。"""
     cache = get_fenxi_cache(match.get("match_id") or "") or {}
@@ -363,6 +376,13 @@ def load_indices(match: Dict[str, Any]) -> Dict[str, Any]:
         asian = asian_from_db(match)
     return {
         "fid": str(match.get("fid_zgzcw") or "").strip(),
+        # 各类数据的真实抓取时间(北京时间); 没有缓存时为 None
+        "fetchedAt": {
+            "asian": fmt_cst(cache.get("asian_fetched_at")),
+            "european": fmt_cst(cache.get("euro_fetched_at")),
+            "overUnder": fmt_cst(cache.get("ou_fetched_at")),
+            "ticks": fmt_cst(cache.get("ticks_fetched_at")),
+        },
         "indices": {
             "european": _euro_summary_rows(euro),
             "asian": asian,

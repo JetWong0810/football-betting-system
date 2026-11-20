@@ -13,7 +13,8 @@
         <text class="time">{{ matchInfo.time }}</text>
         <view class="status-badge" :class="matchInfo.statusClass">{{ matchInfo.status }}</view>
       </view>
-      <view class="update-info">最后更新: {{ lastUpdateTime }}</view>
+      <view class="update-info" :class="{ stale: updateInfo.stale }">{{ updateInfo.text }}</view>
+      <view v-if="updateInfo.sub" class="update-info sub">{{ updateInfo.sub }}</view>
     </view>
 
     <!-- 一级 Tab 导航 -->
@@ -535,7 +536,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from "vue";
+import { ref, computed, reactive, onUnmounted } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import dayjs from "dayjs";
 import { request } from "@/utils/http";
@@ -558,9 +559,35 @@ const errorMsg = ref("");
 const matchId = ref("");
 const fid = ref("");
 
-const lastUpdateTime = computed(() => {
-  return dayjs().format("YYYY-MM-DD HH:mm:ss");
+// 各类数据的真实抓取时间(来自接口, 北京时间)。不是当前时间。
+const fetchedAt = ref({});
+const nowTick = ref(Date.now());
+let nowTimer = null;
+const ageText = (ts) => {
+  const t = dayjs(ts);
+  if (!ts || !t.isValid()) return "";
+  const m = Math.max(0, Math.floor((nowTick.value - t.valueOf()) / 60000));
+  if (m < 1) return "刚刚";
+  if (m < 60) return `${m} 分钟前`;
+  return `${Math.floor(m / 60)} 小时 ${m % 60} 分前`;
+};
+const updateInfo = computed(() => {
+  const map = {
+    asian: { key: "asian", name: "亚盘" },
+    european: { key: "european", name: "欧赔" },
+    overunder: { key: "overUnder", name: "大小球" },
+  };
+  const cfg = map[activeSecondaryTab.value];
+  if (activePrimaryTab.value !== "indices" || !cfg) return { text: "", sub: "", stale: false };
+  const ts = fetchedAt.value[cfg.key];
+  if (!ts) return { text: `${cfg.name}抓取时间: 暂无`, sub: "", stale: true };
+  const ageMin = Math.floor((nowTick.value - dayjs(ts).valueOf()) / 60000);
+  const sub = cfg.key === "asian" && fetchedAt.value.ticks
+    ? `Bet365 变动记录抓取于 ${fetchedAt.value.ticks.slice(11, 19)}(${ageText(fetchedAt.value.ticks)})`
+    : "";
+  return { text: `${cfg.name}抓取于 ${ts.slice(11, 19)}(${ageText(ts)})`, sub, stale: ageMin >= 30 };
 });
+
 
 // 一级 Tab
 const primaryTabs = [
@@ -610,6 +637,8 @@ async function loadIndices() {
     const indices = res.indices || {};
 
     fid.value = res.fid || "";
+    fetchedAt.value = res.fetchedAt || {};
+    nowTick.value = Date.now();
     europeanOdds.value = indices.european || [];
     asianOdds.value = indices.asian || [];
     overUnderOdds.value = indices.overUnder || [];
@@ -637,7 +666,9 @@ async function loadIndices() {
 onLoad((query) => {
   matchId.value = query.matchId || "";
   loadIndices();
+  nowTimer = setInterval(() => { nowTick.value = Date.now(); }, 30000);
 });
+onUnmounted(() => { if (nowTimer) clearInterval(nowTimer); });
 
 // 赔率变动弹窗
 const expandedHistory = reactive({});
@@ -1060,6 +1091,8 @@ function setAwayMatchCount(count) {
   font-size: 20rpx;
   color: #9ca3af;
   margin-top: 12rpx;
+  &.sub { margin-top: 4rpx; }
+  &.stale { color: #d97706; }
 }
 
 // 一级 Tab

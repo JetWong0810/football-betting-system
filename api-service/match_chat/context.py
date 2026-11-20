@@ -222,8 +222,9 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
     L: List[str] = []
 
     def ts(k):
-        v = cache.get(k)
-        return f",抓取于 {v:%m-%d %H:%M}" if hasattr(v, "strftime") else ""
+        from zgzcw_cache import fmt_cst
+        v = fmt_cst(cache.get(k))
+        return f",抓取于 {v[5:16]}(北京时间)" if v else ""
 
     L.append(f"\n【盘口】亚盘·多家公司初盘→即时盘{ts('asian_fetched_at')}。盘口用文字表示:主让=主队让球,主受让=主队受让;水位为主队水/客队水。")
     up = down = same = 0

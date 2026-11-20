@@ -16,6 +16,12 @@ FORM_TTL_SEC = int(os.getenv("ZGZCW_FORM_TTL_SEC", "21600"))
 ASIAN_TTL_SEC = int(os.getenv("ZGZCW_ASIAN_TTL_SEC", "1200"))
 OU_TTL_SEC = int(os.getenv("ZGZCW_OU_TTL_SEC", "2700"))
 TICKS_TTL_SEC = int(os.getenv("ZGZCW_TICKS_TTL_SEC", "2700"))
+# 分级刷新: 按距开赛时间决定各类缓存的最短间隔(秒)。临近开赛的比赛刷得勤, 远期的让出页面预算。
+IMMINENT_SEC = int(os.getenv("ZGZCW_IMMINENT_SEC", "1800"))       # 开赛前30分钟内
+NEAR_SEC = int(os.getenv("ZGZCW_NEAR_SEC", str(3 * 3600)))        # 开赛前3小时内
+MID_SEC = int(os.getenv("ZGZCW_MID_SEC", str(12 * 3600)))         # 开赛前12小时内
+FOCUS_SEC = int(os.getenv("ZGZCW_FOCUS_SEC", "900"))              # 轻量模式下仍重点刷新的窗口
+FOCUS_BUDGET = int(os.getenv("ZGZCW_FOCUS_BUDGET", "30"))
 _CACHE_MIN_LEN = 20
 # 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
 LIGHT_WINDOW_SEC = int(os.getenv("PRE_KICKOFF_LIGHT_SEC", "720"))
@@ -97,6 +103,40 @@ def _asian_close_unchanged(match: Dict, line: Dict) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+def tier_ttls(eta: Optional[float]) -> tuple:
+    """距开赛秒数 -> (亚盘TTL, 欧赔/大小球/Bet365变动TTL)。
+
+    已开赛(eta<=0)盘口已封, 降到最低频只留一次收尾抓取。
+    """
+    if eta is None:
+        return ASIAN_TTL_SEC, EURO_TTL_SEC
+    if eta <= 0:
+        return 3600, 7200
+    if eta <= IMMINENT_SEC:
+        return 240, 600
+    if eta <= NEAR_SEC:
+        return 540, 1200
+    if eta <= MID_SEC:
+        return ASIAN_TTL_SEC, EURO_TTL_SEC
+    return 3600, 7200
+
+
+def next_sync_sleep(eta: Optional[float], elapsed: float, full_interval: int = 600,
+                    imminent: int = IMMINENT_SEC, imminent_interval: int = 300,
+                    min_gap: int = 20) -> int:
+    """本轮结束后睡多久。常规间隔按"开始到开始"算(扣掉本轮耗时), 开赛前30分钟内缩到5分钟。
+
+    临近开赛(compute_sync_sleep 已给出绝对等待)沿用其结果。
+    """
+    base = compute_sync_sleep(eta, full_interval=full_interval)
+    if base != full_interval:
+        return base
+    gap = full_interval
+    if eta is not None and 0 < eta <= imminent:
+        gap = min(gap, imminent_interval)
+    return max(min_gap, int(gap - elapsed))
 
 
 def _is_stale(ts, ttl_sec: int) -> bool:
@@ -234,7 +274,11 @@ class SportterySyncService:
             data = self.fetch_pool(pool_code)
             self.parse_pool(pool_name, data)
         if light:
-            logger.info("临近开赛轻量同步: 只更新体彩赔率, 跳过比分/终盘校正/亚盘")
+            logger.info("临近开赛轻量同步: 体彩赔率 + 仅对即将开赛的比赛重点刷新亚盘/Bet365变动, 跳过比分/终盘校正")
+            try:
+                self.stats["asian"] = self.refresh_live_asian_bet365(focus_sec=FOCUS_SEC)
+            except Exception as e:
+                logger.warning(f"临近开赛重点刷新失败: {e}")
             self.repository.finalize_sync(self.stats["matches"], self.stats["odds"])
             return self.stats
         try:
@@ -362,20 +406,32 @@ class SportterySyncService:
             updated += 1
         return updated
 
-    def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False) -> int:
-        """在售场刷新亚盘/欧赔/基本面/指数。缺亚盘优先, 基本面已新则跳过。
+    def refresh_live_asian_bet365(self, max_workers: int = 4, overwrite_open: bool = False,
+                                  focus_sec: Optional[int] = None) -> int:
+        """在售场刷新亚盘/Bet365变动/欧赔/大小球/基本面。
 
-        顺序: /ypdb → /bsls → /bjop → /dxdb+ticks。Playwright 有页数预算,
-        周末 40+ 场时先补同赔页要的 Bet365 亚盘, 再补近期/交锋。
-        max_workers 保留签名, 足彩网路径忽略。
+        按距开赛时间分级(tier_ttls); targets 本身按开赛时间升序, 临近的先抓。
+        页面预算有限, 阶段顺序按重要性: 亚盘 -> Bet365变动 -> 欧赔 -> 大小球 -> 基本面。
+        被二次验证中止时, 丢的是排在后面的次要数据。
+        focus_sec: 轻量模式用。只处理 0<eta<=focus_sec 的比赛, 只抓亚盘+Bet365变动, 不看TTL(亚盘90s)。
         """
-        from scraper.zgzcw_fenxi import FenxiSession
+        import time as _time
+        from scraper.zgzcw_fenxi import FENXI_BUDGET, FenxiSession
         from scraper.zgzcw_live import resolve_zgzcw_fids
 
         live = self.repository.list_live_for_asian()
         if not live:
             return 0
-        logger.info(f"在售亚盘刷新: {len(live)} 场")
+        logger.info(f"在售亚盘刷新: {len(live)} 场" + (f" [重点: 开赛前{focus_sec}s内]" if focus_sec else ""))
+
+        def eta_of(m) -> Optional[float]:
+            ts = m.get("match_timestamp")
+            return (float(ts) - _time.time()) if ts else None
+
+        if focus_sec:
+            live = [m for m in live if (eta_of(m) is not None and 0 < eta_of(m) <= focus_sec)]
+            if not live:
+                return 0
 
         fid_map = resolve_zgzcw_fids(live)
         for m in live:
@@ -390,27 +446,36 @@ class SportterySyncService:
             m["fid_zgzcw"] = info["fid"]
 
         targets = [m for m in live if m.get("fid_zgzcw")]
+        targets.sort(key=lambda x: (x.get("match_timestamp") is None, x.get("match_timestamp") or 0))
         if not targets:
             logger.warning("zgzcw 未映射到在售场, 本轮亚盘跳过")
             return 0
 
         meta = self.repository.list_fenxi_meta([m["match_id"] for m in targets])
-        n_form = sum(1 for m in targets if need_form_fetch(meta.get(m["match_id"])))
+
+        def asian_ttl(m) -> int:
+            return 90 if focus_sec else tier_ttls(eta_of(m))[0]
+
+        def aux_ttl(m) -> int:
+            return tier_ttls(eta_of(m))[1]
+
+        n_form = 0 if focus_sec else sum(1 for m in targets if need_form_fetch(meta.get(m["match_id"])))
         n_asian = sum(
             1 for m in targets
-            if need_asian_fetch(meta.get(m["match_id"]), force=overwrite_open)
+            if need_asian_fetch(meta.get(m["match_id"]), ttl=asian_ttl(m), force=overwrite_open)
         )
         logger.info(f"本轮待抓 基本面{n_form} 亚盘{n_asian}/{len(targets)}")
         updated = 0
-        with FenxiSession() as sess:
+        with FenxiSession(budget=FOCUS_BUDGET if focus_sec else FENXI_BUDGET) as sess:
             packs = {}
 
+            # 1) 亚盘(各家公司初/即时盘)
             for m in targets:
                 if sess.aborted or sess.remaining <= 0:
                     break
                 mid = m.get("match_id")
                 fid = m.get("fid_zgzcw")
-                if not need_asian_fetch(meta.get(mid), force=overwrite_open):
+                if not need_asian_fetch(meta.get(mid), ttl=asian_ttl(m), force=overwrite_open):
                     continue
                 pack = sess.fetch_ypdb(fid)
                 if not pack:
@@ -455,28 +520,7 @@ class SportterySyncService:
                     f"{line.get('open_hc')}→{line.get('close_hc')} {line.get('name')}"
                 )
 
-            for m in targets:
-                if sess.aborted or sess.remaining <= 0:
-                    break
-                mid = m.get("match_id")
-                fid = m.get("fid_zgzcw")
-                if not need_form_fetch(meta.get(mid)):
-                    continue
-                form = sess.fetch_bsls(fid)
-                if form and (form.get("homeRecent") or form.get("awayRecent")):
-                    try:
-                        self.repository.upsert_fenxi_cache(mid, form=form)
-                        row = meta.setdefault(mid, {})
-                        row["form_fetched_at"] = datetime.utcnow()
-                        row["form_len"] = 99
-                        logger.info(
-                            f"  基本面 {m.get('match_code')} "
-                            f"近{len(form.get('homeRecent') or [])}/"
-                            f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"基本面缓存失败 {mid}: {e}")
-
+            # 2) Bet365 亚盘逐次变动: 盘口线变了立即重抓; 重点模式每轮都抓
             for m in targets:
                 if sess.aborted or sess.remaining <= 0:
                     break
@@ -486,35 +530,50 @@ class SportterySyncService:
                 asian_changed = mid in packs and not _asian_close_unchanged(
                     m, (packs[mid].get("bet365") or {})
                 )
-                need_bjop = (
-                    asian_changed
-                    or _cache_empty(row_meta, "euro_len")
-                    or _is_stale(row_meta.get("euro_fetched_at"), EURO_TTL_SEC)
-                )
-                if not need_bjop:
+                if not (focus_sec or asian_changed or _is_stale(row_meta.get("ticks_fetched_at"), aux_ttl(m))):
                     continue
-                euro = sess.fetch_bjop(fid)
-                if euro and euro.get("companies"):
+                ticks = sess.fetch_ypdb_zhishu(fid)
+                if ticks:
                     try:
-                        self.repository.upsert_fenxi_cache(mid, euro=euro)
-                        logger.info(f"  欧赔 {m.get('match_code')} {len(euro['companies'])}家")
+                        n = self.repository.replace_ah_ticks(mid, ticks)
+                        logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
                     except Exception as e:
-                        logger.warning(f"欧赔缓存失败 {mid}: {e}")
+                        logger.warning(f"亚盘轴落库失败 {mid}: {e}")
 
-            for m in targets:
-                if sess.aborted or sess.remaining <= 0:
-                    break
-                mid = m.get("match_id")
-                fid = m.get("fid_zgzcw")
-                row_meta = meta.get(mid) or {}
-                asian_changed = mid in packs and not _asian_close_unchanged(
-                    m, (packs[mid].get("bet365") or {})
-                )
-                need_ou = asian_changed or _is_stale(row_meta.get("ou_fetched_at"), OU_TTL_SEC)
-                need_ticks = asian_changed or _is_stale(
-                    row_meta.get("ticks_fetched_at"), TICKS_TTL_SEC
-                )
-                if need_ou:
+            if not focus_sec:
+                # 3) 欧赔
+                for m in targets:
+                    if sess.aborted or sess.remaining <= 0:
+                        break
+                    mid = m.get("match_id")
+                    fid = m.get("fid_zgzcw")
+                    row_meta = meta.get(mid) or {}
+                    asian_changed = mid in packs and not _asian_close_unchanged(
+                        m, (packs[mid].get("bet365") or {})
+                    )
+                    if not (asian_changed or _cache_empty(row_meta, "euro_len")
+                            or _is_stale(row_meta.get("euro_fetched_at"), aux_ttl(m))):
+                        continue
+                    euro = sess.fetch_bjop(fid)
+                    if euro and euro.get("companies"):
+                        try:
+                            self.repository.upsert_fenxi_cache(mid, euro=euro)
+                            logger.info(f"  欧赔 {m.get('match_code')} {len(euro['companies'])}家")
+                        except Exception as e:
+                            logger.warning(f"欧赔缓存失败 {mid}: {e}")
+
+                # 4) 大小球
+                for m in targets:
+                    if sess.aborted or sess.remaining <= 0:
+                        break
+                    mid = m.get("match_id")
+                    fid = m.get("fid_zgzcw")
+                    row_meta = meta.get(mid) or {}
+                    asian_changed = mid in packs and not _asian_close_unchanged(
+                        m, (packs[mid].get("bet365") or {})
+                    )
+                    if not (asian_changed or _is_stale(row_meta.get("ou_fetched_at"), aux_ttl(m))):
+                        continue
                     ou = sess.fetch_dxdb(fid)
                     if ou and ou.get("companies"):
                         try:
@@ -522,16 +581,29 @@ class SportterySyncService:
                             logger.info(f"  大小球 {m.get('match_code')} {len(ou['companies'])}家")
                         except Exception as e:
                             logger.warning(f"大小球缓存失败 {mid}: {e}")
-                if sess.aborted or sess.remaining <= 0:
-                    break
-                if need_ticks:
-                    ticks = sess.fetch_ypdb_zhishu(fid)
-                    if ticks:
+
+                # 5) 基本面(近期/交锋, 6小时一次, 最不急)
+                for m in targets:
+                    if sess.aborted or sess.remaining <= 0:
+                        break
+                    mid = m.get("match_id")
+                    fid = m.get("fid_zgzcw")
+                    if not need_form_fetch(meta.get(mid)):
+                        continue
+                    form = sess.fetch_bsls(fid)
+                    if form and (form.get("homeRecent") or form.get("awayRecent")):
                         try:
-                            n = self.repository.replace_ah_ticks(mid, ticks)
-                            logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
+                            self.repository.upsert_fenxi_cache(mid, form=form)
+                            row = meta.setdefault(mid, {})
+                            row["form_fetched_at"] = datetime.utcnow()
+                            row["form_len"] = 99
+                            logger.info(
+                                f"  基本面 {m.get('match_code')} "
+                                f"近{len(form.get('homeRecent') or [])}/"
+                                f"{len(form.get('awayRecent') or [])} 交锋{len(form.get('h2h') or [])}"
+                            )
                         except Exception as e:
-                            logger.warning(f"亚盘轴落库失败 {mid}: {e}")
+                            logger.warning(f"基本面缓存失败 {mid}: {e}")
         logger.info(f"在售亚盘刷新完成: {updated}/{len(targets)} (列表{len(live)})")
         try:
             n_bd = self.refresh_bjdcsf(live)

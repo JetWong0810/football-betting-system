@@ -17,7 +17,7 @@ load_dotenv()
 from database import init_db
 from scraper.sporttery_service import (
     SportterySyncService,
-    compute_sync_sleep,
+    next_sync_sleep,
     should_light_sync,
 )
 
@@ -57,20 +57,22 @@ def run_sync():
 if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("足球竞彩数据抓取服务启动 (循环模式)")
-    logger.info(f"常规间隔: {SYNC_INTERVAL} 秒; 开赛前自动加密体彩赔率")
+    logger.info(f"常规间隔: {SYNC_INTERVAL} 秒(开始到开始); 开赛前30分钟内5分钟一轮; 临近开赛重点刷新亚盘")
     logger.info("=" * 60)
 
     init_db()
     logger.info("数据库初始化完成")
 
     while True:
+        t0 = time.time()
         try:
             _, eta = run_sync()
         except Exception as e:
             logger.error(f"本次同步异常: {e}")
             eta = None
 
-        sleep_s = compute_sync_sleep(eta, full_interval=SYNC_INTERVAL)
+        # 常规间隔按"开始到开始"算(扣掉本轮耗时); 开赛前30分钟内缩到5分钟
+        sleep_s = next_sync_sleep(eta, time.time() - t0, full_interval=SYNC_INTERVAL)
         if eta is not None and eta > 0:
             logger.info(f"距下场开赛 {int(eta)} 秒, 等待 {sleep_s} 秒后同步...")
         else:

@@ -69,6 +69,8 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-600}
       HTTP_TIMEOUT: ${HTTP_TIMEOUT:-20}
+      # 分级刷新(临近开赛的场次更勤)后每轮需要更多页面; 被二次验证拦截频繁时可调回 40
+      ZGZCW_FENXI_BUDGET: ${ZGZCW_FENXI_BUDGET:-60}
     depends_on:
       mysql:
         condition: service_healthy
