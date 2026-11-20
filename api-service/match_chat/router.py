@@ -30,7 +30,7 @@ class ImageIn(BaseModel):
 class ChatIn(BaseModel):
     message: str = Field("", max_length=service.MAX_TEXT)
     images: List[ImageIn] = Field(default_factory=list)
-    web: bool = False
+    web: bool = True
 
 
 def _sse(obj: Dict[str, Any]) -> str:

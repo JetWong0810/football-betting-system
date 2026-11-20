@@ -30,16 +30,17 @@
         <view v-else-if="storeError" class="mc-state">{{ storeError }}</view>
 
         <view v-else-if="!messages.length && !streaming" class="cx">
-          <text class="cx-title">已载入本场数据</text>
-          <text class="cx-sub">不会自动联网或查询,直接提问即可</text>
+          <text class="cx-title">AI 分析</text>
+          <text class="cx-sub">默认和普通 AI 聊天一样,可联网搜索,不带入本场数据。需要时直接说"请关联本场的某某数据"。</text>
           <view class="cx-list">
             <view v-for="r in ctxRows" :key="r.k" class="cx-row" :class="{ off: !r.ok }">
               <text class="cx-k">{{ r.k }}</text>
               <text class="cx-v">{{ r.v }}</text>
             </view>
           </view>
-          <text v-if="ctxText" class="cx-view" @tap="showCtx = !showCtx">{{ showCtx ? '收起数据' : '查看喂给 AI 的全部数据' }}</text>
+          <text v-if="ctxText" class="cx-view" @tap="showCtx = !showCtx">{{ showCtx ? '收起' : '查看本场全部数据原文' }}</text>
           <text v-if="showCtx" class="cx-raw">{{ ctxText }}</text>
+          <text class="cx-lbl">试试</text>
           <view class="cx-ex">
             <text v-for="q in examples" :key="q" class="cx-q" @tap="send(q)">{{ q }}</text>
           </view>
@@ -51,6 +52,7 @@
             <text v-if="m.attachments" class="mc-user-att">含 {{ m.attachments }} 张图片</text>
           </view>
           <view v-else class="mc-ai">
+            <text v-if="(m.attached || []).length" class="mc-att">已关联: {{ m.attached.join(' · ') }}</text>
             <view class="mc-body">
               <view class="mc-md" v-html="renderMd(m.content)"></view>
             </view>
@@ -63,6 +65,7 @@
             <view class="mc-steps">
               <text v-for="(s, i) in steps" :key="i" class="mc-step" :class="{ last: i === steps.length - 1 }">{{ s }}</text>
             </view>
+            <text v-if="liveAttached.length" class="mc-att">已关联: {{ liveAttached.join(' · ') }}</text>
             <view v-if="liveText" class="mc-md" v-html="renderMd(liveText)"></view>
             <view v-if="!liveText" class="mc-wait">
               <view class="mc-dot"></view><view class="mc-dot"></view><view class="mc-dot"></view>
@@ -141,7 +144,8 @@ const loadingHistory = ref(true)
 const storeError = ref('')
 const draft = ref('')
 const images = ref([])
-const web = ref(false)
+const web = ref(true)
+const liveAttached = ref([])
 const streaming = ref(false)
 const liveText = ref('')
 const steps = ref([])
@@ -158,13 +162,12 @@ let tmpSeq = 0
 const ctx = ref(null)
 const ctxText = ref('')
 const showCtx = ref(false)
-const examples = ['这场盘口和赔率有什么矛盾?', '近期状态和交锋怎么看?', '同赔样本可靠吗?', '关联文章里哪些观点可信?']
+const examples = ['双方首发阵容出来了吗?', '请关联本场盘口和赔率数据,分析有什么矛盾', '请关联交锋和近期战绩,分析双方状态', '请关联本场全部数据,综合分析']
 const ctxRows = computed(() => {
   const c = ctx.value
   if (!c) return []
   return [
-    { k: '亚盘', ok: c.ah, v: c.ah ? '初盘/终盘及变动' : '暂无' },
-    { k: '竞彩赔率', ok: c.jczq, v: c.jczq ? '胜平负、让球胜平负及变动' : '暂无' },
+    { k: '盘口赔率', ok: c.ah || c.jczq, v: c.ah || c.jczq ? '亚盘、竞彩赔率及变动' : '暂无' },
     { k: '历史同赔', ok: c.f6 > 0, v: c.f6 > 0 ? `${c.f6} 场样本及盘路统计` : '无匹配样本' },
     { k: '七因子预测', ok: c.prediction, v: c.prediction ? '已存预测' : '暂无' },
     { k: '交锋历史', ok: c.h2h > 0, v: c.h2h > 0 ? `共 ${c.h2h} 场,取最近 10 场` : '暂无' },
@@ -273,6 +276,7 @@ async function send(preset) {
   streaming.value = true
   liveText.value = ''
   steps.value = []
+  liveAttached.value = []
   notice.value = ''
   errText.value = ''
   stick = true
@@ -291,6 +295,8 @@ async function send(preset) {
         if (steps.value[steps.value.length - 1] !== ev.text) steps.value.push(ev.text)
         if (steps.value.length > 6) steps.value.shift()
         toBottom()
+      } else if (ev.type === 'attached') {
+        liveAttached.value = ev.sections || []
       } else if (ev.type === 'sources') {
         sources = ev.items || []
       } else if (ev.type === 'notice') {
@@ -313,7 +319,7 @@ async function send(preset) {
   }
   const body = finalText || (failed ? '' : liveText.value)
   if (body) {
-    messages.value.push(reactive({ tmp: ++tmpSeq, role: 'assistant', content: body, sources, _open: false }))
+    messages.value.push(reactive({ tmp: ++tmpSeq, role: 'assistant', content: body, sources, attached: liveAttached.value.slice(), _open: false }))
   }
   streaming.value = false
   liveText.value = ''
@@ -534,4 +540,7 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
 .cx-raw { display: block; margin-top: 10rpx; padding: 14rpx 16rpx; background: #f8fafc; border-radius: 6rpx; font-size: 20rpx; color: #475569; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
 .cx-ex { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 18rpx; }
 .cx-q { font-size: 22rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 8rpx 16rpx; }
+.cx-lbl { display: block; font-size: 21rpx; color: #94a3b8; margin-top: 18rpx; }
+.cx-ex { margin-top: 10rpx !important; }
+.mc-att { display: inline-block; font-size: 20rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 2rpx 12rpx; margin-bottom: 10rpx; }
 </style>

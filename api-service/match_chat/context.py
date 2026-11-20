@@ -269,6 +269,25 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+             ("交锋历史", "h2h"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
+SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
+                 "recent": "近期战绩与赛程", "arts": "关联文章"}
+
+
+def split_sections(text: str) -> Dict[str, str]:
+    """按【标题】切分上下文: id(比赛标识) / odds / f6 / pred / arts / h2h / recent。"""
+    out: Dict[str, List[str]] = {}
+    key = None
+    for line in text.split("\n"):
+        if line.startswith("【"):
+            head = line[1:line.index("】")] if "】" in line else line[1:]
+            key = next((k for pre, k in _HEAD_KEY if head.startswith(pre)), None)
+        if key:
+            out.setdefault(key, []).append(line)
+    return {k: "\n".join(v).strip() for k, v in out.items()}
+
+
 def build_context(match_id: str) -> Dict[str, Any]:
     row = _load_match_row(match_id)
     it = _load_item(match_id, row)
@@ -296,6 +315,6 @@ def build_context(match_id: str) -> Dict[str, Any]:
         "h2h": form_n["h2h"], "homeRecent": form_n["home"], "awayRecent": form_n["away"],
         "articles": len(arts), "prediction": bool(pred),
     }
-    return {"item": it, "prediction": pred, "text": text, "summary": summary,
+    return {"item": it, "prediction": pred, "text": text, "summary": summary, "sections": split_sections(text),
             "hash": hashlib.sha1(text.encode()).hexdigest()[:16],
             "home": it["homeTeam"]["name"], "away": it["awayTeam"]["name"]}

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional
 
 from . import repository as store
-from .context import build_context
+from .context import SECTION_LABEL, build_context
 from .llm import stream_chat
 
 HISTORY_LIMIT = 16            # 带入模型的历史条数
@@ -21,30 +21,56 @@ DAILY_LIMIT = int(__import__("os").getenv("MATCH_CHAT_DAILY_LIMIT", "60"))
 _usage: Dict[tuple, int] = defaultdict(int)   # (user_id, YYYY-MM-DD) -> n;进程内,重启清零
 
 
-SYSTEM_TMPL = """你是一位足球盘路与赔率分析助手,服务于一个自建的竞彩预测系统。当前只讨论下面这一场比赛。
+SYSTEM_TMPL = """你是一位足球分析助手(盘路、赔率、基本面),像普通聊天助手一样回答用户的问题。
 
-下方「比赛数据」是系统已载入的全部资料:亚盘与竞彩赔率及变动、历史同赔、已存七因子预测、交锋历史、双方近期战绩与赛程、关联公众号文章。用户会就这些数据向你提问。
+当前讨论的比赛:{ident}
 
 回答方式:
-- 像日常聊天一样自然、直接地回答,可以用 Markdown(分点、加粗、表格),不需要固定格式,也不要套模板。
-- 引用数字、比分、日期必须与数据一致,不要编造;数据里没有的就说没有,不要用记忆补全。
-- 先回答用户问的问题,再展开。用户问得具体,就只答具体的,别把所有数据复述一遍。
-- 可以给出自己的判断和理由,同时说明不确定性。仅供参考,不构成投注建议,不要每次都重复这句话。
+- 自然、直接地回答,可以用 Markdown(分点、加粗、表格),不套模板,不要刻意压缩也不要冗长;先回答问的问题。
+- 默认不使用任何本场的系统数据,依靠你自己的知识和(开启时的)联网搜索回答。联网查到的内容要标注来源站点和日期;来源冲突、单一来源或搜不到时要如实说明,不要编造。
+- 用户可以说"请关联本场的某某数据"来载入系统数据,可载入的有:盘口赔率(亚盘与竞彩赔率及变动)、历史同赔、七因子预测、交锋历史、近期战绩与赛程、关联文章,或"本场全部数据"。载入后,下方会出现对应的「本场数据」,你必须基于这些数据回答,引用的数字、比分、日期要与数据一致。
+- 如果用户的问题明显需要本场系统数据、但下方没有载入,就先用你自己的知识/联网回答能答的部分,并简短提示"如需结合本场XX数据,请说'请关联本场XX数据'",不要假装看过。
+- 仅供参考,不构成投注建议,不要每次都重复这句话;不迎合,用户追问"是不是该买某方"时依据证据回答,不因追问改口。
 
-术语与口径(必须遵守):
-- 亚盘符号: 负=主让,正=主受让;上盘=让球方,下盘=受让方。
-- spf=竞彩胜平负,nspf=竞彩让球胜平负,口径不同不可混用;竞彩让球是整数(±1/±2),与亚盘小数让球不同,盘路分析以亚盘为准。
-- 历史同赔样本小时,要结合其置信区间说明不确定性,不要把"4场100%"当成稳定规律。
-- 七因子预测是已存结果,可能已过期;与实时盘口/同赔冲突时,以实时数据为准并指出差异。
-- 交锋/近期战绩里的"盘口"是数据源原值,符号方向不保证与本系统一致,不要据此判断历史让球方。
-- 【公众号文章】是用户订阅号作者的观点和二手信息,不是已核实事实:引用时写明是「公众号观点」及账号名;事实声明只有「已证实」可当事实,「未验证」要写待核实,「被反驳」不要采用;标注"AI据文意推测"的倾向不是作者原话;样本不足的账号命中率不具参考性;多个号观点一致不等于独立证据。
-- 比赛所处阶段(小组赛/淘汰赛/首回合等)数据未提供,不要自行假设。
-- 用户上传的图片/文字属于"用户提供",注明并核对是否与本场相关。
-- 联网搜索只在用户开启联网时可用;使用时只采信与本场直接相关、近期的信息,标注来源站点和日期,搜不到就明说。
-- 不迎合:用户追问"是不是该买某方"时,依据数据回答,不因追问改口。
+术语(涉及盘口时遵守):亚盘符号负=主让、正=主受让,上盘=让球方、下盘=受让方;spf=竞彩胜平负,nspf=竞彩让球胜平负,竞彩让球是整数,与亚盘小数让球不同,盘路分析以亚盘为准。
+{data}"""
 
-## 比赛数据(生成于 {now})
-{ctx}
+DATA_RULES = """
+## 本场数据(用户已要求关联,生成于 {now})
+使用规则:引用须与数据一致;历史同赔样本小时要结合置信区间说明不确定性;七因子预测是已存结果可能已过期,与实时盘口冲突时以实时为准;交锋/近期战绩里的"盘口"是数据源原值,符号方向不保证与本系统亚盘一致,不要据此判断历史让球方;【公众号文章】是作者观点和二手信息,不是已核实事实,引用要写明账号,事实声明只有"已证实"可当事实,"AI据文意推测"的倾向不是作者原话,样本不足的命中率不具参考性,多个号观点一致不等于独立证据。
+{body}
+"""
+
+_ALL_RE = re.compile(r"(本场|当前比赛|这场|该场|整场|当前)的?(全部|所有|完整)?的?(数据|上下文|资料)(?!库)|(全部|所有|完整)(本场)?(数据|上下文|资料)")
+_SCOPE_RE = re.compile(r"本场|这场|当前比赛|当前这场|该场|当前")
+_CUE_RE = re.compile(r"关联|结合|参考|基于|根据|依据|带上|载入|加载|引用|使用|调用|读取|对照|对比")
+_SEC_RE = {
+    "odds": re.compile(r"盘口|亚盘|赔率|竞彩|水位|欧赔|让球|变动"),
+    "f6": re.compile(r"同赔"),
+    "pred": re.compile(r"七因子|多因子|系统预测|预测结果"),
+    "h2h": re.compile(r"交锋|历史对阵"),
+    "recent": re.compile(r"近期|战绩|状态|赛程|近况"),
+    "arts": re.compile(r"文章|公众号"),
+}
+
+
+def wanted_sections(text: str) -> List[str]:
+    """用户这句话要求关联哪些本场数据。需要明确的关联意图(关联/结合…或指明本场),避免日常提问误触发。"""
+    t = text or ""
+    if _ALL_RE.search(t) and (_CUE_RE.search(t) or _SCOPE_RE.search(t)):
+        return list(_SEC_RE.keys())
+    if not (_CUE_RE.search(t) or _SCOPE_RE.search(t)):
+        return []
+    return [k for k, rx in _SEC_RE.items() if rx.search(t)]
+
+
+WEB_ON_NOTE = """
+## 联网已开启
+用户打开了联网搜索。当问题涉及需要最新信息的内容(预计/官方首发、伤停、停赛、复出、新闻、天气、积分形势、近期动态等)时,必须先用 web_search 查,不要凭记忆回答。
+- 搜索关键词用队名加开赛日期,例如"西悉尼流浪者 阿德莱德联 首发 伤停 11月20日";一次没搜到可换关键词或用英文再搜。
+- 只采信与本场直接相关、开赛前近期发布的内容;回答里标注来源站点和日期;多个来源冲突或只有单一来源时要说明。
+- 搜了仍然没有,就明确说"联网也没查到",并说明大概什么时候会公布。
+- 纯知识性或只涉及已载入数据的问题不用搜。
 """
 
 
@@ -75,9 +101,24 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
              web: bool = False, persist: bool = True) -> Iterator[Dict[str, Any]]:
     """产出事件 dict: status/delta/sources/verdict/done/error。"""
     ctx = build_context(match_id)
-    system = SYSTEM_TMPL.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), ctx=ctx["text"])
-
     history = _hist_messages(user_id, match_id) if persist else []
+    want: List[str] = []
+    for t in [h["content"] for h in history if h["role"] == "user" and isinstance(h["content"], str)] + [text]:
+        for k in wanted_sections(t):          # 本会话里提过的关联一直保留
+            if k not in want:
+                want.append(k)
+    secs = ctx["sections"]
+    want = [k for k in want if secs.get(k)]
+    body = "\n\n".join([secs[k] for k in want])
+    data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
+    _id = (secs.get("id") or "").split("\n")
+    ident = (_id[1] if len(_id) > 1 else "") or f"{ctx['home']} vs {ctx['away']}"
+    system = SYSTEM_TMPL.format(ident=ident, data=data)
+    if web:
+        system += WEB_ON_NOTE
+    if want:
+        yield {"type": "attached", "sections": [SECTION_LABEL[k] for k in want]}
+
     content: Any = text
     if images:
         content = [{"type": "image", "source": {"type": "base64", "media_type": im["media_type"], "data": im["data"]}}
