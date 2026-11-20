@@ -178,7 +178,6 @@
             <text v-if="it.isSingle" class="single-tag">单关</text>
             <text v-if="it.beidanDeep" class="beidan-tag">北单1.5</text>
             <text v-if="it.beidanFlip" class="beidan-flip-tag">北单反向</text>
-            <text v-if="articleCount(it)" class="wx-tag" @tap.stop="openArticles(it)">文章 {{ articleCount(it) }}</text>
             <text v-if="recRank(it)" class="rec-tag" :class="'rec-' + recRank(it)">稳{{ recRank(it) }}</text>
             <view class="dir-wrap">
               <text class="dir" :class="[it.f6?.direction || 'neutral', refTier(it.f6)]">{{ dirLabel(it.f6?.direction) }}</text>
@@ -187,6 +186,10 @@
                 class="ref-score"
                 :class="[it.f6?.direction || 'neutral', refTier(it.f6)]"
               >{{ it.f6.refScore }}</text>
+            </view>
+            <view v-if="articleCount(it)" class="art-icon" @tap.stop="openArticles(it)">
+              <view class="ico ico-doc"></view>
+              <text class="art-n">{{ articleCount(it) }}</text>
             </view>
             <view class="chat-icon" @tap.stop="openChat(it)">
               <view class="ico ico-chat"></view>
@@ -2106,7 +2109,10 @@ onShow(() => {
 .predict-icon .ico { width: 30rpx; height: 30rpx; color: #fff; }
 .art-btn { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; border-radius: 6rpx; border: 1rpx solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.9); flex-shrink: 0; }
 .art-btn .ico { width: 28rpx; height: 28rpx; }
-.wx-tag { font-size: 19rpx; font-weight: 600; color: #7c3aed; background: #ede9fe; padding: 2rpx 10rpx; border-radius: 6rpx; }
+.art-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; margin-right: 10rpx; border-radius: 6rpx; border: 1rpx solid #ddd6fe; background: #f5f3ff; color: #7c3aed; flex-shrink: 0; }
+.art-icon:active { opacity: 0.75; }
+.art-icon .ico { width: 28rpx; height: 28rpx; }
+.art-n { position: absolute; top: -10rpx; right: -10rpx; min-width: 26rpx; height: 26rpx; line-height: 26rpx; padding: 0 6rpx; box-sizing: border-box; text-align: center; border-radius: 13rpx; background: #7c3aed; color: #fff; font-size: 18rpx; font-weight: 600; }
 .chat-icon { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; margin-right: 10rpx; border-radius: 6rpx; border: 1rpx solid #99f6e4; background: #f0fdfa; color: #0f766e; flex-shrink: 0; }
 .chat-icon:active { opacity: 0.75; }
 .chat-icon .ico { width: 28rpx; height: 28rpx; }

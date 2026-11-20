@@ -154,11 +154,12 @@ LINK_SYSTEM = """你是体育公众号文章的「比赛关联」裁判。判断
 2. 一句话带过(如“比如威尔士和葡萄牙,威尔士无论如何要打附加赛”)是 mention,不是 main。
 3. 复盘已完赛比赛(“昨天…最终…”)若有实质回顾,也算 main,timing 标 review。
 4. 宁缺毋滥:拿不准就是 mention。
-5. evidence 必须是正文里的原句(≤60字,逐字摘录,不含英文双引号),最好选能证明“在分析这场”的句子。
+5. 队名别名:文章里对某支球队的称呼可能与候选清单里的名字不同(音译或简称不同,如候选"布拉干RB"、文中"巴甘蒂诺")。只有在联赛、日期、对阵另一队都吻合时才可当作同一支球队;此时在 home_alias/away_alias 里原样写出文中对该队的称呼(必须逐字出现在正文里)。与候选名相同或文中没出现该队时留空。不能凭记忆臆测别名,拿不准就当 mention。
+5.1 evidence 必须是正文里的原句(≤60字,逐字摘录,不含英文双引号),最好选能证明“在分析这场”的句子。
 6. reasoning 一句话(≤50字),写出判定依据(如“有专门段落谈伤停和战意”“仅举例带过”)。
 
 只输出 JSON:
-{"judgements":[{"match_id":"","role":"main|mention","timing":"preview|review","evidence":"","reasoning":""}]}
+{"judgements":[{"match_id":"","role":"main|mention","timing":"preview|review","evidence":"","home_alias":"","away_alias":"","reasoning":""}]}
 没有任何候选被谈到时 judgements 为 []。不要输出 none 的项。"""
 
 
@@ -196,6 +197,12 @@ def select_main(judgements: List[Dict[str, Any]], text: str, cands: List[Dict[st
         label = f"{c['home_team_name']} vs {c['away_team_name']}"
         rec = {"match_id": mid, "label": label, "reasoning": str(j.get("reasoning") or "")[:120], "evidence": ev[:120]}
         if j.get("role") == "main" and ev and _norm(ev) in hay:
+            alias = {}
+            for side in ("home", "away"):
+                a = str(j.get(f"{side}_alias") or "").strip()
+                if a and a in text and a != c[f"{side}_team_name"]:      # 别名必须逐字出现在正文
+                    alias[side] = a
+            c = dict(c, _alias=alias)
             main.append(c)
         else:
             mentions.append(rec)
@@ -214,7 +221,9 @@ def verify_extraction(raw: Dict[str, Any], text: str, publish: datetime,
         if not c:
             dropped.append({"why": "match_id不在候选", "match_id": mid})
             continue
-        h, a = name_hit(c["home_team_name"], text), name_hit(c["away_team_name"], text)
+        al = c.get("_alias") or {}
+        h = name_hit(c["home_team_name"], text) or (1 if al.get("home") else 0)       # 校验过的别名按"简称命中"计
+        a = name_hit(c["away_team_name"], text) or (1 if al.get("away") else 0)
         ev = (m.get("evidence") or "").strip()
         ev_ok = bool(ev) and _norm(ev) in hay
         if h and a and ev_ok:
