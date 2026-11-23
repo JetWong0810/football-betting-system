@@ -22,6 +22,22 @@ NEAR_SEC = int(os.getenv("ZGZCW_NEAR_SEC", str(3 * 3600)))        # 开赛前3�
 MID_SEC = int(os.getenv("ZGZCW_MID_SEC", str(12 * 3600)))         # 开赛前12小时内
 FOCUS_SEC = int(os.getenv("ZGZCW_FOCUS_SEC", "900"))              # 轻量模式下仍重点刷新的窗口
 FOCUS_BUDGET = int(os.getenv("ZGZCW_FOCUS_BUDGET", "30"))
+# 逐次变动(ticks)补抓: 亚盘/大小球/欧赔变动页每次返回开盘至今的完整历史, 所以只需在比赛临近时抓,
+# 不必早早轮询。Bet365 亚盘变动由主流程负责, 这里补其他公司和大小球、欧赔。
+TICKS_EXTRA = os.getenv("ZGZCW_TICKS_EXTRA", "1") != "0"                     # 总开关
+TICK_WINDOW_SEC = int(os.getenv("ZGZCW_TICK_WINDOW_SEC", str(3 * 3600)))      # 开赛前3小时起
+TICK_TTL_SEC = int(os.getenv("ZGZCW_TICK_TTL_SEC", "1200"))                   # 常规间隔
+TICK_TTL_NEAR_SEC = int(os.getenv("ZGZCW_TICK_TTL_NEAR_SEC", "300"))          # 开赛前30分钟内
+TICK_FINAL_AFTER_SEC = int(os.getenv("ZGZCW_TICK_FINAL_AFTER_SEC", "900"))    # 开赛后补抓一次收尾
+TICK_PAGES_PER_ROUND = int(os.getenv("ZGZCW_TICK_PAGES_PER_ROUND", "24"))     # 每轮最多额外页数
+# (类型, 足彩网 cid, 入库公司名)。cid: 22 Pinnacle, 3 皇冠, 7 澳门, 2 Bet365, 0 平均欧赔
+TICK_PLAN = (
+    ("ah", 22, "Pinnacle"), ("ah", 3, "皇冠"), ("ah", 7, "澳门"),
+    ("ou", 22, "Pinnacle"), ("ou", 3, "皇冠"), ("ou", 2, "Bet365"),
+    ("euro", 0, "平均欧赔"), ("euro", 2, "Bet365"),
+)
+_TICK_FETCHED: Dict[tuple, float] = {}     # (match_id, kind, cid) -> 上次抓取 time.time(); 进程内, 重启后重抓一次
+_TICK_FINAL: set = set()                   # 已做过开赛后收尾抓取的 match_id
 _CACHE_MIN_LEN = 20
 # 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
 LIGHT_WINDOW_SEC = int(os.getenv("PRE_KICKOFF_LIGHT_SEC", "720"))
@@ -137,6 +153,25 @@ def next_sync_sleep(eta: Optional[float], elapsed: float, full_interval: int = 6
     if eta is not None and 0 < eta <= imminent:
         gap = min(gap, imminent_interval)
     return max(min_gap, int(gap - elapsed))
+
+
+def due_tick_tasks(match_id: str, eta: Optional[float], now: float,
+                   fetched: Dict[tuple, float], final_done: set) -> List[tuple]:
+    """本场现在该补抓哪些逐次变动页。纯函数, 便于测试。
+
+    开赛前 TICK_WINDOW_SEC 内按 TTL 抓(30分钟内更勤); 开赛后 TICK_FINAL_AFTER_SEC 内补抓一次收尾。
+    """
+    if eta is None or eta > TICK_WINDOW_SEC or eta <= -TICK_FINAL_AFTER_SEC:
+        return []
+    if eta <= 0:
+        return [] if match_id in final_done else list(TICK_PLAN)
+    ttl = TICK_TTL_NEAR_SEC if eta <= IMMINENT_SEC else TICK_TTL_SEC
+    due = []
+    for kind, cid, name in TICK_PLAN:
+        last = fetched.get((match_id, kind, cid))
+        if last is None or now - last >= ttl:
+            due.append((kind, cid, name))
+    return due
 
 
 def _is_stale(ts, ttl_sec: int) -> bool:
@@ -539,6 +574,46 @@ class SportterySyncService:
                         logger.info(f"  亚盘轴 {m.get('match_code')} {n}点")
                     except Exception as e:
                         logger.warning(f"亚盘轴落库失败 {mid}: {e}")
+
+            # 2b) 其他公司亚盘变动 + 大小球/欧赔变动。每轮页数封顶, 临近开赛的先抓
+            if TICKS_EXTRA:
+                left = min(TICK_PAGES_PER_ROUND, sess.remaining)
+                for m in targets:
+                    if sess.aborted or left <= 0:
+                        break
+                    mid = m.get("match_id")
+                    fid = m.get("fid_zgzcw")
+                    eta = eta_of(m)
+                    todo = due_tick_tasks(mid, eta, _time.time(), _TICK_FETCHED, _TICK_FINAL)
+                    done_all = True
+                    for kind, cid, name in todo:
+                        if sess.aborted or left <= 0:
+                            done_all = False
+                            break
+                        if kind == "ah":
+                            ticks = sess.fetch_ypdb_zhishu(fid, cid)
+                        elif kind == "ou":
+                            ticks = sess.fetch_dxdb_zhishu(fid, cid)
+                        else:
+                            ticks = sess.fetch_bjop_zhishu(fid, cid)
+                        left -= 1
+                        if ticks is None:           # 被拦或打开失败: 不记已抓, 下轮重试
+                            done_all = False
+                            continue
+                        try:
+                            if kind == "ah":
+                                n = self.repository.replace_ah_ticks(mid, ticks, company=name, cid=cid)
+                            elif kind == "ou":
+                                n = self.repository.append_ou_ticks(mid, ticks, company=name, cid=cid)
+                            else:
+                                n = self.repository.append_euro_ticks(mid, ticks, company=name, cid=cid)
+                            _TICK_FETCHED[(mid, kind, cid)] = _time.time()
+                            logger.info(f"  变动 {m.get('match_code')} {kind}/{name} {n}点")
+                        except Exception as e:
+                            done_all = False
+                            logger.warning(f"变动落库失败 {mid} {kind}/{name}: {e}")
+                    if eta is not None and eta <= 0 and todo and done_all:
+                        _TICK_FINAL.add(mid)
 
             if not focus_sec:
                 # 3) 欧赔

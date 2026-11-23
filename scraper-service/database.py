@@ -35,6 +35,7 @@ def _init_mysql_db() -> None:
             _ensure_fenxi_cache_table(cursor)
             _ensure_fenxi_cache_columns(cursor)
             _ensure_ah_ticks_table(cursor)
+            _ensure_tick_tables(cursor)
         conn.commit()
     finally:
         conn.close()
@@ -153,6 +154,44 @@ def _ensure_ah_ticks_table(cursor) -> None:
             away_odds DECIMAL(8,3) DEFAULT NULL,
             UNIQUE KEY uk_match_company_time (match_id, company, tick_time),
             INDEX idx_match_company (match_id, company)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+
+
+def _ensure_tick_tables(cursor) -> None:
+    """大小球/欧赔逐次变动表。IF NOT EXISTS, 已存在的表不动。"""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jczq_ou_ticks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            match_id VARCHAR(100) NOT NULL,
+            company VARCHAR(50) NOT NULL DEFAULT 'Bet365',
+            cid INT NOT NULL DEFAULT 2,
+            tick_time DATETIME NOT NULL,
+            over_odds DECIMAL(8,3) DEFAULT NULL,
+            line DECIMAL(6,2) DEFAULT NULL,
+            line_text VARCHAR(32) DEFAULT NULL,
+            under_odds DECIMAL(8,3) DEFAULT NULL,
+            UNIQUE KEY uk_ou_match_company_time (match_id, company, tick_time),
+            INDEX idx_ou_match_company (match_id, company)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jczq_euro_ticks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            match_id VARCHAR(100) NOT NULL,
+            company VARCHAR(50) NOT NULL DEFAULT '平均欧赔',
+            cid INT NOT NULL DEFAULT 0,
+            tick_time DATETIME NOT NULL,
+            win_odds DECIMAL(8,3) DEFAULT NULL,
+            draw_odds DECIMAL(8,3) DEFAULT NULL,
+            lose_odds DECIMAL(8,3) DEFAULT NULL,
+            return_rate DECIMAL(5,1) DEFAULT NULL COMMENT '返还率%',
+            UNIQUE KEY uk_euro_match_company_time (match_id, company, tick_time),
+            INDEX idx_euro_match_company (match_id, company)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )

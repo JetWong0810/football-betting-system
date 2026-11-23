@@ -34,6 +34,8 @@ BJOP_URL = "https://fenxi.zgzcw.com/{fid}/bjop"
 BSLS_URL = "https://fenxi.zgzcw.com/{fid}/bsls"
 DXDB_URL = "https://fenxi.zgzcw.com/{fid}/dxdb"
 YPDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/ypdb/zhishu?company_id={cid}"
+BJOP_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/bjop/zhishu?company_id={cid}"
+DXDB_ZHISHU_URL = "https://fenxi.zgzcw.com/{fid}/dxdb/zhishu?company_id={cid}"
 
 # cid → 规范名。禁止子串匹配。
 # cid=3 沙巴(ＳＢ/SBOBET)按皇冠计入 F3; cid=11 是韦德, 不是伟德, 只进热度。
@@ -408,6 +410,67 @@ def parse_ypdb_zhishu(html: str) -> List[dict]:
     return out
 
 
+def _strip_arrow(text: str) -> str:
+    return (text or "").replace("↑", "").replace("↓", "").replace(" ", "").strip()
+
+
+def parse_euro_zhishu(html: str) -> List[dict]:
+    """欧赔变动轴(胜/平/负赔 + 返还率), 页面新在前。
+
+    列: 序号 | 时间 | 赛前N分 | 胜 | 平 | 负 | 概率x3 | 凯利x3 | 赔付率(末列, 0.92 即 92%)。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    out: List[dict] = []
+    seen = set()
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 6:
+            continue
+        found = _zhishu_time(cells)
+        if not found:
+            continue
+        i, time_s = found
+        if time_s in seen:
+            continue
+        w, d, l = (_parse_odds(_strip_arrow(c)) for c in cells[i + 2:i + 5])
+        if w is None or d is None or l is None:
+            continue
+        rr = _parse_odds(_strip_arrow(cells[-1]))
+        seen.add(time_s)
+        out.append({
+            "win": w, "draw": d, "lose": l,
+            "returnRate": round(rr * 100, 1) if rr is not None and rr <= 2 else rr,
+            "time": time_s,
+        })
+    return out
+
+
+def parse_ou_zhishu(html: str) -> List[dict]:
+    """大小球变动轴(大球水 / 盘口线 / 小球水), 页面新在前。盘口 3.5/4球 → 3.75。"""
+    soup = BeautifulSoup(html, "html.parser")
+    out: List[dict] = []
+    seen = set()
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 6:
+            continue
+        found = _zhishu_time(cells)
+        if not found:
+            continue
+        i, time_s = found
+        if time_s in seen:
+            continue
+        over = _parse_odds(_strip_arrow(cells[i + 2]))
+        line_text = _clean_hc(cells[i + 3])
+        line = _parse_ou_line(line_text)
+        under = _parse_odds(_strip_arrow(cells[i + 4]))
+        if over is None or under is None or line is None:
+            continue
+        seen.add(time_s)
+        out.append({"over": over, "line": line, "lineText": line_text, "under": under, "time": time_s})
+    return out
+
+
 def _norm_date(text: str) -> str:
     m = _DATE_RE.match((text or "").strip())
     if not m:
@@ -748,6 +811,14 @@ class FenxiSession:
         if not companies:
             logger.info(f"dxdb 无主流大小球 fid={fid}")
         return {"companies": companies}
+
+    def fetch_bjop_zhishu(self, fid: str, cid: int) -> Optional[list]:
+        html = self._open(BJOP_ZHISHU_URL.format(fid=fid, cid=cid), f"bjop/zhishu fid={fid} cid={cid}")
+        return parse_euro_zhishu(html) if html else None
+
+    def fetch_dxdb_zhishu(self, fid: str, cid: int) -> Optional[list]:
+        html = self._open(DXDB_ZHISHU_URL.format(fid=fid, cid=cid), f"dxdb/zhishu fid={fid} cid={cid}")
+        return parse_ou_zhishu(html) if html else None
 
     def fetch_ypdb_zhishu(self, fid: str, cid: int = BET365_CID) -> Optional[list]:
         html = self._open(

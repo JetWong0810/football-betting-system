@@ -210,6 +210,71 @@ def _probs(o: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float]]:
         return None
 
 
+TICK_COMPANIES = {
+    "asian": [(22, "Pinnacle"), (3, "皇冠"), (7, "澳门")],
+    "ou": [(22, "Pinnacle"), (3, "皇冠"), (2, "Bet365")],
+    "euro": [(0, "平均欧赔"), (2, "Bet365")],
+}
+
+
+def compress_ticks(kind: str, asc: List[Dict[str, Any]], cap: int = 12) -> List[Dict[str, Any]]:
+    """逐次变动压缩(时间从早到晚输入)。保留: 首条、盘口线变化点(欧赔为隐含概率累计变化>=1pp)、最后一条;
+    超过 cap 时保留首条+最近 cap-1 条,避免上下文膨胀。"""
+    if len(asc) <= 2:
+        return list(asc)
+    keep = [asc[0]]
+    for t in asc[1:-1]:
+        last = keep[-1]
+        if kind == "asian":
+            hit = t.get("handicap") != last.get("handicap")
+        elif kind == "ou":
+            hit = t.get("line") != last.get("line")
+        else:
+            a, b = _probs(last), _probs(t)
+            hit = bool(a and b and max(abs(b[i] - a[i]) for i in range(3)) >= 1.0)
+        if hit:
+            keep.append(t)
+    keep.append(asc[-1])
+    if len(keep) > cap:
+        keep = [keep[0]] + keep[-(cap - 1):]
+    return keep
+
+
+def _tick_row(kind: str, t: Dict[str, Any]) -> str:
+    if kind == "asian":
+        return f"{_ah_txt(t.get('handicap'), t.get('handicapText'))} 主水{t.get('home')} 客水{t.get('away')}"
+    if kind == "ou":
+        return f"{t.get('line')} 大水{t.get('over')} 小水{t.get('under')}"
+    pr = _probs(t)
+    ip = f" 隐含 {pr[0]:.1f}/{pr[1]:.1f}/{pr[2]:.1f}" if pr else ""
+    return f"{t.get('win')}/{t.get('draw')}/{t.get('lose')}{ip}"
+
+
+def render_tick_paths(match_id: str) -> Tuple[str, int]:
+    """其余公司(皇冠/澳门/Pinnacle 等)的逐次变动关键路径。无数据返回空串。"""
+    from zgzcw_cache import list_ah_ticks, list_ou_ticks, list_euro_ticks
+    fetch = {"asian": lambda c: list_ah_ticks(match_id, cid=c), "ou": lambda c: list_ou_ticks(match_id, c),
+             "euro": lambda c: list_euro_ticks(match_id, c)}
+    title = {"asian": "亚盘", "ou": "大小球", "euro": "欧赔(胜/平/负,隐含概率已去水)"}
+    out: List[str] = []
+    total = 0
+    for kind in ("asian", "ou", "euro"):
+        for cid, name in TICK_COMPANIES[kind]:
+            if kind == "asian" and cid == 2:
+                continue
+            rows = fetch[kind](cid)
+            if len(rows) < 2:      # 仅1条等于没有变动
+                continue
+            asc = list(reversed(rows))
+            pick = compress_ticks(kind, asc)
+            total += len(rows)
+            out.append(f"{name} {title[kind]} 逐次变动(共{len(rows)}次,仅列关键变动点,从早到晚):")
+            out.extend(f"- {t.get('time')} {_tick_row(kind, t)}" for t in pick)
+    if not out:
+        return "", 0
+    return "\n【其他公司逐次变动】\n" + "\n".join(out), total
+
+
 def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """多家公司亚盘 / 欧赔 / 大小球 + Bet365 亚盘逐次变动。只读缓存,无联网。竞彩赔率口径不同,不纳入。"""
     from zgzcw_cache import get_fenxi_cache, list_ah_ticks, load_predict_inputs, _companies
@@ -279,6 +344,10 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         for o in ou_c:
             i, cu = o.get("initial") or {}, o.get("current") or {}
             L.append(f"- {o.get('bookmaker')}: {i.get('line')}→{cu.get('line')} | 大水{_w(i.get('over'), cu.get('over'))} 小水{_w(i.get('under'), cu.get('under'))}")
+    paths, pn = render_tick_paths(match_id)
+    if paths:
+        L.append(paths)
+        n["ticks"] += pn
     return "\n".join(L), n
 
 

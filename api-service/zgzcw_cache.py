@@ -503,28 +503,71 @@ def _pick_company(companies: List[Dict[str, Any]], cid: int) -> Optional[Dict[st
     return None
 
 
+def _list_ticks(sql: str, params: tuple, mapper) -> List[Dict[str, Any]]:
+    """读逐次变动表;表不存在/查询失败返回空(欧赔 ticks 表在抓取服务上线前不存在)。"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            return [mapper(r) for r in (cur.fetchall() or [])]
+    except Exception as e:
+        logger.warning(f"读 ticks 失败: {e}")
+        return []
+
+
+def _f(v):
+    return float(v) if v is not None else None
+
+
+def list_ou_ticks(match_id: str, cid: int) -> List[Dict[str, Any]]:
+    if not match_id:
+        return []
+    return _list_ticks(
+        "SELECT tick_time, over_odds, line, line_text, under_odds FROM jczq_ou_ticks "
+        "WHERE match_id=%s AND cid=%s ORDER BY tick_time DESC", (match_id, cid),
+        lambda r: {"over": _f(r.get("over_odds")), "line": _f(r.get("line")),
+                   "lineText": r.get("line_text") or "", "under": _f(r.get("under_odds")),
+                   "time": _fmt_ts(r.get("tick_time"))})
+
+
+def list_euro_ticks(match_id: str, cid: int) -> List[Dict[str, Any]]:
+    if not match_id:
+        return []
+    return _list_ticks(
+        "SELECT tick_time, win_odds, draw_odds, lose_odds, return_rate FROM jczq_euro_ticks "
+        "WHERE match_id=%s AND cid=%s ORDER BY tick_time DESC", (match_id, cid),
+        lambda r: {"win": _f(r.get("win_odds")), "draw": _f(r.get("draw_odds")),
+                   "lose": _f(r.get("lose_odds")), "returnRate": _f(r.get("return_rate")),
+                   "time": _fmt_ts(r.get("tick_time"))})
+
+
 def load_odds_history(
     match: Optional[Dict[str, Any]],
     kind: str,
     cid: int,
 ) -> List[Dict[str, Any]]:
-    """赔率变动只读库。Bet365 亚盘优先 ticks; 其余用初/即时两点。"""
+    """赔率变动只读库。优先逐次 ticks 表; 无 ticks 时退回初/即时两点。"""
     if not match:
         return []
-    cache = get_fenxi_cache(match.get("match_id") or "") or {}
-    if kind == "asian" and int(cid) == 2:
-        ticks = list_ah_ticks(match.get("match_id") or "", cid=2)
+    mid = match.get("match_id") or ""
+    cache = get_fenxi_cache(mid) or {}
+    if kind == "asian":
+        ticks = list_ah_ticks(mid, cid=int(cid))
         if ticks:
             return ticks
         asian = _companies(cache.get("asian_json")) or asian_from_db(match)
-        item = _pick_company(asian, cid) or (asian[0] if asian else None)
+        item = _pick_company(asian, cid) or (asian[0] if int(cid) == 2 and asian else None)
         return _two_point_history(item, "asian", cache.get("asian_fetched_at"))
     if kind == "european":
-        euro = _companies(cache.get("euro_json"))
-        item = _pick_company(euro, cid)
+        ticks = list_euro_ticks(mid, int(cid))
+        if ticks:
+            return ticks
+        item = _pick_company(_companies(cache.get("euro_json")), cid)
         return _two_point_history(item, "european", cache.get("euro_fetched_at"))
     if kind == "overunder":
-        ou = _companies(cache.get("ou_json"))
-        item = _pick_company(ou, cid)
+        ticks = list_ou_ticks(mid, int(cid))
+        if ticks:
+            return ticks
+        item = _pick_company(_companies(cache.get("ou_json")), cid)
         return _two_point_history(item, "overunder", cache.get("ou_fetched_at"))
     return []

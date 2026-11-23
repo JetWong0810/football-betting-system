@@ -775,48 +775,85 @@ class OddsRepository:
         company: str = "Bet365",
         cid: int = 2,
     ) -> int:
-        """整段替换某公司亚盘 ticks, 不碰 jczq_ah_history。"""
-        if not match_id or not ticks:
-            return 0
+        """亚盘逐次变动。追加写入(按 match/company/time 唯一, 同时间覆盖), 不再整段删除。
+
+        数据源每次返回完整历史, 追加即可; 即便源页面日后截断, 已存的历史也不会丢。
+        不碰 jczq_ah_history。
+        """
         rows = []
-        for t in ticks:
+        for t in ticks or []:
             ts = _normalize_tick_time(t.get("time"))
-            if not ts:
-                continue
-            rows.append((
-                match_id,
-                company,
-                int(cid),
-                ts,
-                t.get("home"),
-                t.get("handicap"),
-                t.get("handicapText") or "",
-                t.get("away"),
-            ))
-        if not rows:
+            if ts:
+                rows.append((match_id, company, int(cid), ts, t.get("home"), t.get("handicap"),
+                             t.get("handicapText") or "", t.get("away")))
+        if not match_id or not rows:
             return 0
         with get_db() as conn:
             _execute(conn, "INSERT IGNORE INTO jczq_fenxi_cache (match_id) VALUES (%s)", (match_id,))
-            _execute(
-                conn,
-                "DELETE FROM jczq_ah_ticks WHERE match_id=%s AND company=%s",
-                (match_id, company),
-            )
             cur = conn.cursor()
             try:
                 cur.executemany(
-                    """INSERT IGNORE INTO jczq_ah_ticks
+                    """INSERT INTO jczq_ah_ticks
                        (match_id, company, cid, tick_time, home_odds, handicap, handicap_text, away_odds)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON DUPLICATE KEY UPDATE home_odds=VALUES(home_odds), handicap=VALUES(handicap),
+                         handicap_text=VALUES(handicap_text), away_odds=VALUES(away_odds)""",
                     rows,
                 )
             finally:
                 cur.close()
-            _execute(
-                conn,
-                "UPDATE jczq_fenxi_cache SET ticks_fetched_at=NOW() WHERE match_id=%s",
-                (match_id,),
-            )
+            if int(cid) == 2:           # ticks_fetched_at 仅表示 Bet365 亚盘变动的抓取时间
+                _execute(conn, "UPDATE jczq_fenxi_cache SET ticks_fetched_at=NOW() WHERE match_id=%s", (match_id,))
+        return len(rows)
+
+    def append_ou_ticks(self, match_id: str, ticks: List[Dict[str, Any]], *, company: str, cid: int) -> int:
+        """大小球逐次变动(jczq_ou_ticks)。追加写入。"""
+        rows = []
+        for t in ticks or []:
+            ts = _normalize_tick_time(t.get("time"))
+            if ts:
+                rows.append((match_id, company, int(cid), ts, t.get("over"), t.get("line"),
+                             t.get("lineText") or "", t.get("under")))
+        if not match_id or not rows:
+            return 0
+        with get_db() as conn:
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    """INSERT INTO jczq_ou_ticks
+                       (match_id, company, cid, tick_time, over_odds, line, line_text, under_odds)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON DUPLICATE KEY UPDATE over_odds=VALUES(over_odds), line=VALUES(line),
+                         line_text=VALUES(line_text), under_odds=VALUES(under_odds)""",
+                    rows,
+                )
+            finally:
+                cur.close()
+        return len(rows)
+
+    def append_euro_ticks(self, match_id: str, ticks: List[Dict[str, Any]], *, company: str, cid: int) -> int:
+        """欧赔逐次变动(jczq_euro_ticks)。追加写入。"""
+        rows = []
+        for t in ticks or []:
+            ts = _normalize_tick_time(t.get("time"))
+            if ts:
+                rows.append((match_id, company, int(cid), ts, t.get("win"), t.get("draw"),
+                             t.get("lose"), t.get("returnRate")))
+        if not match_id or not rows:
+            return 0
+        with get_db() as conn:
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    """INSERT INTO jczq_euro_ticks
+                       (match_id, company, cid, tick_time, win_odds, draw_odds, lose_odds, return_rate)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON DUPLICATE KEY UPDATE win_odds=VALUES(win_odds), draw_odds=VALUES(draw_odds),
+                         lose_odds=VALUES(lose_odds), return_rate=VALUES(return_rate)""",
+                    rows,
+                )
+            finally:
+                cur.close()
         return len(rows)
 
 

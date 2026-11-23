@@ -562,7 +562,7 @@ def get_odds_history(
     type: str = "european",
     matchId: Optional[str] = None,
 ):
-    """赔率变动只读库。Bet365 亚盘走 ticks, 其余用初/即时两点。"""
+    """赔率变动只读库。优先逐次 ticks(亚盘/大小球/欧赔),无 ticks 时退回初/即时两点。"""
     if type not in ("european", "asian", "overunder"):
         raise HTTPException(status_code=400, detail="type 必须是 european/asian/overunder")
     from zgzcw_cache import find_match_by_fid, load_odds_history
