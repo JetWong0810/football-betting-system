@@ -13,7 +13,7 @@ import httpx
 
 BASE = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 MODEL = os.getenv("MATCH_CHAT_MODEL", "deepseek-flash")
-MAX_TOKENS = int(os.getenv("MATCH_CHAT_MAX_TOKENS", "16000"))
+MAX_TOKENS = int(os.getenv("MATCH_CHAT_MAX_TOKENS", "48000"))
 WEB_MAX_USES = int(os.getenv("MATCH_CHAT_WEB_MAX_USES", "3"))
 
 

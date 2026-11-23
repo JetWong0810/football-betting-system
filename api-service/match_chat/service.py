@@ -160,7 +160,7 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
                                     web_used=bool(sources), ctx_hash=ctx["hash"])
             saved = True
         if usage.get("stop_reason") == "max_tokens":
-            yield {"type": "notice", "text": "回答因长度上限被截断,可让我继续或缩小问题范围"}
+            yield {"type": "notice", "text": "回答因长度上限被截断,点下方「继续」可接着生成,或缩小问题范围"}
         yield {"type": "done", "messageId": mid, "text": clean, "usage": usage}
     finally:
         # 客户端中途断开/停止: 保存已生成的部分,避免历史里只剩悬空的提问
