@@ -314,10 +314,13 @@ async function send(preset) {
     } else {
       failed = true
       if (e?.statusCode === 401) requireAuth()
-      errText.value = e?.message || '网络异常'
+      const m = String(e?.message || '')
+      errText.value = /Failed to fetch|NetworkError|network|Load failed|terminated/i.test(m)
+        ? '网络连接中断,请重试(已生成的内容会保留)' : (m || '网络异常')
     }
   }
-  const body = finalText || (failed ? '' : liveText.value)
+  // 出错时保留已流出的部分内容,避免整段回答凭空消失
+  const body = finalText || (failed && liveText.value ? liveText.value + '\n\n(回答被中断)' : liveText.value)
   if (body) {
     messages.value.push(reactive({ tmp: ++tmpSeq, role: 'assistant', content: body, sources, attached: liveAttached.value.slice(), _open: false }))
   }

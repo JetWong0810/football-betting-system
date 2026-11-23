@@ -36,11 +36,18 @@ export async function streamChat(matchId, payload, onEvent, signal, path) {
   })
   if (!resp.ok) {
     let detail = ''
-    try { detail = (await resp.json()).detail } catch (e) { /* ignore */ }
+    try {
+      const d = (await resp.json()).detail
+      // 422 校验错误的 detail 是数组(如消息超长),不能直接当字符串
+      detail = typeof d === 'string' ? d : (Array.isArray(d) ? '消息内容不符合要求(可能过长)' : '')
+    } catch (e) { /* ignore */ }
+    if (!detail && resp.status === 413) detail = '图片太大,请减少图片数量或换小一点的图'
+    if (!detail && (resp.status === 502 || resp.status === 504)) detail = '服务响应超时,请稍后重试'
     const err = new Error(detail || `请求失败(${resp.status})`)
     err.statusCode = resp.status
     throw err
   }
+  if (!resp.body) throw new Error('当前浏览器不支持流式响应')
   const reader = resp.body.getReader()
   const dec = new TextDecoder('utf-8')
   let buf = ''

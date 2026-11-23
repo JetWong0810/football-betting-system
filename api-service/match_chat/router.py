@@ -4,6 +4,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import queue
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -89,15 +91,38 @@ def post_chat(match_id: str, req: ChatIn, user_id: int = Depends(require_auth)):
     if not service.check_quota(user_id):
         raise HTTPException(status_code=429, detail="今日提问次数已达上限")
 
-    def gen():
+    def produce(q: "queue.Queue", stop: threading.Event):
         try:
             for ev in service.run_turn(user_id, match_id, text, imgs, web=req.web):
-                yield _sse(ev)
+                if stop.is_set():       # 客户端已断开: 关闭生成器,触发 run_turn 的 finally 保存已生成部分
+                    break
+                q.put(ev)
         except MatchNotFound:
-            yield _sse({"type": "error", "text": "未找到比赛"})
+            q.put({"type": "error", "text": "未找到比赛"})
         except Exception as e:  # noqa: BLE001
             logger.exception("match chat failed %s", match_id)
-            yield _sse({"type": "error", "text": f"分析失败: {type(e).__name__}"})
+            q.put({"type": "error", "text": f"分析失败: {type(e).__name__}"})
+        finally:
+            q.put(None)
+
+    def gen():
+        # 模型联网搜索/思考期间可能数十秒无输出,代理(nginx/Cloudflare)会判空闲断开,
+        # 所以在独立线程里生成,主流每 10 秒补一个注释心跳。
+        q: "queue.Queue" = queue.Queue()
+        stop = threading.Event()
+        threading.Thread(target=produce, args=(q, stop), daemon=True).start()
+        try:
+            while True:
+                try:
+                    ev = q.get(timeout=10)
+                except queue.Empty:
+                    yield ": ping\n\n"
+                    continue
+                if ev is None:
+                    return
+                yield _sse(ev)
+        finally:
+            stop.set()
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
