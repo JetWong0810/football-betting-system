@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -92,9 +93,18 @@ def post_chat(match_id: str, req: ChatIn, user_id: int = Depends(require_auth)):
         raise HTTPException(status_code=429, detail="今日提问次数已达上限")
 
     def produce(q: "queue.Queue", stop: threading.Event):
+        t0 = time.time()
+        first = None
+        outcome = "ok"
+        logger.info("chat start user=%s match=%s web=%s imgs=%s chars=%s", user_id, match_id, req.web, len(imgs), len(text))
         try:
             for ev in service.run_turn(user_id, match_id, text, imgs, web=req.web):
+                if first is None and ev.get("type") == "delta":
+                    first = time.time() - t0
+                if ev.get("type") == "error":
+                    outcome = "error:" + str(ev.get("text"))[:80]
                 if stop.is_set():       # 客户端已断开: 关闭生成器,触发 run_turn 的 finally 保存已生成部分
+                    outcome = "client_disconnected"
                     break
                 q.put(ev)
         except MatchNotFound:
@@ -103,6 +113,8 @@ def post_chat(match_id: str, req: ChatIn, user_id: int = Depends(require_auth)):
             logger.exception("match chat failed %s", match_id)
             q.put({"type": "error", "text": f"分析失败: {type(e).__name__}"})
         finally:
+            logger.info("chat end user=%s match=%s outcome=%s first_token=%ss total=%.1fs", user_id, match_id, outcome,
+                        "-" if first is None else f"{first:.1f}", time.time() - t0)
             q.put(None)
 
     def gen():

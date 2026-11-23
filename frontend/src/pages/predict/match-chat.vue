@@ -80,6 +80,11 @@
     </scroll-view>
 
     <view class="mc-bottom">
+      <scroll-view class="mc-quick" scroll-x :show-scrollbar="false">
+        <view class="mc-quick-in">
+          <text v-for="q in quick" :key="q.t" class="mc-chip" :class="{ off: streaming }" @tap="quickSend(q)">{{ q.t }}</text>
+        </view>
+      </scroll-view>
       <view class="mc-composer" :class="{ focus: focused, busy: streaming }">
         <view v-if="images.length" class="mc-previews">
           <view v-for="(im, i) in images" :key="i" class="mc-prev">
@@ -162,6 +167,19 @@ let tmpSeq = 0
 const ctx = ref(null)
 const ctxText = ref('')
 const showCtx = ref(false)
+// 快捷提问:点击直接发送(q 为完整问题)。关联类问题会按关键词自动带入对应数据
+const quick = [
+  { t: '盘口赔率分析', q: '请关联本场盘口和赔率数据,分析各家公司的盘口、水位和欧赔有什么矛盾或异常' },
+  { t: '盘口变动解读', q: '请关联本场盘口赔率变动数据,解读开盘到现在的变动路径,资金流向和庄家态度是什么' },
+  { t: '同赔盘路', q: '请关联本场历史同赔数据,说明样本盘路统计偏向上盘还是下盘,可信度如何' },
+  { t: '交锋+近期', q: '请关联交锋历史和近期战绩,分析双方状态和对位关系' },
+  { t: '首发伤停', q: '请联网查本场双方首发阵容和伤停情况,标注来源和发布时间' },
+  { t: '文章观点核实', q: '请关联本场相关公众号文章,列出各文章的核心观点,并用盘口数据核实它们是否站得住' },
+  { t: '综合分析', q: '请关联本场全部数据,综合给出倾向(让球/大小球)、理由、风险点和信心高低' },
+  { t: '三句话总结', q: '把上面的分析总结成三句话,给出最终倾向' },
+  { t: '继续', q: '请继续' },
+]
+const quickSend = (q) => { if (!streaming.value) send(q.q) }
 const examples = ['双方首发阵容出来了吗?', '请关联本场盘口和赔率数据,分析有什么矛盾', '请关联交锋和近期战绩,分析双方状态', '请关联本场全部数据,综合分析']
 const ctxRows = computed(() => {
   const c = ctx.value
@@ -482,6 +500,9 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
 @keyframes mc-blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
 
 .mc-notice { font-size: 22rpx; color: #b45309; background: #fffbeb; border-radius: 6rpx; padding: 10rpx 16rpx; margin-bottom: 14rpx; }
+.mc-quick { white-space: nowrap; padding: 10rpx 0 4rpx; }
+.mc-quick-in { display: inline-flex; gap: 12rpx; padding: 0 24rpx; }
+.mc-chip { flex: none; font-size: 22rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 8rpx 18rpx; &:active { background: #ccfbf1; } &.off { opacity: 0.45; } }
 .mc-error { font-size: 22rpx; color: #dc2626; background: #fef2f2; border-radius: 6rpx; padding: 10rpx 16rpx; margin-bottom: 14rpx; }
 .mc-tail { height: 8rpx; }
 
