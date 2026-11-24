@@ -20,7 +20,7 @@ from database import get_db
 
 logger = logging.getLogger(__name__)
 CST = timezone(timedelta(hours=8))
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
+from llm_config import OPENAI_MODEL as MODEL
 MAX_ATTEMPTS = 3
 
 MARKETS = {"spf", "rqspf", "ah", "ou", "score", "dc", "other"}
@@ -105,7 +105,7 @@ def _client():
     key = os.getenv("DEEPSEEK_API_KEY", "")
     if not key:
         raise RuntimeError("DEEPSEEK_API_KEY 未配置")
-    return OpenAI(api_key=key, base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+    return OpenAI(api_key=key, base_url=__import__("llm_config").OPENAI_BASE)
 
 
 def _parse_json(txt: str) -> Dict[str, Any]:

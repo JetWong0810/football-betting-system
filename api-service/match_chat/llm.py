@@ -11,8 +11,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import httpx
 
-BASE = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-MODEL = os.getenv("MATCH_CHAT_MODEL", "deepseek-flash")
+from llm_config import ANTHROPIC_URL as API_URL, ANTHROPIC_MODEL as MODEL
 MAX_TOKENS = int(os.getenv("MATCH_CHAT_MAX_TOKENS", "48000"))
 WEB_MAX_USES = int(os.getenv("MATCH_CHAT_WEB_MAX_USES", "3"))
 
@@ -34,7 +33,7 @@ def stream_chat(system: str, messages: List[Dict[str, Any]], web: bool = True) -
     blocks: Dict[int, Dict[str, Any]] = {}
     usage: Dict[str, Any] = {}
     try:
-        with httpx.stream("POST", f"{BASE}/anthropic/v1/messages", headers=_headers(),
+        with httpx.stream("POST", API_URL, headers=_headers(),
                           json=body, timeout=httpx.Timeout(30.0, read=180.0)) as r:
             if r.status_code != 200:
                 yield {"type": "error", "text": f"模型接口错误 {r.status_code}: {r.read().decode()[:200]}"}

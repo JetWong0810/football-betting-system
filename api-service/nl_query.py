@@ -37,7 +37,8 @@ WORLDCUP_DB_PATH = Path(__file__).parent / "data" / "worldcup_odds.db"
 
 # DeepSeek
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+from llm_config import OPENAI_BASE as _OB, OPENAI_MODEL as _OM
+DEEPSEEK_API_URL = _OB + ("/chat/completions" if _OB.rstrip("/").endswith("/v1") else "/v1/chat/completions")
 
 # Claude via AWS Bedrock
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -230,7 +231,7 @@ def generate_sql_deepseek(question: str) -> Optional[str]:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "deepseek-flash",
+        "model": _OM,
         "messages": [
             {"role": "user", "content": SCHEMA_PROMPT.format(question=question)}
         ],

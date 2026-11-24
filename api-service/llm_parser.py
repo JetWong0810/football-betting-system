@@ -12,8 +12,7 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-flash"  # DeepSeek-V4.1-Flash
+from llm_config import OPENAI_BASE as DEEPSEEK_BASE_URL, OPENAI_MODEL as DEEPSEEK_MODEL  # 可经环境变量切到网关
 
 SYSTEM_PROMPT = """你是体育投注信息提取助手。从OCR文字中提取投注数据，只输出JSON：
 
