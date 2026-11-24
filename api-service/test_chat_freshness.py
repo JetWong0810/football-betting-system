@@ -18,8 +18,12 @@ def _run(text, fr, refreshed):
     return cap["system"], [e.get("text") for e in ev if e["type"] == "status"]
 
 
-def _fr(eta, age):
-    return {"now": datetime(2026, 11, 24, 12, 0), "eta": eta, "ageMin": age, "lastFetch": datetime(2026, 11, 24, 11, 0), "lastChange": None}
+def _fr(eta, age, ou_age=None):
+    lf = datetime(2026, 11, 24, 11, 0)
+    ka = {"lastFetch": lf if age is not None else None, "ageMin": age}
+    ko = {"lastFetch": lf if (ou_age if ou_age is not None else age) is not None else None, "ageMin": ou_age if ou_age is not None else age}
+    return {"now": datetime(2026, 11, 24, 12, 0), "eta": eta, "ageMin": max([x for x in (age, ou_age) if x is not None] or [None]) if age is not None else None,
+            "lastFetch": lf, "lastChange": None, "kinds": {"asian": ka, "ou": ko, "euro": ka}}
 
 
 def test_auto_refresh_when_stale_and_near():
@@ -54,9 +58,12 @@ def test_readings_and_freshness_text():
     assert "平局→A全赢/B全输" in ah_reading(-0.75, "A", "B")
     assert "总进球3→大球赢半/小球输半" in ou_reading(2.75)
     s = freshness_text(_fr(1500, 40))
-    assert "滞后 40 分钟" in s and "不得断言" in s
-    assert "滞后" not in freshness_text(_fr(1500, 4))
-    assert "滞后" not in freshness_text(_fr(-100, 400))
+    assert "已滞后" in s and "不得断言" in s and "40 分钟前" in s
+    assert "已滞后" not in freshness_text(_fr(1500, 4))
+    assert "已滞后" not in freshness_text(_fr(-100, 400))
+    # 分项: 亚盘/欧赔很新, 只有大小球旧 -> 注意里只点名大小球(大小球曾被亚盘的新鲜度掩盖)
+    s2 = freshness_text(_fr(1500, 2, ou_age=45))
+    assert "大小球的数据已滞后" in s2 and "亚盘、" not in s2.split("【注意】")[1].split("的数据已滞后")[0]
 
 
 if __name__ == "__main__":
@@ -76,3 +83,25 @@ def test_split_sections_keeps_all_market_blocks():
 
 def test_breakeven_text():
     assert "58%→0.72" in C.breakeven_text("主水", 0.95, "客水", 0.9) and "主水0.95(需有效胜率≥51.3%)" in C.breakeven_text("主水", 0.95, "客水", 0.9)
+
+
+def test_overlay_500_prefers_fresh_500_and_adds_hkjc():
+    import zgzcw_cache as Z
+    real = Z.list_o500_ticks
+    rows = {("overunder", "Bet365"): [{"over": 0.9, "line": 3.0, "under": 0.95, "time": "2026-11-24 18:01:00"},
+                                      {"over": 0.8, "line": 2.75, "under": 1.0, "time": "2026-11-23 12:00:00"}],
+            ("overunder", "香港马会"): [{"over": 0.7, "line": 2.75, "under": 1.05, "time": "2026-11-24 17:21:00"}]}
+    Z.list_o500_ticks = lambda kind, mid, name: rows.get((kind, name), [])
+    try:
+        cache = [{"bookmaker": "Bet365", "cid": 2, "initial": {"line": 2.75}, "current": {"line": 2.75, "over": 0.82}},
+                 {"bookmaker": "立博", "cid": 5, "initial": {"line": 2.5}, "current": {"line": 2.5}}]
+        out, used = C.overlay_500("m", "ou", cache)
+        by = {x["bookmaker"]: x for x in out}
+        assert used == 2 and by["Bet365"]["current"]["line"] == 3.0 and by["Bet365"]["initial"]["line"] == 2.75 and by["Bet365"]["cid"] == 2
+        assert "香港马会" in by and by["香港马会"]["src500"] and by["立博"]["current"]["line"] == 2.5 and not by["立博"].get("src500")
+    finally:
+        Z.list_o500_ticks = real
+
+
+def test_odd_open_flag():
+    assert "水位失衡" in C._odd_open("ou", {"over": 1.3, "under": 0.57}) and C._odd_open("ou", {"over": 0.9, "under": 0.95}) == ""

@@ -287,12 +287,19 @@ def _utc_to_bj(d):
     return d.replace(tzinfo=timezone.utc).astimezone(_BJ).replace(tzinfo=None) if d else None
 
 
+_KIND_T500 = {"asian": "odds500_ah_ticks", "ou": "odds500_ou_ticks", "euro": "odds500_euro_ticks"}
+_KIND_CN = {"asian": "亚盘", "ou": "大小球", "euro": "欧赔"}
+_KIND_ZG = {"asian": ("asian_fetched_at", "ticks_fetched_at"), "ou": ("ou_fetched_at",), "euro": ("euro_fetched_at",)}
+
+
 def market_freshness(match_id: str, now: Optional[datetime] = None) -> Dict[str, Any]:
-    """盘口赔率数据新鲜度。lastFetch=最近一次成功抓取(北京时间, 取 500.com 与足彩网中较新者),
-    lastChange=最近一条变动记录(变动时间 != 抓取时间, 盘口平静时变动会很旧但数据仍是新的)。"""
+    """盘口赔率数据新鲜度, 分亚盘/大小球/欧赔三类各自计算(大小球曾因排在抓取末位而长期偏旧, 不能被亚盘的新鲜度掩盖)。
+    每类 lastFetch=最近一次成功抓取(北京时间, 取 500.com 与足彩网中较新者); ageMin=三类里最旧的那类的滞后分钟数
+    (任一类从未抓到则为 None)。lastChange=最近一条变动记录(盘口平静时变动会很旧, 但数据仍是新的)。"""
     now = now or datetime.now(_BJ).replace(tzinfo=None)
-    out: Dict[str, Any] = {"now": now, "eta": None, "lastFetch": None, "lastChange": None, "ageMin": None}
-    fetches, changes = [], []
+    out: Dict[str, Any] = {"now": now, "eta": None, "lastFetch": None, "lastChange": None, "ageMin": None, "kinds": {}}
+    kinds: Dict[str, List[datetime]] = {k: [] for k in _KIND_T500}
+    changes = []
     try:
         with get_db() as conn:
             cur = conn.cursor()
@@ -300,12 +307,12 @@ def market_freshness(match_id: str, now: Optional[datetime] = None) -> Dict[str,
             r = cur.fetchone()
             if r and r.get("match_timestamp"):
                 out["eta"] = float(r["match_timestamp"]) - now.replace(tzinfo=_BJ).timestamp()
-            for t in ("odds500_ah_ticks", "odds500_ou_ticks", "odds500_euro_ticks"):
+            for k, t in _KIND_T500.items():
                 try:
                     cur.execute(f"SELECT MAX(fetched_at) f, MAX(tick_time) c FROM {t} WHERE match_id=%s", (match_id,))
                     x = cur.fetchone() or {}
                     if x.get("f"):
-                        fetches.append(_utc_to_bj(x["f"]))
+                        kinds[k].append(_utc_to_bj(x["f"]))
                     if x.get("c"):
                         changes.append(x["c"])
                 except Exception:  # noqa: BLE001  表尚未创建
@@ -318,17 +325,28 @@ def market_freshness(match_id: str, now: Optional[datetime] = None) -> Dict[str,
                         changes.append(x["c"])
                 except Exception:  # noqa: BLE001
                     pass
-            cur.execute("SELECT asian_fetched_at a, euro_fetched_at e, ou_fetched_at o, ticks_fetched_at t "
+            cur.execute("SELECT asian_fetched_at, euro_fetched_at, ou_fetched_at, ticks_fetched_at "
                         "FROM jczq_fenxi_cache WHERE match_id=%s", (match_id,))
             x = cur.fetchone() or {}
-            for k in ("a", "e", "o", "t"):
-                if x.get(k):
-                    fetches.append(_utc_to_bj(x[k]))
+            for k, cols in _KIND_ZG.items():
+                for col in cols:
+                    if x.get(col):
+                        kinds[k].append(_utc_to_bj(x[col]))
     except Exception:  # noqa: BLE001
         return out
-    if fetches:
-        out["lastFetch"] = max(fetches)
-        out["ageMin"] = max(0, int((now - out["lastFetch"]).total_seconds() // 60))
+    ages = []
+    for k, vals in kinds.items():
+        last = max(vals) if vals else None
+        age = max(0, int((now - last).total_seconds() // 60)) if last else None
+        out["kinds"][k] = {"lastFetch": last, "ageMin": age}
+        ages.append(age)
+    fetched = [v["lastFetch"] for v in out["kinds"].values() if v["lastFetch"]]
+    if fetched:
+        out["lastFetch"] = max(fetched)
+    if ages and all(a is not None for a in ages):
+        out["ageMin"] = max(ages)           # 最旧的一类
+    elif fetched:
+        out["ageMin"] = None                # 有的类别从未抓到
     if changes:
         out["lastChange"] = max(changes)
     return out
@@ -343,19 +361,23 @@ def _fmt_eta(eta: Optional[float]) -> str:
 
 
 def freshness_text(fr: Dict[str, Any]) -> str:
-    L = [f"数据新鲜度: 当前北京时间 {fr['now'].strftime('%m-%d %H:%M')},{_fmt_eta(fr['eta'])}。"]
-    if fr["lastFetch"]:
-        L.append(f"盘口赔率最近一次成功抓取 {fr['lastFetch'].strftime('%m-%d %H:%M')}({fr['ageMin']} 分钟前)")
-    else:
-        L.append("盘口赔率没有成功抓取记录")
+    s = f"数据新鲜度: 当前北京时间 {fr['now'].strftime('%m-%d %H:%M')},{_fmt_eta(fr['eta'])}。"
+    kinds = fr.get("kinds") or {}
+    parts = []
+    for k in ("asian", "ou", "euro"):
+        v = kinds.get(k) or {}
+        parts.append(f"{_KIND_CN[k]} {v['lastFetch'].strftime('%H:%M')}({v['ageMin']} 分钟前)" if v.get("lastFetch") else f"{_KIND_CN[k]} 无抓取记录")
+    s += "各类盘口最近一次成功抓取:" + "、".join(parts) if kinds else "盘口赔率没有成功抓取记录"
     if fr["lastChange"]:
-        L.append(f";最近一条变动记录发生在 {fr['lastChange'].strftime('%m-%d %H:%M')}(盘口平静时变动记录会很旧,不代表数据旧)")
-    s = "".join(L[:1]) + "".join(L[1:]) + "。"
-    eta, age = fr["eta"], fr["ageMin"]
-    if eta is not None and eta > 0 and (age is None or age > 10) and eta <= 3 * 3600:
-        s += (f"【注意】临近开赛,抓取已滞后{'' if age is None else f' {age} 分钟'},之后的盘口变动这份数据里没有。"
-              "分析时必须先说明这一点,不得断言市场已经消化了某条消息(如首发),也不得把'抓取时间'当作'盘口变动时间';"
-              "用户可以说\"抓取本场最新的盘口赔率\"来刷新。")
+        s += f";最近一条变动记录发生在 {fr['lastChange'].strftime('%m-%d %H:%M')}(盘口平静时变动记录会很旧,不代表数据旧)"
+    s += "。"
+    eta = fr["eta"]
+    stale = [_KIND_CN[k] for k in ("asian", "ou", "euro")
+             if (kinds.get(k) or {}).get("ageMin") is None or kinds[k]["ageMin"] > 10]
+    if eta is not None and 0 < eta <= 3 * 3600 and stale:
+        s += (f"【注意】临近开赛,{'、'.join(stale)}的数据已滞后(见上),之后的盘口变动这份数据里没有。"
+              "分析时必须先说明这一点,涉及这几类的结论要标注'数据可能不是最新',不得断言市场已经消化了某条消息(如首发),"
+              "也不得把'抓取时间'当作'盘口变动时间';用户可以说\"抓取本场最新的盘口赔率\"来刷新。")
     return s
 
 
@@ -436,6 +458,57 @@ def _novig(a: Optional[float], b: Optional[float]) -> str:
         return ""
 
 
+_NAME_ALIAS = {"伟德": "韦德"}          # 500.com 叫伟德, 足彩网叫韦德(同一家)
+_FIELDS = {
+    "asian": lambda t: {"home": t.get("home"), "handicap": t.get("handicap"), "handicapText": t.get("handicapText"), "away": t.get("away")},
+    "ou": lambda t: {"over": t.get("over"), "line": t.get("line"), "under": t.get("under")},
+    "euro": lambda t: {"win": t.get("win"), "draw": t.get("draw"), "lose": t.get("lose")},
+}
+_K500 = {"asian": "asian", "ou": "overunder", "euro": "european"}
+
+
+def overlay_500(match_id: str, kind: str, cache_items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """把 500.com 逐次变动折成"初盘→即时盘"并覆盖/补充快照(最早一条=初盘, 最新一条=即时盘)。
+    足彩网快照的大小球排在抓取末位, 常比 500.com 旧几十分钟; 500.com 有数据就以它为准, 没有的公司保留快照。
+    返回 (合并后的列表, 被 500.com 覆盖或新增的公司数)。"""
+    from odds500_ticks import COMPANIES
+    from zgzcw_cache import list_o500_ticks
+    out = [dict(x) for x in cache_items]
+    by_name = {x.get("bookmaker"): i for i, x in enumerate(out)}
+    used = 0
+    for cid, name in COMPANIES.items():
+        rows = list_o500_ticks(_K500[kind], match_id, name)
+        if not rows:
+            continue
+        cn = _NAME_ALIAS.get(name, name)
+        item = {"bookmaker": cn, "initial": _FIELDS[kind](rows[-1]), "current": _FIELDS[kind](rows[0]),
+                "src500": True, "asof": rows[0].get("time")}
+        if kind == "euro":
+            item["returnRate"] = rows[0].get("returnRate")
+        if cn in by_name:
+            old = out[by_name[cn]]
+            for k in ("cid", "raw_name"):
+                if k in old:
+                    item[k] = old[k]
+            out[by_name[cn]] = item
+        else:
+            by_name[cn] = len(out)
+            out.append(item)
+        used += 1
+    return out, used
+
+
+def _odd_open(kind: str, i: Dict[str, Any]) -> str:
+    """初盘水位明显失衡(源数据如此, 500.com 与足彩网一致)时给出标注, 避免被误判为抓取错误或当成有效初盘。"""
+    ws = [i.get(k) for k in {"asian": ("home", "away"), "ou": ("over", "under"), "euro": ()}[kind]]
+    try:
+        if any(w is not None and (float(w) < 0.6 or float(w) > 1.3) for w in ws):
+            return " ⚠初盘水位失衡(源数据如此,非抓取错误),不宜作为有效初盘参考"
+    except (TypeError, ValueError):
+        pass
+    return ""
+
+
 def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """多家公司亚盘 / 欧赔 / 大小球 + Bet365 亚盘逐次变动。只读缓存,无联网。竞彩赔率口径不同,不纳入。"""
     from zgzcw_cache import get_fenxi_cache, list_ah_ticks, load_predict_inputs, _companies
@@ -444,6 +517,13 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
     euro_c = [x for x in ((euro or {}).get("companies") or []) if x.get("bookmaker") != "竞彩官方"]
     ou_c = _companies(cache.get("ou_json"))
     from zgzcw_cache import list_o500_ticks
+    ov: Dict[str, int] = {}
+    try:
+        asian, ov["asian"] = overlay_500(match_id, "asian", list(asian or []))
+        ou_c, ov["ou"] = overlay_500(match_id, "ou", ou_c)
+        euro_c, ov["euro"] = overlay_500(match_id, "euro", euro_c)
+    except Exception:  # noqa: BLE001  500.com 数据不可用时沿用足彩网快照
+        pass
     ticks = list_o500_ticks("asian", match_id, "Bet365") or list_ah_ticks(match_id, cid=2)
     n = {"asian": len(asian or []), "euro": len(euro_c), "ou": len(ou_c), "ticks": len(ticks)}
     L: List[str] = []
@@ -453,7 +533,9 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         v = fmt_cst(cache.get(k))
         return f",抓取于 {v[5:16]}(北京时间)" if v else ""
 
-    L.append(f"\n【盘口】亚盘·多家公司初盘→即时盘{ts('asian_fetched_at')}。盘口用文字表示:主让=主队让球,主受让=主队受让;水位为主队水/客队水。")
+    L.append(f"\n【盘口】亚盘·多家公司初盘→即时盘{ts('asian_fetched_at')}"
+             + (f";其中 {ov.get('asian')} 家来自 500.com 实时抓取(以其「最新变动」时间为准)" if ov.get("asian") else "")
+             + "。盘口用文字表示:主让=主队让球,主受让=主队受让;水位为主队水/客队水。")
     try:
         L.append(freshness_text(market_freshness(match_id)))
     except Exception:  # noqa: BLE001  新鲜度失败不影响其余内容
@@ -501,7 +583,8 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         else:
             mv, same = "盘口不变", same + 1
         L.append(f"- {a.get('bookmaker')}: {_ah_txt(hi, i.get('handicapText'))}→{_ah_txt(hc, cu.get('handicapText'))} | {mv} | "
-                 f"主水{_w(i.get('home'), cu.get('home'))} 客水{_w(i.get('away'), cu.get('away'))}")
+                 f"主水{_w(i.get('home'), cu.get('home'))} 客水{_w(i.get('away'), cu.get('away'))}"
+                 + (f" | 最新变动 {str(a.get('asof'))[5:16]}" if a.get("src500") else " | 来源足彩网快照") + _odd_open("asian", i))
     if asian:
         L.append(f"汇总: {len(asian)}家公司中 升盘{up} 降盘{down} 不变{same}")
     else:
@@ -536,10 +619,12 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         L.append("(暂无欧赔抓取数据)")
 
     if ou_c:
-        L.append(f"\n【大小球】多家公司初盘→即时盘(大球水/小球水){ts('ou_fetched_at')}")
+        L.append(f"\n【大小球】多家公司初盘→即时盘(大球水/小球水){ts('ou_fetched_at')}"
+                 + (f";其中 {ov.get('ou')} 家来自 500.com 实时抓取(以其「最新变动」时间为准,比足彩网快照新)" if ov.get("ou") else ""))
         for o in ou_c:
             i, cu = o.get("initial") or {}, o.get("current") or {}
-            L.append(f"- {o.get('bookmaker')}: {i.get('line')}→{cu.get('line')} | 大水{_w(i.get('over'), cu.get('over'))} 小水{_w(i.get('under'), cu.get('under'))}")
+            L.append(f"- {o.get('bookmaker')}: {i.get('line')}→{cu.get('line')} | 大水{_w(i.get('over'), cu.get('over'))} 小水{_w(i.get('under'), cu.get('under'))}"
+                     + (f" | 最新变动 {str(o.get('asof'))[5:16]}" if o.get("src500") else " | 来源足彩网快照") + _odd_open("ou", i))
     paths, pn = render_tick_paths(match_id)
     if paths:
         L.append(paths)
