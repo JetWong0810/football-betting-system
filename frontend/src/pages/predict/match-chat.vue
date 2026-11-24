@@ -80,8 +80,19 @@
     </scroll-view>
 
     <view class="mc-bottom">
+      <view v-if="quickOpen" class="mc-qpanel">
+        <scroll-view scroll-y class="mc-qscroll">
+          <view v-for="g in quickGroups" :key="g.name" class="mc-qgroup">
+            <text class="mc-qname">{{ g.name }}<text v-if="g.web" class="mc-qweb">联网</text></text>
+            <view class="mc-qitems">
+              <text v-for="q in g.items" :key="q.t" class="mc-chip" :class="{ off: streaming, web: q.web }" @tap="quickSend(q)">{{ q.t }}</text>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
       <scroll-view class="mc-quick" scroll-x :show-scrollbar="false">
         <view class="mc-quick-in">
+          <text class="mc-chip all" :class="{ on: quickOpen }" @tap="quickOpen = !quickOpen">{{ quickOpen ? '收起' : '全部提问' }}</text>
           <text v-for="q in quick" :key="q.t" class="mc-chip" :class="{ off: streaming }" @tap="quickSend(q)">{{ q.t }}</text>
         </view>
       </scroll-view>
@@ -168,19 +179,59 @@ const ctx = ref(null)
 const ctxText = ref('')
 const showCtx = ref(false)
 // 快捷提问:点击直接发送(q 为完整问题)。关联类问题会按关键词自动带入对应数据
-const quick = [
-  { t: '抓取最新盘口', q: '请抓取本场最新的盘口赔率数据,并分析最新变化和各家公司的态度' },
-  { t: '盘口赔率分析', q: '请关联本场盘口和赔率数据,分析各家公司的盘口、水位和欧赔有什么矛盾或异常' },
-  { t: '盘口变动解读', q: '请关联本场盘口赔率变动数据,解读开盘到现在的变动路径,资金流向和庄家态度是什么' },
-  { t: '同赔盘路', q: '请关联本场历史同赔数据,说明样本盘路统计偏向上盘还是下盘,可信度如何' },
-  { t: '交锋+近期', q: '请关联交锋历史和近期战绩,分析双方状态和对位关系' },
-  { t: '首发伤停', q: '请联网查本场双方首发阵容和伤停情况,标注来源和发布时间' },
-  { t: '文章观点核实', q: '请关联本场相关公众号文章,列出各文章的核心观点,并用盘口数据核实它们是否站得住' },
-  { t: '综合分析', q: '请关联本场全部数据,综合给出倾向(让球/大小球)、理由、风险点和信心高低' },
-  { t: '三句话总结', q: '把上面的分析总结成三句话,给出最终倾向' },
-  { t: '继续', q: '请继续' },
+// 快捷提问: 点击直接发送。web=true 的需要联网搜索(点击时自动打开联网)。
+// 含"关联…数据"的会按关键词自动带入本场对应数据; 联网类要求标注来源, 查不到就明说,不得编造。
+const WEB_TAIL = ',标注来源网站和发布时间,多个来源冲突要说明,查不到就明说"没查到",不要编造数字'
+const quickGroups = [
+  { name: '盘口与数据', items: [
+    { t: '抓取最新盘口', q: '请抓取本场最新的盘口赔率数据,并分析最新变化和各家公司的态度' },
+    { t: '盘口赔率分析', q: '请关联本场盘口和赔率数据,分析各家公司的盘口、水位和欧赔有什么矛盾或异常' },
+    { t: '盘口变动解读', q: '请关联本场盘口赔率变动数据,解读开盘至今的变动路径,资金流向和庄家态度是什么' },
+    { t: '香港马会', q: '请关联本场盘口赔率变动数据,重点分析香港马会的亚盘、大小球和欧赔变动,并与其他公司对比是否一致' },
+    { t: '同赔盘路', q: '请关联本场历史同赔数据,说明样本盘路统计偏向上盘还是下盘,可信度如何' },
+    { t: '七因子预测', q: '请关联本场七因子预测数据,解释各因子的方向和强弱,以及是否与当前盘口冲突' },
+  ] },
+  { name: '阵容与战术', web: true, items: [
+    { t: '首发伤停', web: true, q: '请联网查本场双方首发阵容和伤停情况' + WEB_TAIL },
+    { t: '阵型与打法', web: true, q: '请联网查双方本赛季常用阵型、预计或已公布首发的阵型,分析各自的攻防特点、出球方式和边路/中路倾向,以及两队阵型的对位关系' + WEB_TAIL },
+    { t: '核心球员状态', web: true, q: '请联网查双方核心球员(主力前锋、中场组织者、门将、中卫)最近的表现和数据,以及他们缺阵或复出对本场的影响' + WEB_TAIL },
+    { t: '定位球与高空', web: true, q: '请联网查双方定位球进球/失球情况、高空球对抗特点,分析定位球在本场的作用' + WEB_TAIL },
+  ] },
+  { name: '战意与情报', web: true, items: [
+    { t: '战意分析', web: true, q: '请联网查本场双方的积分形势、联赛排名压力(争冠/欧战/保级)、赛事阶段和出线形势,分析双方的战意强弱,谁更需要这场比赛的结果' + WEB_TAIL },
+    { t: '赛前新闻情报', web: true, q: '请联网搜集本场赛前新闻情报:球队内部消息、伤病细节、停赛、各类传闻、争议事件、重要动态' + WEB_TAIL },
+    { t: '主帅与球员发言', web: true, q: '请联网查本场双方主帅和主要球员赛前发布会的发言,提炼对阵容、战术、伤病和战意的有效信息(排除套话)' + WEB_TAIL },
+    { t: '关联文章', q: '请关联本场相关公众号文章,列出各文章的核心观点,并用盘口数据核实它们是否站得住' },
+  ] },
+  { name: '体能与赛程', web: true, items: [
+    { t: '赛程与疲劳', web: true, q: '请联网查双方近 14 天的赛程(含杯赛和欧战)、两场比赛的间隔天数、客场旅途距离,评估体能疲劳和轮换风险' + WEB_TAIL },
+    { t: '跑动与体能数据', web: true, q: '请联网查双方球员近期的跑动距离、高强度跑动、冲刺次数、压迫强度等体能数据,以及两队下半场的进球/失球分布,判断体能对后段比赛的影响;查不到具体跑动数据就明说' + WEB_TAIL },
+    { t: '天气场地裁判', web: true, q: '请联网查本场的天气(气温、降水、风)、场地草皮情况、主裁判的执法风格(场均黄牌/点球倾向)和球场氛围' + WEB_TAIL },
+    { t: '近期状态', q: '请关联交锋历史和近期战绩,分析双方状态和对位关系' },
+  ] },
+  { name: '进球与盘口玩法', items: [
+    { t: '进球数分析', web: true, q: '请关联本场盘口数据,并联网查双方最近预期进球(xG)、场均进球/失球和上下半场进球分布,分析大小球走向,给出总进球的大致分布' + WEB_TAIL },
+    { t: '让球与不败', q: '请关联本场盘口和历史同赔数据,分析让球盘的上盘/下盘与"强队不败/弱队不败"哪个更站得住,按盘口读法的结算说明风险' },
+    { t: '风险点复盘', q: '请关联本场全部数据,站在反方向挑刺:列出最可能让当前判断出错的 3~5 个因素,并给出各自的信号和占比' },
+  ] },
+  { name: '收口', items: [
+    { t: '综合分析', q: '请关联本场全部数据,综合给出倾向(让球/大小球)、理由、风险点和信心高低' },
+    { t: '三句话总结', q: '把上面的分析总结成三句话,给出最终倾向' },
+    { t: '继续', q: '请继续' },
+  ] },
 ]
-const quickSend = (q) => { if (!streaming.value) send(q.q) }
+// 底部常驻的高频入口
+const quick = [
+  quickGroups[0].items[0], quickGroups[0].items[1], quickGroups[1].items[0],
+  quickGroups[2].items[0], quickGroups[5].items[0], quickGroups[5].items[1], quickGroups[5].items[2],
+]
+const quickOpen = ref(false)
+const quickSend = (q) => {
+  if (streaming.value) return
+  if (q.web && !web.value) { web.value = true; uni.showToast({ title: '已开启联网', icon: 'none' }) }
+  quickOpen.value = false
+  send(q.q)
+}
 const examples = ['双方首发阵容出来了吗?', '请关联本场盘口和赔率数据,分析有什么矛盾', '请关联交锋和近期战绩,分析双方状态', '请关联本场全部数据,综合分析']
 const ctxRows = computed(() => {
   const c = ctx.value
@@ -504,6 +555,14 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
 .mc-quick { white-space: nowrap; padding: 10rpx 0 4rpx; }
 .mc-quick-in { display: inline-flex; gap: 12rpx; padding: 0 24rpx; }
 .mc-chip { flex: none; font-size: 22rpx; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 8rpx 18rpx; &:active { background: #ccfbf1; } &.off { opacity: 0.45; } }
+.mc-chip.all { color: #fff; background: #0d9488; border-color: #0d9488; &.on { background: #0f766e; } }
+.mc-chip.web { border-style: dashed; }
+.mc-qpanel { border-bottom: 1rpx solid #e2e8f0; background: #f8fafc; }
+.mc-qscroll { max-height: 520rpx; padding: 8rpx 24rpx 12rpx; box-sizing: border-box; }
+.mc-qgroup { padding: 10rpx 0 6rpx; }
+.mc-qname { display: block; font-size: 21rpx; font-weight: 700; color: #475569; margin-bottom: 8rpx; }
+.mc-qweb { margin-left: 10rpx; font-size: 18rpx; font-weight: 500; color: #0d9488; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 0 8rpx; }
+.mc-qitems { display: flex; flex-wrap: wrap; gap: 12rpx; }
 .mc-error { font-size: 22rpx; color: #dc2626; background: #fef2f2; border-radius: 6rpx; padding: 10rpx 16rpx; margin-bottom: 14rpx; }
 .mc-tail { height: 8rpx; }
 

@@ -59,7 +59,7 @@ _SEC_RE = {
 }
 
 
-_REFRESH_ACT = re.compile(r"抓取|抓一下|刷新|重新抓|拉取|更新|实时|最新|即时|现在的")
+_REFRESH_ACT = re.compile(r"抓取|抓一下|刷新|重新抓|拉取|更新|实时|最新|即时")
 _REFRESH_OBJ = re.compile(r"盘口|亚盘|赔率|欧赔|大小球|水位|变动")
 
 
