@@ -280,6 +280,146 @@ def render_tick_paths(match_id: str) -> Tuple[str, int]:
     return "\n【其他公司逐次变动】(时间均为北京时间; 开赛后的滚球记录已剔除)\n" + "\n".join(out), total
 
 
+_BJ = timezone(timedelta(hours=8))
+
+
+def _utc_to_bj(d):
+    return d.replace(tzinfo=timezone.utc).astimezone(_BJ).replace(tzinfo=None) if d else None
+
+
+def market_freshness(match_id: str, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """盘口赔率数据新鲜度。lastFetch=最近一次成功抓取(北京时间, 取 500.com 与足彩网中较新者),
+    lastChange=最近一条变动记录(变动时间 != 抓取时间, 盘口平静时变动会很旧但数据仍是新的)。"""
+    now = now or datetime.now(_BJ).replace(tzinfo=None)
+    out: Dict[str, Any] = {"now": now, "eta": None, "lastFetch": None, "lastChange": None, "ageMin": None}
+    fetches, changes = [], []
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT match_timestamp FROM matches WHERE match_id=%s", (match_id,))
+            r = cur.fetchone()
+            if r and r.get("match_timestamp"):
+                out["eta"] = float(r["match_timestamp"]) - now.replace(tzinfo=_BJ).timestamp()
+            for t in ("odds500_ah_ticks", "odds500_ou_ticks", "odds500_euro_ticks"):
+                try:
+                    cur.execute(f"SELECT MAX(fetched_at) f, MAX(tick_time) c FROM {t} WHERE match_id=%s", (match_id,))
+                    x = cur.fetchone() or {}
+                    if x.get("f"):
+                        fetches.append(_utc_to_bj(x["f"]))
+                    if x.get("c"):
+                        changes.append(x["c"])
+                except Exception:  # noqa: BLE001  表尚未创建
+                    pass
+            for t in ("jczq_ah_ticks", "jczq_ou_ticks", "jczq_euro_ticks"):
+                try:
+                    cur.execute(f"SELECT MAX(tick_time) c FROM {t} WHERE match_id=%s", (match_id,))
+                    x = cur.fetchone() or {}
+                    if x.get("c"):
+                        changes.append(x["c"])
+                except Exception:  # noqa: BLE001
+                    pass
+            cur.execute("SELECT asian_fetched_at a, euro_fetched_at e, ou_fetched_at o, ticks_fetched_at t "
+                        "FROM jczq_fenxi_cache WHERE match_id=%s", (match_id,))
+            x = cur.fetchone() or {}
+            for k in ("a", "e", "o", "t"):
+                if x.get(k):
+                    fetches.append(_utc_to_bj(x[k]))
+    except Exception:  # noqa: BLE001
+        return out
+    if fetches:
+        out["lastFetch"] = max(fetches)
+        out["ageMin"] = max(0, int((now - out["lastFetch"]).total_seconds() // 60))
+    if changes:
+        out["lastChange"] = max(changes)
+    return out
+
+
+def _fmt_eta(eta: Optional[float]) -> str:
+    if eta is None:
+        return "开赛时间未知"
+    if eta <= 0:
+        return f"已开赛 {int(-eta // 60)} 分钟"
+    return f"距开赛 {int(eta // 3600)} 小时 {int(eta % 3600 // 60)} 分钟" if eta >= 3600 else f"距开赛 {int(eta // 60)} 分钟"
+
+
+def freshness_text(fr: Dict[str, Any]) -> str:
+    L = [f"数据新鲜度: 当前北京时间 {fr['now'].strftime('%m-%d %H:%M')},{_fmt_eta(fr['eta'])}。"]
+    if fr["lastFetch"]:
+        L.append(f"盘口赔率最近一次成功抓取 {fr['lastFetch'].strftime('%m-%d %H:%M')}({fr['ageMin']} 分钟前)")
+    else:
+        L.append("盘口赔率没有成功抓取记录")
+    if fr["lastChange"]:
+        L.append(f";最近一条变动记录发生在 {fr['lastChange'].strftime('%m-%d %H:%M')}(盘口平静时变动记录会很旧,不代表数据旧)")
+    s = "".join(L[:1]) + "".join(L[1:]) + "。"
+    eta, age = fr["eta"], fr["ageMin"]
+    if eta is not None and eta > 0 and (age is None or age > 10) and eta <= 3 * 3600:
+        s += (f"【注意】临近开赛,抓取已滞后{'' if age is None else f' {age} 分钟'},之后的盘口变动这份数据里没有。"
+              "分析时必须先说明这一点,不得断言市场已经消化了某条消息(如首发),也不得把'抓取时间'当作'盘口变动时间';"
+              "用户可以说\"抓取本场最新的盘口赔率\"来刷新。")
+    return s
+
+
+def _halves(line: float) -> List[float]:
+    return [line - 0.25, line + 0.25] if abs(line * 4) % 2 == 1 else [line]
+
+
+def _res_word(adjs: List[float]) -> str:
+    w = sum(1 for x in adjs if x > 0)
+    l = sum(1 for x in adjs if x < 0)
+    if len(adjs) == 1:
+        return "全赢" if w else ("全输" if l else "走水")
+    if w == 2:
+        return "全赢"
+    if l == 2:
+        return "全输"
+    if w == 1 and l == 0:
+        return "赢半"
+    if l == 1 and w == 0:
+        return "输半"
+    return "走水"
+
+
+def ah_reading(h_raw: Optional[float], home: str, away: str) -> str:
+    """亚盘读法。h_raw 为数据源原值(正=主让)。给出各净胜球下上盘/下盘的结算, 避免模型现推时说反。"""
+    if h_raw is None:
+        return ""
+    if h_raw == 0:
+        up_side, line_txt = None, "平手盘"
+    else:
+        up_side = home if h_raw > 0 else away
+        line_txt = f"{'主让' if h_raw > 0 else '主受让'}{abs(h_raw):g}"
+    parts = []
+    for d, name in ((2, f"{home}净胜2球及以上"), (1, f"{home}赢1球"), (0, "平局"), (-1, f"{away}赢1球"), (-2, f"{away}净胜2球及以上")):
+        home_res = _res_word([d - x for x in _halves(h_raw)])
+        away_res = {"全赢": "全输", "全输": "全赢", "赢半": "输半", "输半": "赢半", "走水": "走水"}[home_res]
+        parts.append(f"{name}→{home}{home_res}/{away}{away_res}")
+    head = f"当前主流亚盘 {line_txt}"
+    if up_side:
+        down = away if up_side == home else home
+        head += f":上盘=让球方({up_side}),下盘=受让方({down})"
+    return head + "。结算(以主队盘口计): " + "; ".join(parts) + "。"
+
+
+def ou_reading(line: Optional[float]) -> str:
+    if line is None:
+        return ""
+    parts = []
+    for t in sorted({max(0, int(line) - 1), max(0, int(line)), int(line) + 1, int(line) + 2}):
+        big = _res_word([t - x for x in _halves(line)])
+        small = {"全赢": "全输", "全输": "全赢", "赢半": "输半", "输半": "赢半", "走水": "走水"}[big]
+        parts.append(f"总进球{t}→大球{big}/小球{small}")
+    return f"当前主流大小球 {line:g}: " + "; ".join(parts) + "。"
+
+
+def _novig(a: Optional[float], b: Optional[float]) -> str:
+    """港式水位(净赔率)两边去水概率。"""
+    try:
+        pa, pb = 1 / (1 + float(a)), 1 / (1 + float(b))
+        return f"{pa / (pa + pb) * 100:.1f}% / {pb / (pa + pb) * 100:.1f}%"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return ""
+
+
 def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """多家公司亚盘 / 欧赔 / 大小球 + Bet365 亚盘逐次变动。只读缓存,无联网。竞彩赔率口径不同,不纳入。"""
     from zgzcw_cache import get_fenxi_cache, list_ah_ticks, load_predict_inputs, _companies
@@ -298,6 +438,38 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         return f",抓取于 {v[5:16]}(北京时间)" if v else ""
 
     L.append(f"\n【盘口】亚盘·多家公司初盘→即时盘{ts('asian_fetched_at')}。盘口用文字表示:主让=主队让球,主受让=主队受让;水位为主队水/客队水。")
+    try:
+        L.append(freshness_text(market_freshness(match_id)))
+    except Exception:  # noqa: BLE001  新鲜度失败不影响其余内容
+        pass
+    # 盘口读法: 当前主流盘(优先 Bet365 最新变动), 预先算好结算与去水概率, 不让模型现推上下盘/赢半输半
+    try:
+        from zgzcw_cache import list_ou_ticks as _lou
+        home_n, away_n = (match or {}).get("home_team_name") or "主队", (match or {}).get("away_team_name") or "客队"
+        h_now = ticks[0].get("handicap") if ticks else None
+        w_h = (ticks[0].get("home"), ticks[0].get("away")) if ticks else (None, None)
+        if h_now is None:
+            b = next((a for a in (asian or []) if a.get("bookmaker") == "Bet365"), None)
+            if b:
+                cu = b.get("current") or {}
+                h_now, w_h = cu.get("handicap"), (cu.get("home"), cu.get("away"))
+        r1 = ah_reading(h_now, home_n, away_n)
+        if r1:
+            nv = _novig(*w_h)
+            L.append("【盘口读法】" + r1 + (f"(Bet365 最新水位去水后 主队/客队覆盖概率 {nv})" if nv else ""))
+        ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
+        o_line, o_w = (ot[0].get("line"), (ot[0].get("over"), ot[0].get("under"))) if ot else (None, (None, None))
+        if o_line is None:
+            b = next((o for o in ou_c if o.get("bookmaker") == "Bet365"), None)
+            if b:
+                cu = b.get("current") or {}
+                o_line, o_w = cu.get("line"), (cu.get("over"), cu.get("under"))
+        r2 = ou_reading(o_line)
+        if r2:
+            nv = _novig(*o_w)
+            L.append(r2 + (f"(Bet365 最新水位去水后 大球/小球概率 {nv})" if nv else ""))
+    except Exception:  # noqa: BLE001
+        pass
     up = down = same = 0
     for a in asian or []:
         i, cu = a.get("initial") or {}, a.get("current") or {}

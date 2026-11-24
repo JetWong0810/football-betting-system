@@ -820,7 +820,7 @@ class OddsRepository:
         rows = [(match_id, company, int(cid), t["time"].strftime("%Y-%m-%d %H:%M:%S")) + pick(t) for t in ticks or []]
         if not match_id or not rows:
             return 0
-        upd = ", ".join(f"{c.strip()}=VALUES({c.strip()})" for c in cols.split(","))
+        upd = ", ".join(f"{c.strip()}=VALUES({c.strip()})" for c in cols.split(",")) + ", fetched_at=CURRENT_TIMESTAMP"
         with get_db() as conn:
             cur = conn.cursor()
             try:
