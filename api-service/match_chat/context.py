@@ -210,11 +210,12 @@ def _probs(o: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float]]:
         return None
 
 
-TICK_COMPANIES = {
-    "asian": [(22, "Pinnacle"), (3, "皇冠"), (7, "澳门")],
-    "ou": [(22, "Pinnacle"), (3, "皇冠"), (2, "Bet365")],
-    "euro": [(0, "平均欧赔"), (2, "Bet365")],
-}
+# 逐次变动展示的公司(按关注度排序)。zcid 为足彩网 cid(500.com 无数据时兜底); 香港马会足彩网无
+TICK_COMPANIES = [
+    ("香港马会", None), ("Bet365", 2), ("Pinnacle", 22), ("皇冠", 3), ("澳门", 7),
+    ("威廉希尔", 9), ("立博", 5), ("伟德", None), ("易胜博", None), ("利记", None), ("明陞", None),
+]
+_CORE_NAMES = {"香港马会", "Bet365", "Pinnacle", "皇冠", "澳门", "威廉希尔", "立博"}
 
 
 def compress_ticks(kind: str, asc: List[Dict[str, Any]], cap: int = 12) -> List[Dict[str, Any]]:
@@ -251,28 +252,32 @@ def _tick_row(kind: str, t: Dict[str, Any]) -> str:
 
 
 def render_tick_paths(match_id: str) -> Tuple[str, int]:
-    """其余公司(皇冠/澳门/Pinnacle 等)的逐次变动关键路径。无数据返回空串。"""
-    from zgzcw_cache import list_ah_ticks, list_ou_ticks, list_euro_ticks
-    fetch = {"asian": lambda c: list_ah_ticks(match_id, cid=c), "ou": lambda c: list_ou_ticks(match_id, c),
-             "euro": lambda c: list_euro_ticks(match_id, c)}
+    """多家公司亚盘/大小球/欧赔逐次变动的关键路径。500.com 来源优先, 无数据回退足彩网。Bet365 亚盘另有专段。"""
+    from zgzcw_cache import list_ah_ticks, list_ou_ticks, list_euro_ticks, list_o500_ticks
+    fb = {"asian": list_ah_ticks, "ou": list_ou_ticks, "euro": list_euro_ticks}
+    k500 = {"asian": "asian", "ou": "overunder", "euro": "european"}
     title = {"asian": "亚盘", "ou": "大小球", "euro": "欧赔(胜/平/负,隐含概率已去水)"}
     out: List[str] = []
     total = 0
     for kind in ("asian", "ou", "euro"):
-        for cid, name in TICK_COMPANIES[kind]:
-            if kind == "asian" and cid == 2:
+        for name, zcid in TICK_COMPANIES:
+            if kind == "asian" and name == "Bet365":
                 continue
-            rows = fetch[kind](cid)
+            rows = list_o500_ticks(k500[kind], match_id, name)
+            src = "500.com"
+            if not rows and zcid is not None:
+                rows = fb[kind](match_id, zcid) if kind != "asian" else list_ah_ticks(match_id, cid=zcid)
+                src = "足彩网"
             if len(rows) < 2:      # 仅1条等于没有变动
                 continue
             asc = list(reversed(rows))
-            pick = compress_ticks(kind, asc)
+            pick = compress_ticks(kind, asc, cap=10 if name in _CORE_NAMES else 6)
             total += len(rows)
-            out.append(f"{name} {title[kind]} 逐次变动(共{len(rows)}次,仅列关键变动点,从早到晚):")
+            out.append(f"{name} {title[kind]} 逐次变动(来源{src},共{len(rows)}次,最新 {asc[-1].get('time')},仅列关键变动点,从早到晚):")
             out.extend(f"- {t.get('time')} {_tick_row(kind, t)}" for t in pick)
     if not out:
         return "", 0
-    return "\n【其他公司逐次变动】\n" + "\n".join(out), total
+    return "\n【其他公司逐次变动】(时间均为北京时间; 开赛后的滚球记录已剔除)\n" + "\n".join(out), total
 
 
 def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -282,7 +287,8 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
     _, asian, euro = load_predict_inputs(match)
     euro_c = [x for x in ((euro or {}).get("companies") or []) if x.get("bookmaker") != "竞彩官方"]
     ou_c = _companies(cache.get("ou_json"))
-    ticks = list_ah_ticks(match_id, cid=2)
+    from zgzcw_cache import list_o500_ticks
+    ticks = list_o500_ticks("asian", match_id, "Bet365") or list_ah_ticks(match_id, cid=2)
     n = {"asian": len(asian or []), "euro": len(euro_c), "ou": len(ou_c), "ticks": len(ticks)}
     L: List[str] = []
 

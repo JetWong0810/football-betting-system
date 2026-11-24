@@ -806,6 +806,31 @@ class OddsRepository:
                 _execute(conn, "UPDATE jczq_fenxi_cache SET ticks_fetched_at=NOW() WHERE match_id=%s", (match_id,))
         return len(rows)
 
+    def append_ticks500(self, kind: str, match_id: str, ticks: List[Dict[str, Any]], *, company: str, cid: int) -> int:
+        """500.com 来源逐次变动(odds500_{ah,ou,euro}_ticks)。time 已是 datetime(北京时间), 追加写入。"""
+        spec = {
+            "ah": ("odds500_ah_ticks", "home_odds, handicap, handicap_text, away_odds",
+                   lambda t: (t.get("home"), t.get("handicap"), t.get("handicapText") or "", t.get("away"))),
+            "ou": ("odds500_ou_ticks", "over_odds, line, line_text, under_odds",
+                   lambda t: (t.get("over"), t.get("line"), t.get("lineText") or "", t.get("under"))),
+            "euro": ("odds500_euro_ticks", "win_odds, draw_odds, lose_odds, return_rate",
+                     lambda t: (t.get("win"), t.get("draw"), t.get("lose"), t.get("returnRate"))),
+        }[kind]
+        table, cols, pick = spec
+        rows = [(match_id, company, int(cid), t["time"].strftime("%Y-%m-%d %H:%M:%S")) + pick(t) for t in ticks or []]
+        if not match_id or not rows:
+            return 0
+        upd = ", ".join(f"{c.strip()}=VALUES({c.strip()})" for c in cols.split(","))
+        with get_db() as conn:
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    f"INSERT INTO {table} (match_id, company, cid, tick_time, {cols}) "
+                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE {upd}", rows)
+            finally:
+                cur.close()
+        return len(rows)
+
     def append_ou_ticks(self, match_id: str, ticks: List[Dict[str, Any]], *, company: str, cid: int) -> int:
         """大小球逐次变动(jczq_ou_ticks)。追加写入。"""
         rows = []

@@ -541,6 +541,32 @@ def list_euro_ticks(match_id: str, cid: int) -> List[Dict[str, Any]]:
                    "time": _fmt_ts(r.get("tick_time"))})
 
 
+_O500 = {
+    "asian": ("odds500_ah_ticks", "SELECT tick_time, home_odds, handicap, handicap_text, away_odds FROM odds500_ah_ticks "
+              "WHERE match_id=%s AND company=%s ORDER BY tick_time DESC",
+              lambda r: {"home": _f(r.get("home_odds")), "handicap": _f(r.get("handicap")),
+                         "handicapText": r.get("handicap_text") or "", "away": _f(r.get("away_odds")),
+                         "time": _fmt_ts(r.get("tick_time"))}),
+    "overunder": ("odds500_ou_ticks", "SELECT tick_time, over_odds, line, line_text, under_odds FROM odds500_ou_ticks "
+                  "WHERE match_id=%s AND company=%s ORDER BY tick_time DESC",
+                  lambda r: {"over": _f(r.get("over_odds")), "line": _f(r.get("line")),
+                             "lineText": r.get("line_text") or "", "under": _f(r.get("under_odds")),
+                             "time": _fmt_ts(r.get("tick_time"))}),
+    "european": ("odds500_euro_ticks", "SELECT tick_time, win_odds, draw_odds, lose_odds, return_rate FROM odds500_euro_ticks "
+                 "WHERE match_id=%s AND company=%s ORDER BY tick_time DESC",
+                 lambda r: {"win": _f(r.get("win_odds")), "draw": _f(r.get("draw_odds")), "lose": _f(r.get("lose_odds")),
+                            "returnRate": _f(r.get("return_rate")), "time": _fmt_ts(r.get("tick_time"))}),
+}
+
+
+def list_o500_ticks(kind: str, match_id: str, company: str) -> List[Dict[str, Any]]:
+    """500.com 来源的逐次变动(新→旧)。表不存在或无数据返回空, 调用方回退到足彩网。"""
+    spec = _O500.get(kind)
+    if not spec or not match_id or not company:
+        return []
+    return _list_ticks(spec[1], (match_id, company), spec[2])
+
+
 def load_odds_history(
     match: Optional[Dict[str, Any]],
     kind: str,
@@ -551,6 +577,12 @@ def load_odds_history(
         return []
     mid = match.get("match_id") or ""
     cache = get_fenxi_cache(mid) or {}
+    key = {"asian": "asian_json", "european": "euro_json", "overunder": "ou_json"}.get(kind)
+    item0 = _pick_company(_companies(cache.get(key)), cid) if key else None
+    if item0 and item0.get("bookmaker"):
+        rows500 = list_o500_ticks(kind, mid, item0["bookmaker"])
+        if rows500:                                   # 500.com 优先, 足彩网兜底
+            return rows500
     if kind == "asian":
         ticks = list_ah_ticks(mid, cid=int(cid))
         if ticks:

@@ -196,6 +196,31 @@ def _ensure_tick_tables(cursor) -> None:
         """
     )
 
+    # 500.com 来源的多家公司逐次变动(与足彩网 jczq_*_ticks 分开存放, 读取时 500 优先、足彩网兜底)
+    for kind, cols in (
+        ("ah", "home_odds DECIMAL(8,3) DEFAULT NULL, handicap DECIMAL(6,2) DEFAULT NULL COMMENT '500原值 正=主让', "
+               "handicap_text VARCHAR(32) DEFAULT NULL, away_odds DECIMAL(8,3) DEFAULT NULL"),
+        ("ou", "over_odds DECIMAL(8,3) DEFAULT NULL, line DECIMAL(6,2) DEFAULT NULL, "
+               "line_text VARCHAR(32) DEFAULT NULL, under_odds DECIMAL(8,3) DEFAULT NULL"),
+        ("euro", "win_odds DECIMAL(8,3) DEFAULT NULL, draw_odds DECIMAL(8,3) DEFAULT NULL, "
+                 "lose_odds DECIMAL(8,3) DEFAULT NULL, return_rate DECIMAL(5,2) DEFAULT NULL"),
+    ):
+        cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS odds500_{kind}_ticks (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                match_id VARCHAR(100) NOT NULL,
+                company VARCHAR(50) NOT NULL,
+                cid INT NOT NULL,
+                tick_time DATETIME NOT NULL,
+                {cols},
+                fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_o500_{kind} (match_id, company, tick_time),
+                INDEX idx_o500_{kind}_m (match_id, company)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+
 
 def _connect():
     """连接 MySQL 数据库"""

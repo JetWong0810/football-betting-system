@@ -1,7 +1,8 @@
 import logging
 import os
+import time as _time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -38,6 +39,23 @@ TICK_PLAN = (
 )
 _TICK_FETCHED: Dict[tuple, float] = {}     # (match_id, kind, cid) -> 上次抓取 time.time(); 进程内, 重启后重抓一次
 _TICK_FINAL: set = set()                   # 已做过开赛后收尾抓取的 match_id
+
+# ---- 500.com 多家公司逐次变动(主来源; 足彩网为兜底) ----
+O500_ENABLED = os.getenv("O500_ENABLED", "1") != "0"
+O500_WINDOW_SEC = int(os.getenv("O500_WINDOW_SEC", str(3 * 3600)))          # 开赛前3小时起抓
+O500_FULL_SEC = int(os.getenv("O500_FULL_SEC", "5400"))                      # 90分钟内抓全部核心公司, 更早只抓精简集合
+O500_TTL_SEC = int(os.getenv("O500_TTL_SEC", "1200"))
+O500_TTL_MID_SEC = int(os.getenv("O500_TTL_MID_SEC", "600"))                 # 90分钟内
+O500_TTL_NEAR_SEC = int(os.getenv("O500_TTL_NEAR_SEC", "300"))               # 30分钟内
+O500_FINAL_AFTER_SEC = int(os.getenv("O500_FINAL_AFTER_SEC", "900"))         # 开赛后补抓一次收尾
+O500_BUDGET = int(os.getenv("O500_BUDGET", "80"))                            # 每轮最多请求数
+O500_FOCUS_BUDGET = int(os.getenv("O500_FOCUS_BUDGET", "24"))                # 临近开赛轻量轮
+O500_COVER_SEC = int(os.getenv("O500_COVER_SEC", "1800"))                    # 500 覆盖有效期, 期内足彩网不重复抓变动
+_O500_FETCHED: Dict[tuple, float] = {}     # (match_id, kind, cid) -> 上次成功抓取时间(含"无数据")
+_O500_FINAL: set = set()
+_O500_FIDS: Dict[str, tuple] = {}          # sale_date -> (抓取时间, {match_code: {...}})
+_O500_FID_TTL = 6 * 3600
+_O500_KIND_OF = {"asian": "ah", "ou": "ou", "euro": "euro"}
 _CACHE_MIN_LEN = 20
 # 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
 LIGHT_WINDOW_SEC = int(os.getenv("PRE_KICKOFF_LIGHT_SEC", "720"))
@@ -174,6 +192,35 @@ def due_tick_tasks(match_id: str, eta: Optional[float], now: float,
     return due
 
 
+def due_o500_tasks(match_id: str, eta: Optional[float], now: float,
+                   fetched: Dict[tuple, float], final_done: set) -> List[tuple]:
+    """本场现在该抓哪些 500.com 逐次变动: [(kind, cid)]。纯函数, 便于测试。
+
+    开赛前 O500_WINDOW_SEC 内按 TTL 抓: 90 分钟外只抓精简公司集合, 90 分钟内抓全部核心公司,
+    30 分钟内更勤; 开赛后 O500_FINAL_AFTER_SEC 内补抓一次收尾。
+    """
+    from .odds500_ticks import CORE_CIDS, KINDS, LITE_CIDS
+    if eta is None or eta > O500_WINDOW_SEC or eta <= -O500_FINAL_AFTER_SEC:
+        return []
+    cids = CORE_CIDS if eta <= O500_FULL_SEC else LITE_CIDS
+    if eta <= 0:
+        return [] if match_id in final_done else [(k, c) for k in KINDS for c in cids]
+    ttl = O500_TTL_NEAR_SEC if eta <= IMMINENT_SEC else (O500_TTL_MID_SEC if eta <= O500_FULL_SEC else O500_TTL_SEC)
+    return [(k, c) for k in KINDS for c in cids
+            if (fetched.get((match_id, k, c)) is None or now - fetched[(match_id, k, c)] >= ttl)]
+
+
+def o500_covered(match_id: str, now: float, fetched: Dict[tuple, float], within: int = 0) -> bool:
+    """500.com 近期是否已覆盖该场的主要变动(亚盘/大小球/欧赔 × Bet365/皇冠/Pinnacle)。覆盖时足彩网不再补抓变动页。"""
+    within = within or O500_COVER_SEC
+    for kind in ("asian", "ou", "euro"):
+        for cid in (3, 280, 1055):
+            t = fetched.get((match_id, kind, cid))
+            if t is None or now - t > within:
+                return False
+    return True
+
+
 def _is_stale(ts, ttl_sec: int) -> bool:
     """按 UTC 算缓存年龄。
 
@@ -300,6 +347,95 @@ class SportterySyncService:
         "getUniformMatchResultV1.qry"
     )
 
+    def _o500_fid(self, client, m: Dict[str, Any]) -> Optional[str]:
+        """match -> 500.com fid。按售卖日取列表页(缓存6小时), 用开赛时间校验, 防止错配。"""
+        sale = derive_sale_date(m)
+        code = m.get("match_code")
+        if not sale or not code:
+            return None
+        now = _time.time()
+        hit = _O500_FIDS.get(sale)
+        if hit is None or now - hit[0] > _O500_FID_TTL or (code not in hit[1] and now - hit[0] > 600):
+            data = client.fetch_fid_list(sale)
+            if data is None:
+                return None
+            _O500_FIDS[sale] = (now, data)
+            hit = _O500_FIDS[sale]
+        info = hit[1].get(code)
+        if not info:
+            return None
+        ko = info.get("kickoff")
+        ts = m.get("match_timestamp")
+        if ko is not None and ts:
+            # 开赛时间不一致说明列表页场次错配(如跨日编号), 宁可不抓也不写错数据
+            if abs((ko.replace(tzinfo=_BJ).timestamp()) - float(ts)) > 15 * 60:
+                logger.warning("500.com 开赛时间校验失败 %s %s: 500=%s 库=%s", m.get("match_id"), code, ko, ts)
+                return None
+        return info["fid"]
+
+    def refresh_odds500_ticks(self, budget: int = O500_BUDGET, max_eta: Optional[float] = None) -> Dict[str, int]:
+        """500.com 多家公司亚盘/欧赔/大小球逐次变动。单线程限速, 被拦即熔断(足彩网接手)。"""
+        from .odds500_ticks import COMPANIES, Odds500Client, breaker_open
+        res = {"requests": 0, "ticks": 0, "matches": 0}
+        if not O500_ENABLED:
+            return res
+        if breaker_open():
+            logger.info("500.com 熔断中, 本轮跳过(由足彩网兜底)")
+            return res
+        live = self.repository.list_live_for_asian()
+        now0 = _time.time()
+        plan = []
+        for m in live:
+            ts = m.get("match_timestamp")
+            if not ts:
+                continue
+            eta = float(ts) - now0
+            if max_eta is not None and eta > max_eta:
+                continue
+            todo = due_o500_tasks(m["match_id"], eta, now0, _O500_FETCHED, _O500_FINAL)
+            if todo:
+                plan.append((float(ts), m, eta, todo))
+        plan.sort(key=lambda x: x[0])
+        if not plan:
+            return res
+        left = budget
+        with Odds500Client() as c:
+            for ts, m, eta, todo in plan:
+                if left <= 0 or not c.allow():
+                    break
+                mid = m["match_id"]
+                fid = self._o500_fid(c, m)
+                if not fid:
+                    continue
+                kickoff = datetime.fromtimestamp(ts, _BJ).replace(tzinfo=None)
+                done_all = True
+                touched = False
+                for kind, cid in todo:
+                    if left <= 0 or not c.allow():
+                        done_all = False
+                        break
+                    left -= 1
+                    ticks = c.fetch_history(kind, fid, cid, kickoff)
+                    if ticks is None:                      # 被拦/失败: 不记已抓, 下轮重试
+                        done_all = False
+                        continue
+                    _O500_FETCHED[(mid, kind, cid)] = _time.time()
+                    touched = True
+                    if ticks:
+                        try:
+                            res["ticks"] += self.repository.append_ticks500(
+                                _O500_KIND_OF[kind], mid, ticks, company=COMPANIES[cid], cid=cid)
+                        except Exception as e:
+                            logger.warning("500.com 落库失败 %s %s/%s: %s", mid, kind, cid, e)
+                if touched:
+                    res["matches"] += 1
+                if eta <= 0 and done_all:
+                    _O500_FINAL.add(mid)
+            res["requests"] = c.requests
+        if res["requests"]:
+            logger.info("500.com 变动抓取: %s 场 %s 请求 写入 %s 点", res["matches"], res["requests"], res["ticks"])
+        return res
+
     def seconds_until_next_kickoff(self) -> Optional[float]:
         return self.repository.seconds_until_next_kickoff()
 
@@ -310,6 +446,10 @@ class SportterySyncService:
             self.parse_pool(pool_name, data)
         if light:
             logger.info("临近开赛轻量同步: 体彩赔率 + 仅对即将开赛的比赛重点刷新亚盘/Bet365变动, 跳过比分/终盘校正")
+            try:
+                self.refresh_odds500_ticks(budget=O500_FOCUS_BUDGET, max_eta=FOCUS_SEC)
+            except Exception as e:
+                logger.warning(f"500.com 临近开赛抓取失败: {e}")
             try:
                 self.stats["asian"] = self.refresh_live_asian_bet365(focus_sec=FOCUS_SEC)
             except Exception as e:
@@ -324,6 +464,10 @@ class SportterySyncService:
             self.stats["closing_odds"] = self.backfill_closing_odds(days=3)
         except Exception as e:
             logger.warning(f"终盘回填失败: {e}")
+        try:
+            self.refresh_odds500_ticks()
+        except Exception as e:
+            logger.warning(f"500.com 变动抓取失败: {e}")
         try:
             self.stats["asian"] = self.refresh_live_asian_bet365()
         except Exception as e:
@@ -584,6 +728,8 @@ class SportterySyncService:
                     mid = m.get("match_id")
                     fid = m.get("fid_zgzcw")
                     eta = eta_of(m)
+                    if O500_ENABLED and o500_covered(mid, _time.time(), _O500_FETCHED):
+                        continue            # 500.com 已覆盖本场变动, 足彩网仅作兜底
                     todo = due_tick_tasks(mid, eta, _time.time(), _TICK_FETCHED, _TICK_FINAL)
                     done_all = True
                     for kind, cid, name in todo:

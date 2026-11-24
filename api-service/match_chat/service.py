@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections import defaultdict
@@ -11,6 +12,8 @@ from typing import Any, Dict, Iterator, List, Optional
 from . import repository as store
 from .context import SECTION_LABEL, build_context
 from .llm import stream_chat
+
+logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 16            # 带入模型的历史条数
 MAX_TEXT = 4000               # 单条用户消息字数上限
@@ -52,6 +55,31 @@ _SEC_RE = {
     "recent": re.compile(r"近期|战绩|状态|赛程|近况"),
     "arts": re.compile(r"文章|公众号"),
 }
+
+
+_REFRESH_ACT = re.compile(r"抓取|抓一下|刷新|重新抓|拉取|更新|实时|最新|即时|现在的")
+_REFRESH_OBJ = re.compile(r"盘口|亚盘|赔率|欧赔|大小球|水位|变动")
+
+
+def wants_refresh(text: str) -> bool:
+    """用户要求现抓最新盘口赔率(如"抓取本场最新的盘口赔率并分析")。需同时有"最新/抓取"类动作词和盘口赔率对象。"""
+    t = text or ""
+    return bool(_REFRESH_ACT.search(t) and _REFRESH_OBJ.search(t))
+
+
+def refresh_note(res: Dict[str, Any]) -> str:
+    """本次实时抓取的结果说明, 放进数据区, 让模型如实告知用户数据新旧。"""
+    if res.get("ok"):
+        part = f"(其中 {len(res['failed'])} 项请求失败: {', '.join(res['failed'][:6])})" if res.get("failed") else ""
+        cached = "(2 分钟内刚抓过,复用该结果)" if res.get("cached") else ""
+        return (f"【本次实时抓取】已于北京时间 {res['fetchedAt'][5:16]} 从 500.com 抓取最新盘口赔率{cached},"
+                f"成功 {res['got']} 项{part},新增/更新 {res['ticks']} 个变动点。上方「其他公司逐次变动」和「Bet365 亚盘逐次变动」是刚抓到的最新数据,"
+                "以其最后一条为即时盘;而「亚盘/欧赔/大小球 初盘→即时盘」汇总来自定时缓存,可能比逐次变动旧,有出入时以逐次变动为准。"
+                "回答时先说明数据抓取时间,并指出相较之前的主要变化(如果能从逐次变动看出)。")
+    from odds500_live import REASON_TEXT
+    why = REASON_TEXT.get(res.get("reason"), "未知原因")
+    return (f"【本次实时抓取失败】原因:{why}。上方盘口赔率数据是之前定时抓取的结果,不是最新的,"
+            "回答时必须先如实告诉用户这次没有抓到最新数据,并写明上方数据各自的抓取/最新变动时间。")
 
 
 def wanted_sections(text: str) -> List[str]:
@@ -100,6 +128,16 @@ def _hist_messages(user_id: int, match_id: str) -> List[Dict[str, Any]]:
 def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]],
              web: bool = False, persist: bool = True) -> Iterator[Dict[str, Any]]:
     """产出事件 dict: status/delta/sources/verdict/done/error。"""
+    refresh = None
+    if wants_refresh(text):
+        yield {"type": "status", "text": "正在抓取最新盘口赔率(约 15-30 秒)…"}
+        try:
+            from odds500_live import refresh_match_odds
+            refresh = refresh_match_odds(match_id)
+        except Exception as e:  # noqa: BLE001  抓取异常不影响聊天
+            logger.warning("实时抓取异常 %s: %s", match_id, e)
+            refresh = {"ok": False, "reason": "exception"}
+        yield {"type": "status", "text": ("最新盘口赔率已抓取" if refresh.get("ok") else "实时抓取未成功,使用已有数据")}
     ctx = build_context(match_id)
     history = _hist_messages(user_id, match_id) if persist else []
     want: List[str] = []
@@ -107,10 +145,14 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
         for k in wanted_sections(t):          # 本会话里提过的关联一直保留
             if k not in want:
                 want.append(k)
+    if refresh is not None and "odds" not in want:
+        want.append("odds")
     secs = ctx["sections"]
     want = [k for k in want if secs.get(k)]
     body = "\n\n".join([secs[k] for k in want])
     data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
+    if refresh is not None:
+        data += "\n" + refresh_note(refresh) + "\n"
     _id = (secs.get("id") or "").split("\n")
     ident = (_id[1] if len(_id) > 1 else "") or f"{ctx['home']} vs {ctx['away']}"
     system = SYSTEM_TMPL.format(ident=ident, data=data)
