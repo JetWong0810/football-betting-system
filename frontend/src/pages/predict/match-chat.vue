@@ -54,7 +54,7 @@
           <view v-else class="mc-ai">
             <text v-if="(m.attached || []).length" class="mc-att">已关联: {{ m.attached.join(' · ') }}</text>
             <view class="mc-body">
-              <view class="mc-md" v-html="renderMd(m.content)"></view>
+              <view class="mc-md" v-html="renderMd(splitNext(m.content).body)"></view>
             </view>
           </view>
         </view>
@@ -66,13 +66,17 @@
               <text v-for="(s, i) in steps" :key="i" class="mc-step" :class="{ last: i === steps.length - 1 }">{{ s }}</text>
             </view>
             <text v-if="liveAttached.length" class="mc-att">已关联: {{ liveAttached.join(' · ') }}</text>
-            <view v-if="liveText" class="mc-md" v-html="renderMd(liveText)"></view>
+            <view v-if="liveText" class="mc-md" v-html="renderMd(liveBody)"></view>
             <view v-if="!liveText" class="mc-wait">
               <view class="mc-dot"></view><view class="mc-dot"></view><view class="mc-dot"></view>
             </view>
           </view>
         </view>
 
+        <view v-if="nextQs.length && !streaming" class="mc-next">
+          <text class="mc-next-l">下一步可以问</text>
+          <text v-for="q in nextQs" :key="q" class="mc-next-q" @tap="send(q)">{{ q }}</text>
+        </view>
         <view v-if="notice" class="mc-notice">{{ notice }}</view>
         <view v-if="errText" class="mc-error">{{ errText }}</view>
         <view class="mc-tail"></view>
@@ -225,6 +229,29 @@ const quick = [
   quickGroups[0].items[0], quickGroups[0].items[1], quickGroups[1].items[0],
   quickGroups[2].items[0], quickGroups[5].items[0], quickGroups[5].items[1], quickGroups[5].items[2],
 ]
+// 模型回复末尾的 "[[NEXT]] 问题一 || 问题二" 是给界面解析的下一步建议: 从正文剥离, 渲染成可点击问题
+function splitNext(text) {
+  const t = String(text || '')
+  const i = t.indexOf('[[NEXT]]')
+  if (i < 0) return { body: t, next: [] }
+  const qs = t.slice(i + 8).split(/\|\||\n/).map((x) => x.trim().replace(/^[-\d.、\s]+/, '')).filter((x) => x.length >= 4).slice(0, 3)
+  return { body: t.slice(0, i).trimEnd(), next: qs }
+}
+// 流式输出中标记可能只到一半("[[NE"), 先截掉避免闪现
+function stripLive(text) {
+  const t = String(text || '')
+  if (t.indexOf('[[NEXT]]') >= 0) return splitNext(t).body
+  const i = t.lastIndexOf('[[')
+  if (i >= 0 && '[[NEXT]]'.startsWith(t.slice(i))) return t.slice(0, i).trimEnd()
+  if (t.endsWith('[')) return t.slice(0, -1)
+  return t
+}
+const liveBody = computed(() => stripLive(liveText.value))
+const nextQs = computed(() => {
+  const last = messages.value[messages.value.length - 1]
+  return last && last.role === 'assistant' ? splitNext(last.content).next : []
+})
+
 const quickOpen = ref(false)
 const quickSend = (q) => {
   if (streaming.value) return
@@ -563,6 +590,9 @@ onBeforeUnmount(() => { if (ctrl) ctrl.abort() })
 .mc-qname { display: block; font-size: 21rpx; font-weight: 700; color: #475569; margin-bottom: 8rpx; }
 .mc-qweb { margin-left: 10rpx; font-size: 18rpx; font-weight: 500; color: #0d9488; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 0 8rpx; }
 .mc-qitems { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.mc-next { margin: 16rpx 0 6rpx; display: flex; flex-direction: column; gap: 10rpx; }
+.mc-next-l { font-size: 20rpx; color: #64748b; font-weight: 600; }
+.mc-next-q { font-size: 23rpx; line-height: 1.55; color: #0f766e; background: #f0fdfa; border: 1rpx solid #99f6e4; border-radius: 6rpx; padding: 10rpx 16rpx; &:active { background: #ccfbf1; } }
 .mc-error { font-size: 22rpx; color: #dc2626; background: #fef2f2; border-radius: 6rpx; padding: 10rpx 16rpx; margin-bottom: 14rpx; }
 .mc-tail { height: 8rpx; }
 

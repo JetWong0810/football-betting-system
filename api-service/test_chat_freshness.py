@@ -63,3 +63,16 @@ if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):
             f(); print("ok", n)
+
+
+def test_split_sections_keeps_all_market_blocks():
+    """回归: 【其他公司逐次变动】【水位参考】曾因标题未登记被丢弃, 模型根本看不到。"""
+    text = "【比赛】\nx\n【盘口】a\n数据新鲜度: x\n【盘口读法】r\n【水位参考·亚盘】w\n【欧赔】e\n【大小球】o\n【其他公司逐次变动】(t)\n香港马会 亚盘 逐次变动\n- p\n【主队近期战绩】f\n"
+    secs = C.split_sections(text)
+    for k in ("数据新鲜度", "盘口读法", "水位参考·亚盘", "其他公司逐次变动", "香港马会 亚盘 逐次变动"):
+        assert k in secs["odds"], k
+    assert "主队近期战绩" in secs["recent"] and "水位参考" not in secs["recent"]
+
+
+def test_breakeven_text():
+    assert "58%→0.72" in C.breakeven_text("主水", 0.95, "客水", 0.9) and "主水0.95(需有效胜率≥51.3%)" in C.breakeven_text("主水", 0.95, "客水", 0.9)

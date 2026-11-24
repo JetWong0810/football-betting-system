@@ -411,6 +411,22 @@ def ou_reading(line: Optional[float]) -> str:
     return f"当前主流大小球 {line:g}: " + "; ".join(parts) + "。"
 
 
+_P_GRID = (0.50, 0.52, 0.55, 0.58, 0.60)
+
+
+def breakeven_text(label_a: str, w_a, label_b: str, w_b) -> str:
+    """盈亏平衡水位: 有效胜率 p(赢半按 0.5 计入)下, 港式水位 w 至少为 (1-p)/p 才不亏。并对照当前两边水位。"""
+    row = "/".join(f"{round(p * 100)}%→{(1 - p) / p:.2f}" for p in _P_GRID)
+    cur = []
+    for lab, w in ((label_a, w_a), (label_b, w_b)):
+        try:
+            cur.append(f"{lab}{float(w):.2f}(需有效胜率≥{100 / (1 + float(w)):.1f}%)")
+        except (TypeError, ValueError):
+            pass
+    tail = f";Bet365 当前水位 {' '.join(cur)}" if cur else ""
+    return f"有效胜率→所需最低港式水位(简化估算): {row}{tail}"
+
+
 def _novig(a: Optional[float], b: Optional[float]) -> str:
     """港式水位(净赔率)两边去水概率。"""
     try:
@@ -457,6 +473,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         if r1:
             nv = _novig(*w_h)
             L.append("【盘口读法】" + r1 + (f"(Bet365 最新水位去水后 主队/客队覆盖概率 {nv})" if nv else ""))
+            L.append("【水位参考·亚盘】" + breakeven_text(f"{home_n}水", w_h[0], f"{away_n}水", w_h[1]))
         ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
         o_line, o_w = (ot[0].get("line"), (ot[0].get("over"), ot[0].get("under"))) if ot else (None, (None, None))
         if o_line is None:
@@ -468,6 +485,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         if r2:
             nv = _novig(*o_w)
             L.append(r2 + (f"(Bet365 最新水位去水后 大球/小球概率 {nv})" if nv else ""))
+            L.append("【水位参考·大小球】" + breakeven_text("大球水", o_w[0], "小球水", o_w[1]))
     except Exception:  # noqa: BLE001
         pass
     up = down = same = 0
@@ -595,7 +613,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
              ("交锋历史", "h2h"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}
