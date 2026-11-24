@@ -180,7 +180,8 @@ def refresh_match_odds(match_id: str, force: bool = False) -> Dict[str, Any]:
             reqs = c.requests
         fetched_at = datetime.now(_BJ).strftime("%Y-%m-%d %H:%M:%S")
         res = {"ok": bool(got), "reason": None if got else "all_failed", "fetchedAt": fetched_at,
-               "requests": reqs, "ticks": ticks_n, "got": len(got), "failed": failed}
+               "requests": reqs, "ticks": ticks_n, "got": len(got), "failed": failed,
+               "started": time.time() > float(m["match_timestamp"])}
         if got:
             _recent[match_id] = (time.time(), res)
         logger.info("odds500 实时抓取 %s: 成功%s 失败%s 请求%s 写入%s点", match_id, len(got), len(failed), reqs, ticks_n)

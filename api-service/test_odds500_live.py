@@ -76,6 +76,7 @@ def test_kickoff_mismatch_and_rate_limit():
     fake, saves = _patch(m)
     try:
         ts = time.time() + 3600
+        fake.fetch_fid_list = lambda d: {"周二001": {"fid": "F1", "kickoff": datetime.fromtimestamp(ts + 3 * 3600, L._BJ).replace(tzinfo=None), "home": "x"}}   # 与库里开赛时间相差 3 小时
         L._load_match = lambda mid: {"match_id": mid, "match_code": "周二001", "match_number": "261124", "match_timestamp": ts}
         r = L.refresh_match_odds("m2")           # 列表页 kickoff(2026-11-24 15:45) 与 ts 不一致
         assert not r["ok"] and r["reason"] == "kickoff_mismatch" and not fake.calls
