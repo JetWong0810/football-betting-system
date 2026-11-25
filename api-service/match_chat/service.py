@@ -131,6 +131,14 @@ WEB_ON_NOTE = """
 """
 
 
+BD_NOTE = """
+## 本场是北单(非竞彩)场次
+- 本场没有历史同赔、七因子预测、关联公众号文章;不要提这些,用户问到就说明北单场次不提供。可载入的只有:盘口赔率(多家公司亚盘/欧赔/大小球及逐次变动)、交锋历史、近期战绩、未来赛程、赛前联赛积分。
+- 这些数据都不是定时抓取的,而是用户要求时才实时抓取并存库:说"抓取本场最新的盘口赔率数据"会抓盘口赔率,说"请关联本场交锋和近期战绩"会抓交锋/战绩/赛程/积分。数据区没有对应内容时,提示用户用这样的说法。
+- 预计阵容、首发、阵型、伤停、停赛、赛前新闻和发言系统不抓取,请用 web_search 联网查,并标注来源站点和日期;搜不到就说没查到。
+"""
+
+
 def check_quota(user_id: int) -> bool:
     key = (user_id, time.strftime("%Y-%m-%d"))
     if _usage[key] >= DAILY_LIMIT:
@@ -177,6 +185,24 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
                 reason = f"盘口数据已落后{'' if age is None else f' {age} 分钟'},临近开赛,正在自动抓取最新数据(约 15-30 秒)…"
         except Exception as e:  # noqa: BLE001
             logger.warning("新鲜度检查失败 %s: %s", match_id, e)
+    bd = match_id.startswith("bd_")
+    if bd and not reason and "odds" in want:        # 北单无定时抓取: 首次关联盘口时(库里一条都没有)自动抓一次
+        try:
+            from .context import market_freshness
+            fr = market_freshness(match_id)
+            if not any(v.get("lastFetch") for v in (fr.get("kinds") or {}).values()):
+                reason = "本场盘口赔率还没抓取过,正在实时抓取(约 15-30 秒)…"
+        except Exception as e:  # noqa: BLE001
+            logger.warning("北单新鲜度检查失败 %s: %s", match_id, e)
+    fenxi = None
+    if bd and ({"h2h", "recent"} & set(want)):
+        import bd_service
+        yield {"type": "status", "text": "正在抓取交锋/近期战绩/赛程…"}
+        try:
+            fenxi = bd_service.fetch_fenxi(match_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("北单数据页抓取异常 %s: %s", match_id, e)
+            fenxi = {"ok": False, "reason": "error"}
     if reason:
         yield {"type": "status", "text": reason}
         try:
@@ -195,9 +221,15 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
     data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
     if refresh is not None:
         data += "\n" + refresh_note(refresh) + "\n"
+    if fenxi is not None and not fenxi.get("ok"):
+        import bd_service
+        data += (f"\n【本次抓取交锋/战绩失败】原因:{bd_service.FENXI_REASON.get(fenxi.get('reason'), '未知')}。"
+                 "回答时如实告诉用户没有抓到,数据区里的交锋/战绩(若有)是之前存的旧数据。\n")
     _id = (secs.get("id") or "").split("\n")
     ident = (_id[1] if len(_id) > 1 else "") or f"{ctx['home']} vs {ctx['away']}"
     system = SYSTEM_TMPL.format(ident=ident, data=data)
+    if bd:
+        system += BD_NOTE
     if web:
         system += WEB_ON_NOTE
     if wants_summary(text):

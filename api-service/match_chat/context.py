@@ -305,6 +305,9 @@ def market_freshness(match_id: str, now: Optional[datetime] = None) -> Dict[str,
             cur = conn.cursor()
             cur.execute("SELECT match_timestamp FROM matches WHERE match_id=%s", (match_id,))
             r = cur.fetchone()
+            if not r and str(match_id).startswith("bd_"):
+                cur.execute("SELECT kickoff_ts AS match_timestamp FROM bd_matches WHERE match_id=%s", (match_id,))
+                r = cur.fetchone()
             if r and r.get("match_timestamp"):
                 out["eta"] = float(r["match_timestamp"]) - now.replace(tzinfo=_BJ).timestamp()
             for k, t in _KIND_T500.items():
@@ -699,7 +702,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
 
 
 _HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
-             ("交锋历史", "h2h"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
+             ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}
 
@@ -718,6 +721,9 @@ def split_sections(text: str) -> Dict[str, str]:
 
 
 def build_context(match_id: str) -> Dict[str, Any]:
+    if str(match_id).startswith("bd_"):          # 北单(非竞彩)场次: 只有盘口赔率+交锋/战绩, 无同赔/七因子
+        from .bd_context import build_bd_context
+        return build_bd_context(match_id)
     row = _load_match_row(match_id)
     it = _load_item(match_id, row)
     if not it:

@@ -101,6 +101,12 @@ def _sale_date(match_number: Any) -> Optional[str]:
 
 
 def _load_match(match_id: str) -> Optional[Dict[str, Any]]:
+    if str(match_id).startswith("bd_"):        # 北单场次: fid 直接取自北单列表, 无需按售卖日映射
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT match_id, fid, kickoff_ts AS match_timestamp FROM bd_matches WHERE match_id=%s", (match_id,))
+            r = cur.fetchone()
+        return {**r, "bd": True} if r else None
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT match_id, match_code, match_number, match_timestamp FROM matches WHERE match_id=%s", (match_id,))
@@ -157,7 +163,7 @@ def refresh_match_odds(match_id: str, force: bool = False) -> Dict[str, Any]:
         kickoff = datetime.fromtimestamp(float(m["match_timestamp"]), _BJ).replace(tzinfo=None)
         got, failed, ticks_n = [], [], 0
         with Odds500Client() as c:
-            fid, why = _resolve_fid(c, m)
+            fid, why = (str(m["fid"]), None) if m.get("bd") else _resolve_fid(c, m)
             if not fid:
                 res = {"ok": False, "reason": why or "no_fid", "requests": c.requests}
                 return res

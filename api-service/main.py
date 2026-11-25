@@ -54,6 +54,8 @@ app = FastAPI(title="Football Match Odds API", version="1.0.0")
 
 from match_chat.router import router as match_chat_router  # noqa: E402
 app.include_router(match_chat_router)
+from bd_router import router as bd_router  # noqa: E402
+app.include_router(bd_router)
 from wx_articles.router import router as wx_router  # noqa: E402
 app.include_router(wx_router)
 

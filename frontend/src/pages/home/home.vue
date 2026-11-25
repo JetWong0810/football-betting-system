@@ -66,6 +66,10 @@
           <text class="action-label">去预测</text>
           <text class="action-desc">选赛分析</text>
         </view>
+        <view class="action-card" @tap="goBd">
+          <text class="action-label">北单比赛</text>
+          <text class="action-desc">非竞彩 AI 分析</text>
+        </view>
         <view class="action-card" @tap="goRecord">
           <text class="action-label">快速记录</text>
           <text class="action-desc">手动投注</text>
@@ -280,6 +284,10 @@ const drawdownLevel = computed(() => {
 
 function goPredict() {
   uni.navigateTo({ url: '/pages/predict/predict' })
+}
+
+function goBd() {
+  uni.navigateTo({ url: '/pages/bd/list' })
 }
 
 function goRecord() {
@@ -542,7 +550,7 @@ onShow(() => {
 /* 快捷操作 */
 .actions-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 12rpx;
   margin-bottom: 24rpx;
 }

@@ -263,6 +263,13 @@ const examples = ['双方首发阵容出来了吗?', '请关联本场盘口和�
 const ctxRows = computed(() => {
   const c = ctx.value
   if (!c) return []
+  if (c.bd) {
+    return [
+      { k: '盘口赔率', ok: c.asian + c.euro > 0, v: c.asian + c.euro > 0 ? `亚盘 ${c.asian} 家 / 欧赔 ${c.euro} 家 / 大小球 ${c.ou} 家,Bet365 亚盘变动 ${c.ticks} 次` : '尚未抓取,说"抓取本场最新的盘口赔率数据"' },
+      { k: '交锋/战绩', ok: c.homeRecent + c.awayRecent > 0, v: c.homeRecent + c.awayRecent > 0 ? `交锋 ${c.h2h} 场,主 ${c.homeRecent} / 客 ${c.awayRecent} 场近期战绩(抓取于 ${c.fenxiAt})` : '尚未抓取,说"请关联本场交锋和近期战绩"' },
+      { k: '阵容/伤停', ok: false, v: '不抓取,提问时联网搜索' },
+    ]
+  }
   return [
     { k: '盘口赔率', ok: c.asian + c.euro > 0, v: `亚盘 ${c.asian} 家 / 欧赔 ${c.euro} 家 / 大小球 ${c.ou} 家,Bet365 亚盘变动 ${c.ticks} 次` },
     { k: '历史同赔', ok: c.f6 > 0, v: c.f6 > 0 ? `${c.f6} 场样本及盘路统计` : '无匹配样本' },
