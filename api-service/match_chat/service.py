@@ -21,7 +21,7 @@ MAX_IMAGES = 3
 AUTO_REFRESH_WITHIN = 3 * 3600      # 开赛前 3 小时内才自动刷新
 AUTO_REFRESH_STALE_MIN = 10         # 数据抓取超过 10 分钟视为滞后
 MAX_IMAGE_B64 = 7_000_000     # 约 5MB 原图
-DAILY_LIMIT = int(__import__("os").getenv("MATCH_CHAT_DAILY_LIMIT", "60"))
+DAILY_LIMIT = int(__import__("os").getenv("MATCH_CHAT_DAILY_LIMIT", "0"))   # 0 = 不限制; 需要限额时设环境变量
 
 _usage: Dict[tuple, int] = defaultdict(int)   # (user_id, YYYY-MM-DD) -> n;进程内,重启清零
 
@@ -155,6 +155,8 @@ def extract_verdict(text: str):
 
 
 def check_quota(user_id: int) -> bool:
+    if DAILY_LIMIT <= 0:
+        return True
     key = (user_id, time.strftime("%Y-%m-%d"))
     if _usage[key] >= DAILY_LIMIT:
         return False
