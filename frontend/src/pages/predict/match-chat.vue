@@ -231,7 +231,9 @@ const quick = [
 ]
 // 模型回复末尾的 "[[NEXT]] 问题一 || 问题二" 是给界面解析的下一步建议: 从正文剥离, 渲染成可点击问题
 function splitNext(text) {
-  const t = String(text || '')
+  let t = String(text || '')
+  const v = t.indexOf('[[V]]')
+  if (v >= 0) t = t.slice(0, v).trimEnd()          // 结构化倾向行是给后台统计用的, 不展示
   const i = t.indexOf('[[NEXT]]')
   if (i < 0) return { body: t, next: [] }
   const qs = t.slice(i + 8).split(/\|\||\n/).map((x) => x.trim().replace(/^[-\d.、\s]+/, '')).filter((x) => x.length >= 4).slice(0, 3)
@@ -240,9 +242,9 @@ function splitNext(text) {
 // 流式输出中标记可能只到一半("[[NE"), 先截掉避免闪现
 function stripLive(text) {
   const t = String(text || '')
-  if (t.indexOf('[[NEXT]]') >= 0) return splitNext(t).body
+  if (t.indexOf('[[NEXT]]') >= 0 || t.indexOf('[[V]]') >= 0) return splitNext(t).body
   const i = t.lastIndexOf('[[')
-  if (i >= 0 && '[[NEXT]]'.startsWith(t.slice(i))) return t.slice(0, i).trimEnd()
+  if (i >= 0 && ('[[NEXT]]'.startsWith(t.slice(i)) || '[[V]]'.startsWith(t.slice(i)))) return t.slice(0, i).trimEnd()
   if (t.endsWith('[')) return t.slice(0, -1)
   return t
 }

@@ -40,6 +40,15 @@ def _sse(obj: Dict[str, Any]) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
+@router.get("/chat-stats/verdicts")
+def verdict_stats(days: int = 14, user_id: int = Depends(require_auth)):
+    """近 N 天 AI 倾向分布(让球 上盘/下盘/不确定, 大小球 大球/小球/不确定), 用于监控单边偏向。"""
+    try:
+        return store.verdict_stats(max(1, min(days, 180)))
+    except store.ChatStoreUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @router.get("/{match_id}/chat")
 def get_chat(match_id: str, user_id: int = Depends(require_auth)):
     try:

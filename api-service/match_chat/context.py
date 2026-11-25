@@ -461,6 +461,37 @@ def _novig(a: Optional[float], b: Optional[float]) -> str:
         return ""
 
 
+# 实测基准(近 400 天已结算 3294 场, 含半赢半输按 0.5 折算): 上盘赢盘率 50.4%; 按盘口深度 <=0.25: 52.8% / 0.5-0.75: 47.9% /
+# 1-1.25: 52.1% / >=1.5: 48.7%。Bet365 终盘水位格式一致的 1269 场里, 上盘平均水位 0.929、下盘 0.872, 上盘平均去水概率仅 49.3%:
+# 庄家给上盘的水位系统性偏高, 所以约 56% 的比赛"去水概率站下盘"、38% 站上盘, 而这并不预测下盘更易赢盘(站下盘时上盘仍赢 50.3%)。
+UPPER_DEVIG_NORM = 49.3
+BASE_RATE_TEXT = ("【赢盘基准】近 400 天 3294 场已结算:上盘赢盘率 50.4%(半赢半输按 0.5 计),按盘口深度 ≤0.25 档 52.8%、"
+                  "0.5~0.75 档 47.9%、1~1.25 档 52.1%、≥1.5 档 48.7%,上下盘没有天然优势,先验就是接近五五开;"
+                  "只有本场出现多类独立证据(盘口变动、欧赔、基本面/新闻)方向一致,才可偏离五五开。")
+
+
+def devig_text(h_raw: Optional[float], home: str, away: str, w_home, w_away, src: str = "Bet365") -> str:
+    """亚盘去水概率, 以"相对常态的偏离"表述。庄家对上盘水位系统性偏高(上盘去水概率常态约 49.3%),
+    直接说"下盘 51%"会被误读成方向信号。"""
+    try:
+        ph, pa = 1 / (1 + float(w_home)), 1 / (1 + float(w_away))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return ""
+    ph = ph / (ph + pa) * 100
+    if not h_raw:                       # 平手盘没有上下盘之分
+        note = "距 50% 不到 3 个百分点,属定价噪音" if abs(ph - 50) < 3 else "平手盘的去水概率常态未统计"
+        return f"({src} 最新水位去水后 {home}/{away} 覆盖概率 {ph:.1f}% / {100 - ph:.1f}%;{note},不单独作为方向依据)"
+    up_name, p_up = (home, ph) if h_raw > 0 else (away, 100 - ph)
+    dev = p_up - UPPER_DEVIG_NORM
+    if abs(dev) < 3:
+        verdict = "在常态范围内,不提供方向信息"
+    else:
+        verdict = (f"{'高于' if dev > 0 else '低于'}常态约 {abs(dev):.1f} 个百分点(只说明该盘口的定价偏离了常见水位结构,"
+                   "不等于该方向更可能赢盘,需要其他独立证据印证)")
+    return (f"({src} 最新水位去水后 上盘({up_name})定价概率 {p_up:.1f}% / 下盘 {100 - p_up:.1f}%;"
+            f"庄家对上盘水位系统性偏高,上盘去水概率常态约 {UPPER_DEVIG_NORM}%,本场{verdict})")
+
+
 _NAME_ALIAS = {"伟德": "韦德"}          # 500.com 叫伟德, 足彩网叫韦德(同一家)
 _FIELDS = {
     "asian": lambda t: {"home": t.get("home"), "handicap": t.get("handicap"), "handicapText": t.get("handicapText"), "away": t.get("away")},
@@ -556,8 +587,8 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
                 h_now, w_h = cu.get("handicap"), (cu.get("home"), cu.get("away"))
         r1 = ah_reading(h_now, home_n, away_n)
         if r1:
-            nv = _novig(*w_h)
-            L.append("【盘口读法】" + r1 + (f"(Bet365 最新水位去水后 主队/客队覆盖概率 {nv})" if nv else ""))
+            L.append("【盘口读法】" + r1 + devig_text(h_now, home_n, away_n, w_h[0], w_h[1]))
+            L.append(BASE_RATE_TEXT)
             L.append("【水位参考·亚盘】" + breakeven_text(f"{home_n}水", w_h[0], f"{away_n}水", w_h[1]))
         ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
         o_line, o_w = (ot[0].get("line"), (ot[0].get("over"), ot[0].get("under"))) if ot else (None, (None, None))
@@ -569,7 +600,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         r2 = ou_reading(o_line)
         if r2:
             nv = _novig(*o_w)
-            L.append(r2 + (f"(Bet365 最新水位去水后 大球/小球概率 {nv})" if nv else ""))
+            L.append(r2 + (f"(Bet365 最新水位去水后 大球/小球概率 {nv};与 50% 的偏离在 3 个百分点内属定价噪音,不单独作为方向依据)" if nv else ""))
             L.append("【水位参考·大小球】" + breakeven_text("大球水", o_w[0], "小球水", o_w[1]))
     except Exception:  # noqa: BLE001
         pass
@@ -701,7 +732,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}

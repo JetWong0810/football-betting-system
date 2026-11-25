@@ -71,3 +71,27 @@ def clear_messages(user_id: int, match_id: str) -> int:
             return cur.rowcount
     except Exception as e:  # noqa: BLE001
         _wrap(e)
+
+
+def verdict_stats(days: int = 14) -> Dict[str, Any]:
+    """近 N 天 AI 给出的让球/大小球倾向分布(每场取最后一次带倾向的回复), 用来监控是否又出现单边偏向。"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, match_id, verdict_json FROM match_chat_messages WHERE role='assistant' AND verdict_json IS NOT NULL "
+                "AND created_at >= NOW() - INTERVAL %s DAY ORDER BY id", (int(days),))
+            rows = list(cur.fetchall() or [])
+    except Exception as e:  # noqa: BLE001
+        _wrap(e)
+    last: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        try:
+            last[r["match_id"]] = json.loads(r["verdict_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+    out: Dict[str, Any] = {"days": days, "matches": len(last), "ah": {}, "ou": {}}
+    for v in last.values():
+        for k in ("ah", "ou"):
+            out[k][v.get(k) or "无"] = out[k].get(v.get(k) or "无", 0) + 1
+    return out
