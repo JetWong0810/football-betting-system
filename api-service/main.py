@@ -345,6 +345,11 @@ async def startup_event():
     import threading as _th
     _th.Thread(target=_score_backfill_loop, daemon=True).start()
     _th.Thread(target=_warmup_spf_pool, daemon=True).start()
+    try:
+        from api_football.auto import start as _af_start
+        _af_start()
+    except Exception as e:  # noqa: BLE001  映射失败不影响 API 启动
+        logger.warning(f"API-Football 自动映射启动失败: {e}")
 
 
 def _warmup_spf_pool():

@@ -1,0 +1,15 @@
+---
+description: API-Football(api-sports.io)接入: 映射、滚球盘口口径、额度、接入原则
+globs: api-service/api_football/**
+alwaysApply: false
+---
+
+# API-Football 接入(`api-service/api_football/`)
+
+- key 在 `api-service/.env` 的 `API_FOOTBALL_KEY`(已 gitignore, 勿提交)。Pro 档 7500 次/天、300 次/分钟, 2026-12-26 到期。
+- 新表(2026-11 新建, 不改旧表): `af_team_map`(竞彩中文队名 -> AF 球队 id)、`af_fixture_map`(match_id -> AF fixture)。
+- 映射: `python -m api_football map`(预览) / `map --apply`(写库) / `set-team 中文名 id 英文名`(人工)。规则见 `mapping.py` 顶部: both / fuzzy / one_side / league_unique, 对不上的不猜。
+- 滚球盘口(`/odds/live`): 亚盘 `handicap` 是主队一侧、**全场口径**(相对最终比分, 不是从当前比分重算); 负=主让, 与本系统标准亚盘一致。更新约每 50~70 秒, 进球后立即更新。进球后盘口数值会整体平移, 分析必须结合当前比分。
+- 已完赛比赛查不到赔率(实测), 不能回补同赔池历史; 同赔只能往前积累。
+- 预计首发没有, 官方首发开赛前约 1 小时才有。
+- 接入聊天的原则: 数据不是越多越好。每类数据只在"改变结论"时才进上下文, 先只存库, 用回测证明有用再接入。

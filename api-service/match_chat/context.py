@@ -261,15 +261,14 @@ def render_tick_paths(match_id: str) -> Tuple[str, int]:
     title = {"asian": "亚盘", "ou": "大小球", "euro": "欧赔(胜/平/负,隐含概率已去水)"}
     out: List[str] = []
     total = 0
+    ko = _kickoff_str(match_id)
     for kind in ("asian", "ou", "euro"):
         for name, zcid in TICK_COMPANIES:
             if kind == "asian" and name == "Bet365":
                 continue
-            rows = list_o500_ticks(k500[kind], match_id, name)
-            src = "500.com"
-            if not rows and zcid is not None:
-                rows = fb[kind](match_id, zcid) if kind != "asian" else list_ah_ticks(match_id, cid=zcid)
-                src = "足彩网"
+            r5 = list_o500_ticks(k500[kind], match_id, name)
+            rz = (fb[kind](match_id, zcid) if kind != "asian" else list_ah_ticks(match_id, cid=zcid)) if zcid is not None else []
+            rows, src = pick_ticks(r5, rz, ko)
             if len(rows) < 2:      # 仅1条等于没有变动
                 continue
             asc = list(reversed(rows))
@@ -280,6 +279,35 @@ def render_tick_paths(match_id: str) -> Tuple[str, int]:
     if not out:
         return "", 0
     return "\n【其他公司逐次变动】(时间均为北京时间; 开赛后的滚球记录已剔除)\n" + "\n".join(out), total
+
+
+def _kickoff_str(match_id: str) -> Optional[str]:
+    """开赛时间(北京时间字符串, 与 tick 的 time 字段同格式); 查不到返回 None。"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT match_timestamp AS t FROM matches WHERE match_id=%s", (match_id,))
+            r = cur.fetchone()
+            if not r and str(match_id).startswith("bd_"):
+                cur.execute("SELECT kickoff_ts AS t FROM bd_matches WHERE match_id=%s", (match_id,))
+                r = cur.fetchone()
+        if r and r.get("t"):
+            return datetime.fromtimestamp(float(r["t"]), _BJ).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        logger.exception("kickoff lookup failed %s", match_id)
+    return None
+
+
+def pick_ticks(rows500: List[Dict[str, Any]], rows_zg: List[Dict[str, Any]], kickoff: Optional[str]) -> Tuple[List[Dict[str, Any]], str]:
+    """在 500.com 与足彩网逐次变动(均新→旧)里选更新的一份。足彩网记录含开赛后滚球点, 先剔除; 500.com 已在抓取端剔除。
+    两边最新一条时间相同则取 500.com。返回 (rows, 来源名)。"""
+    if kickoff:
+        rows_zg = [r for r in rows_zg if str(r.get("time") or "") <= kickoff]
+    if not rows500:
+        return rows_zg, "足彩网"
+    if rows_zg and str(rows_zg[0].get("time") or "") > str(rows500[0].get("time") or ""):
+        return rows_zg, "足彩网"
+    return rows500, "500.com"
 
 
 _BJ = timezone(timedelta(hours=8))
@@ -560,7 +588,8 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         euro_c, ov["euro"] = overlay_500(match_id, "euro", euro_c)
     except Exception:  # noqa: BLE001  500.com 数据不可用时沿用足彩网快照
         pass
-    ticks = list_o500_ticks("asian", match_id, "Bet365") or list_ah_ticks(match_id, cid=2)
+    ko = _kickoff_str(match_id)
+    ticks, _ = pick_ticks(list_o500_ticks("asian", match_id, "Bet365"), list_ah_ticks(match_id, cid=2), ko)
     n = {"asian": len(asian or []), "euro": len(euro_c), "ou": len(ou_c), "ticks": len(ticks)}
     snap_ah: Optional[Dict[str, Any]] = None
     snap_ou: Optional[Dict[str, Any]] = None
@@ -611,7 +640,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
             L.append(water_signal_text(asian, home_n, away_n))
             snap_ah = {"line": h_now, "home": w_h[0], "away": w_h[1], "src": "Bet365",
                        "open": ((b365 or {}).get("initial") or {}).get("handicap")}
-        ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
+        ot, _ = pick_ticks(list_o500_ticks("overunder", match_id, "Bet365"), _lou(match_id, 2), ko)
         o_line, o_w = (ot[0].get("line"), (ot[0].get("over"), ot[0].get("under"))) if ot else (None, (None, None))
         if o_line is None:
             b = next((o for o in ou_c if o.get("bookmaker") == "Bet365"), None)
@@ -755,10 +784,10 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
-                 "recent": "近期战绩与赛程", "arts": "关联文章"}
+                 "recent": "近期战绩与赛程", "arts": "关联文章", "inj": "伤停"}
 
 
 def split_sections(text: str) -> Dict[str, str]:
@@ -801,7 +830,13 @@ def build_context(match_id: str) -> Dict[str, Any]:
         market_text, mk = render_market(match_id, full2) if full2 else ("", mk)
     except Exception:  # noqa: BLE001
         pass
-    text = render_text(it, pred, arts) + market_text + form_text
+    inj_text = ""
+    try:
+        from api_football.injuries import render as render_inj
+        inj_text = render_inj(match_id, it["homeTeam"]["name"], it["awayTeam"]["name"])
+    except Exception:  # noqa: BLE001  伤停表不可用不影响聊天
+        logger.exception("伤停渲染失败 %s", match_id)
+    text = render_text(it, pred, arts) + market_text + form_text + inj_text
     f6 = it.get("f6") or {}
     summary = {
         "asian": mk["asian"], "euro": mk["euro"], "ou": mk["ou"], "ticks": mk["ticks"],

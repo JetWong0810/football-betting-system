@@ -325,11 +325,16 @@ class Odds500Client:
         if body is None:
             return None
         html = body.decode("gbk", errors="replace")
-        if "data-fid" not in html and len(html) < 5000:
-            _STATE["bad"] += 1
-            if _STATE["bad"] >= 3:
+        if "data-fid" not in html:
+            # 盾页/空页。_get 对任何非空响应都会清零 bad, 所以这里用独立计数, 连续 3 次才熔断
+            _STATE["list_bad"] = _STATE.get("list_bad", 0) + 1
+            logger.warning("500.com 列表页无场次 %s: 长度=%s 连续第%s次 头部=%r",
+                           sale_date, len(html), _STATE["list_bad"], html[:120].replace("\n", " "))
+            if _STATE["list_bad"] >= 3:
+                _STATE["list_bad"] = 0
                 self._trip(f"列表页异常 {sale_date}")
             return None
+        _STATE["list_bad"] = 0
         return parse_fid_list(html, int(sale_date[:4]))
 
 

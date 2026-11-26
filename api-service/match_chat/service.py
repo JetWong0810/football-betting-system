@@ -66,6 +66,7 @@ _SEC_RE = {
     "h2h": re.compile(r"交锋|历史对阵"),
     "recent": re.compile(r"近期|战绩|状态|赛程|近况"),
     "arts": re.compile(r"文章|公众号"),
+    "inj": re.compile(r"伤停|伤病|伤情|缺阵|停赛|受伤|阵容缺"),
 }
 
 
@@ -221,6 +222,15 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
         except Exception as e:  # noqa: BLE001
             logger.warning("北单数据页抓取异常 %s: %s", match_id, e)
             fenxi = {"ok": False, "reason": "error"}
+    inj_res = None
+    if "inj" in want and not bd:
+        try:
+            from api_football import injuries as af_inj
+            inj_res = af_inj.fetch(match_id)
+        except Exception as e:  # noqa: BLE001  伤停抓取失败不影响聊天
+            logger.warning("伤停抓取异常 %s: %s", match_id, e)
+            inj_res = {"ok": False, "reason": "error"}
+        yield {"type": "status", "text": "伤停已更新" if (inj_res or {}).get("ok") else "伤停没有抓到,使用已有数据"}
     if reason:
         yield {"type": "status", "text": reason}
         try:
@@ -239,6 +249,10 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
     data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
     if refresh is not None:
         data += "\n" + refresh_note(refresh) + "\n"
+    if inj_res is not None and not inj_res.get("ok"):
+        why = "本场还没有对应到 API-Football 的比赛" if inj_res.get("reason") == "no_mapping" else "接口请求失败"
+        data += (f"\n【本次抓取伤停失败】原因:{why}。回答时如实告诉用户没有拿到伤停数据(若上方【伤停】有内容则是之前存的旧数据,须注明抓取时间),"
+                 "不要凭印象补写伤停;可以建议用户打开联网搜索查伤停。\n")
     if fenxi is not None and not fenxi.get("ok"):
         import bd_service
         data += (f"\n【本次抓取交锋/战绩失败】原因:{bd_service.FENXI_REASON.get(fenxi.get('reason'), '未知')}。"

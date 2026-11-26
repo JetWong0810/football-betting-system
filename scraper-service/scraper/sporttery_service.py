@@ -55,6 +55,8 @@ _O500_FETCHED: Dict[tuple, float] = {}     # (match_id, kind, cid) -> 上次成�
 _O500_FINAL: set = set()
 _O500_FIDS: Dict[str, tuple] = {}          # sale_date -> (抓取时间, {match_code: {...}})
 _O500_FID_TTL = 6 * 3600
+_O500_LIST_FAIL: Dict[str, float] = {}      # sale_date -> 列表页失败时间(负缓存, 5分钟内不重试)
+_O500_LIST_FAIL_TTL = 300
 _O500_KIND_OF = {"asian": "ah", "ou": "ou", "euro": "euro"}
 _CACHE_MIN_LEN = 20
 # 下场开赛倒计时小于该值则只打体彩赔率, 不开 Playwright
@@ -356,11 +358,18 @@ class SportterySyncService:
         now = _time.time()
         hit = _O500_FIDS.get(sale)
         if hit is None or now - hit[0] > _O500_FID_TTL or (code not in hit[1] and now - hit[0] > 600):
+            if now - _O500_LIST_FAIL.get(sale, 0) < _O500_LIST_FAIL_TTL:
+                return None if hit is None else self._o500_pick(hit, m, code)
             data = client.fetch_fid_list(sale)
             if data is None:
-                return None
+                _O500_LIST_FAIL[sale] = now
+                return None if hit is None else self._o500_pick(hit, m, code)   # 旧缓存仍可用
+            _O500_LIST_FAIL.pop(sale, None)
             _O500_FIDS[sale] = (now, data)
             hit = _O500_FIDS[sale]
+        return self._o500_pick(hit, m, code)
+
+    def _o500_pick(self, hit, m: Dict[str, Any], code: str) -> Optional[str]:
         info = hit[1].get(code)
         if not info:
             return None
@@ -673,6 +682,11 @@ class SportterySyncService:
                         logger.warning(f"亚盘缓存失败 {mid}: {e}")
                 line = pack.get("bet365")
                 if not line or line.get("close_hc") is None:
+                    continue
+                e_ts = eta_of(m)
+                if not overwrite_open and e_ts is not None and e_ts <= 0:
+                    # 已开赛: 页面上的即时盘是滚球盘, 不能再覆盖终盘(matches / jczq_ah_history)
+                    sess.skipped += 1
                     continue
                 if not overwrite_open and _asian_close_unchanged(m, line):
                     sess.skipped += 1

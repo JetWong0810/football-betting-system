@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---- 回测基准(Bet365 开盘→终盘, jczq_ah_history 中 500.com 来源 32095 场已结算; 2026-11 复核, 可用 backtest_signals.py 复算) ----
-# 注意: 足彩网来源(company='Bet365', 16073 场)的终盘记录约 12% 混入了开赛后滚球盘口, 之前用它得到的 46.7%/43.2% 夸大了效应, 已改用 500.com 来源。
+# 注意: 终盘取 500.com 来源(Bet365-500, 样本更大)。company='Bet365' 来源多为 football-data 回填, 但其中约 731 场是线上抓取写入的近期记录,
+# 可能把开赛后的滚球盘口当终盘(抓取端已修复, 历史行未改动); 两个来源的差异另有原因, 未查明, 所以不用它。
 SIGNALS = {
     "deeper": (48.1, 6740, "上盘加深(开盘→终盘)"),
     "deeper_big": (46.3, 1470, "上盘加深≥0.5 球"),
