@@ -95,4 +95,4 @@ def build_bd_context(match_id: str) -> Dict[str, Any]:
                "h2h": fn["h2h"], "homeRecent": fn["home"], "awayRecent": fn["away"],
                "fenxiAt": at.strftime("%m-%d %H:%M") if at else None, "f6": 0, "articles": 0, "prediction": False}
     return {"item": None, "prediction": None, "text": text, "summary": summary, "sections": split_sections(text),
-            "hash": hashlib.sha1(text.encode()).hexdigest()[:16], "home": ht, "away": at_n}
+            "hash": hashlib.sha1(text.encode()).hexdigest()[:16], "snap": mk.get("snap"), "home": ht, "away": at_n}

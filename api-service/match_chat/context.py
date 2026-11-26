@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import math
 import re
@@ -11,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from database import get_db
 
 
+logger = logging.getLogger(__name__)
 CST = timezone(timedelta(hours=8))
 
 
@@ -560,6 +562,8 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         pass
     ticks = list_o500_ticks("asian", match_id, "Bet365") or list_ah_ticks(match_id, cid=2)
     n = {"asian": len(asian or []), "euro": len(euro_c), "ou": len(ou_c), "ticks": len(ticks)}
+    snap_ah: Optional[Dict[str, Any]] = None
+    snap_ou: Optional[Dict[str, Any]] = None
     L: List[str] = []
 
     def ts(k):
@@ -589,7 +593,23 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         if r1:
             L.append("【盘口读法】" + r1 + devig_text(h_now, home_n, away_n, w_h[0], w_h[1]))
             L.append(BASE_RATE_TEXT)
+            from .edge import best_price_text, prior_text, signal_text
+            from .margin_dist import margin_text
+            mt = margin_text(h_now, home_n, away_n)
+            if mt:
+                L.append(mt)
+            pt = prior_text(euro_c, home_n, away_n)
+            if pt:
+                L.append(pt)
             L.append("【水位参考·亚盘】" + breakeven_text(f"{home_n}水", w_h[0], f"{away_n}水", w_h[1]))
+            bt = best_price_text(asian, home_n, away_n)
+            if bt:
+                L.append(bt)
+            b365 = next((a for a in (asian or []) if a.get("bookmaker") == "Bet365"), None)
+            if b365:
+                L.append(signal_text((b365.get("initial") or {}).get("handicap"), h_now, home_n, away_n))
+            snap_ah = {"line": h_now, "home": w_h[0], "away": w_h[1], "src": "Bet365",
+                       "open": ((b365 or {}).get("initial") or {}).get("handicap")}
         ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
         o_line, o_w = (ot[0].get("line"), (ot[0].get("over"), ot[0].get("under"))) if ot else (None, (None, None))
         if o_line is None:
@@ -602,8 +622,9 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
             nv = _novig(*o_w)
             L.append(r2 + (f"(Bet365 最新水位去水后 大球/小球概率 {nv};与 50% 的偏离在 3 个百分点内属定价噪音,不单独作为方向依据)" if nv else ""))
             L.append("【水位参考·大小球】" + breakeven_text("大球水", o_w[0], "小球水", o_w[1]))
-    except Exception:  # noqa: BLE001
-        pass
+            snap_ou = {"line": o_line, "over": o_w[0], "under": o_w[1], "src": "Bet365"}
+    except Exception:  # noqa: BLE001  盘口读法/先验等附加块失败不影响主体, 但必须留日志, 否则后面的块会被静默吞掉
+        logger.exception("盘口读法/先验/最优价生成失败 %s", match_id)
     up = down = same = 0
     for a in asian or []:
         i, cu = a.get("initial") or {}, a.get("current") or {}
@@ -663,6 +684,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
     if paths:
         L.append(paths)
         n["ticks"] += pn
+    n["snap"] = {"at": datetime.now(_BJ).strftime("%Y-%m-%d %H:%M"), "ah": snap_ah, "ou": snap_ou}
     return "\n".join(L), n
 
 
@@ -732,7 +754,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}
@@ -787,5 +809,5 @@ def build_context(match_id: str) -> Dict[str, Any]:
         "articles": len(arts), "prediction": bool(pred),
     }
     return {"item": it, "prediction": pred, "text": text, "summary": summary, "sections": split_sections(text),
-            "hash": hashlib.sha1(text.encode()).hexdigest()[:16],
+            "hash": hashlib.sha1(text.encode()).hexdigest()[:16], "snap": mk.get("snap"),
             "home": it["homeTeam"]["name"], "away": it["awayTeam"]["name"]}
