@@ -463,12 +463,12 @@ def _novig(a: Optional[float], b: Optional[float]) -> str:
         return ""
 
 
-# 实测基准(近 400 天已结算 3294 场, 含半赢半输按 0.5 折算): 上盘赢盘率 50.4%; 按盘口深度 <=0.25: 52.8% / 0.5-0.75: 47.9% /
-# 1-1.25: 52.1% / >=1.5: 48.7%。Bet365 终盘水位格式一致的 1269 场里, 上盘平均水位 0.929、下盘 0.872, 上盘平均去水概率仅 49.3%:
-# 庄家给上盘的水位系统性偏高, 所以约 56% 的比赛"去水概率站下盘"、38% 站上盘, 而这并不预测下盘更易赢盘(站下盘时上盘仍赢 50.3%)。
-UPPER_DEVIG_NORM = 49.3
-BASE_RATE_TEXT = ("【赢盘基准】近 400 天 3294 场已结算:上盘赢盘率 50.4%(半赢半输按 0.5 计),按盘口深度 ≤0.25 档 52.8%、"
-                  "0.5~0.75 档 47.9%、1~1.25 档 52.1%、≥1.5 档 48.7%,上下盘没有天然优势,先验就是接近五五开;"
+# 实测基准(2026-11 复核, Bet365 终盘, 500.com 来源已结算非平手盘 24348 场, 含半赢半输按 0.5): 上盘赢盘率 49.4%;
+# 按盘口深度 <=0.25: 49.2% / 0.5-0.75: 50.0% / 1-1.25: 48.9% / >=1.5: 48.9%。水位格式一致的 27554 场里, 上盘平均水位 0.942、下盘 0.915,
+# 上盘平均去水概率 49.7%, 约 52% 的比赛"去水概率站下盘"(此前用 1269 场足彩网样本得到的 49.3%/56% 是小样本夸大)。
+UPPER_DEVIG_NORM = 49.7
+BASE_RATE_TEXT = ("【赢盘基准】Bet365 终盘已结算 24348 场(非平手盘):上盘赢盘率 49.4%(半赢半输按 0.5 计),按盘口深度 ≤0.25 档 49.2%、"
+                  "0.5~0.75 档 50.0%、1~1.25 档 48.9%、≥1.5 档 48.9%,上下盘没有天然优势,先验就是接近五五开;"
                   "只有本场出现多类独立证据(盘口变动、欧赔、基本面/新闻)方向一致,才可偏离五五开。")
 
 
@@ -491,7 +491,7 @@ def devig_text(h_raw: Optional[float], home: str, away: str, w_home, w_away, src
         verdict = (f"{'高于' if dev > 0 else '低于'}常态约 {abs(dev):.1f} 个百分点(只说明该盘口的定价偏离了常见水位结构,"
                    "不等于该方向更可能赢盘,需要其他独立证据印证)")
     return (f"({src} 最新水位去水后 上盘({up_name})定价概率 {p_up:.1f}% / 下盘 {100 - p_up:.1f}%;"
-            f"庄家对上盘水位系统性偏高,上盘去水概率常态约 {UPPER_DEVIG_NORM}%,本场{verdict})")
+            f"上盘去水概率常态约 {UPPER_DEVIG_NORM}%,本场{verdict})")
 
 
 _NAME_ALIAS = {"伟德": "韦德"}          # 500.com 叫伟德, 足彩网叫韦德(同一家)
@@ -593,7 +593,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
         if r1:
             L.append("【盘口读法】" + r1 + devig_text(h_now, home_n, away_n, w_h[0], w_h[1]))
             L.append(BASE_RATE_TEXT)
-            from .edge import best_price_text, prior_text, signal_text
+            from .edge import best_price_text, prior_text, signal_text, water_signal_text
             from .margin_dist import margin_text
             mt = margin_text(h_now, home_n, away_n)
             if mt:
@@ -608,6 +608,7 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
             b365 = next((a for a in (asian or []) if a.get("bookmaker") == "Bet365"), None)
             if b365:
                 L.append(signal_text((b365.get("initial") or {}).get("handicap"), h_now, home_n, away_n))
+            L.append(water_signal_text(asian, home_n, away_n))
             snap_ah = {"line": h_now, "home": w_h[0], "away": w_h[1], "src": "Bet365",
                        "open": ((b365 or {}).get("initial") or {}).get("handicap")}
         ot = list_o500_ticks("overunder", match_id, "Bet365") or _lou(match_id, 2)
@@ -754,7 +755,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章"}

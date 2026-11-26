@@ -15,9 +15,9 @@ def test_classify_and_signal():
     assert edge.classify_move(-1.0, -0.75)[0] == "shallower"        # 主受让变浅 = 上盘(客)变浅
     assert edge.classify_move(0.5, -0.5) is None and edge.classify_move(0, 0.25) is None
     t = edge.signal_text(1.0, 1.5, "甲", "乙")
-    assert "上盘(甲)" in t and "加深 0.5 球" in t and "43.2%" in t and "n=273" in t, t
+    assert "上盘(甲)" in t and "加深 0.5 球" in t and "46.3%" in t and "n=1470" in t, t
     t = edge.signal_text(-1.0, -1.25, "甲", "乙")
-    assert "上盘(乙)" in t and "46.7%" in t
+    assert "上盘(乙)" in t and "48.1%" in t
     assert "无可比" in edge.signal_text(0, 0, "甲", "乙")
 
 
@@ -38,6 +38,31 @@ def test_best_price_and_ev():
     assert "两边期望都不为正" in edge.best_price_text(asian3, "甲", "乙")
     assert "无法估算" in edge.best_price_text([comp("Bet365", 1.0, 0.98, 0.88)], "甲", "乙")
     assert edge.best_price([]) is None
+
+
+def item(name, h0, h1, w0h, w0a, w1h, w1a):
+    return {"bookmaker": name, "initial": {"handicap": h0, "home": w0h, "away": w0a},
+            "current": {"handicap": h1, "home": w1h, "away": w1a}}
+
+
+def test_water_signal():
+    # 主让1(上盘=甲), 盘口不变, 主水 0.95->0.85(降0.10) => drop
+    a = [item("Bet365", 1.0, 1.0, 0.95, 0.90, 0.85, 1.00), item("皇冠", 1.0, 1.0, 0.92, 0.93, 0.86, 0.97),
+         item("Pinnacle", 1.0, 1.0, 0.90, 0.95, 0.96, 0.93)]
+    w = edge.water_signal(a, "甲", "乙")
+    assert w["kind"] == "drop" and w["up"] == "甲" and abs(w["delta"] + 0.10) < 1e-9
+    assert w["tally"] == {"drop": 2, "rise": 1, "flat": 0}, w["tally"]
+    t = edge.water_signal_text(a, "甲", "乙")
+    assert "53.1%" in t and "n=3884" in t and "顺势" in t and "上盘(甲)水位 0.95→0.85" in t, t
+    # 主受让(上盘=客): 客水升 => rise
+    b = [item("Bet365", -0.5, -0.5, 0.90, 0.80, 0.88, 0.90)]
+    w = edge.water_signal(b, "甲", "乙")
+    assert w["kind"] == "rise" and w["up"] == "乙", w
+    # 盘口变了 / 平手盘 / 无 Bet365: 不适用
+    assert edge.water_signal([item("Bet365", 1.0, 1.25, 0.9, 0.9, 0.9, 0.9)], "甲", "乙") is None
+    assert edge.water_signal([item("Bet365", 0, 0, 0.9, 0.9, 0.8, 1.0)], "甲", "乙") is None
+    assert edge.water_signal([item("皇冠", 1.0, 1.0, 0.9, 0.9, 0.8, 1.0)], "甲", "乙") is None
+    assert "不适用" in edge.water_signal_text([], "甲", "乙")
 
 
 def test_prior():

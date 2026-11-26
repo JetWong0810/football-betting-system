@@ -7,18 +7,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-# ---- 回测基准(Bet365 开盘→终盘, jczq_ah_history 16073 场已结算; 2026-11 统计, 可用 backtest_signals.py 复算) ----
+# ---- 回测基准(Bet365 开盘→终盘, jczq_ah_history 中 500.com 来源 32095 场已结算; 2026-11 复核, 可用 backtest_signals.py 复算) ----
+# 注意: 足彩网来源(company='Bet365', 16073 场)的终盘记录约 12% 混入了开赛后滚球盘口, 之前用它得到的 46.7%/43.2% 夸大了效应, 已改用 500.com 来源。
 SIGNALS = {
-    "deeper": (46.7, 2516, "上盘加深(开盘→终盘)"),
-    "deeper_big": (43.2, 273, "上盘加深≥0.5 球"),
-    "shallower": (50.9, 1843, "上盘变浅"),
-    "same": (50.6, 7338, "盘口不变"),
+    "deeper": (48.1, 6740, "上盘加深(开盘→终盘)"),
+    "deeper_big": (46.3, 1470, "上盘加深≥0.5 球"),
+    "shallower": (51.7, 4525, "上盘变浅"),
+    "same": (50.0, 10604, "盘口不变"),
 }
 SIGNAL_NOTE = (
-    "回测(Bet365 开盘→终盘,16073 场已结算): 上盘加深后上盘赢盘率 46.7%(n=2516,按时间三等分 46.8/46.6/46.7%,稳定;"
-    "加深≥0.5 球 43.2%,n=273),上盘变浅 50.9%(n=1843),盘口不变 50.6%(n=7338)。同盘口上盘水位下降超 0.04 后上盘 56.3%(n=169,样本小,仅供参考)。"
-    "价格口径(终盘水位,水位格式一致的 1279 场,误差约±4.5%): 无差别买上盘 ROI 约 0%,买下盘约 -9.6%——下盘平均水位(0.872)低于上盘(0.929),"
-    "同样五成命中率下下盘天然吃亏;升盘后买下盘 ROI -8.1%、买上盘 -1.6%,命中率的差距补不上价格差。"
+    "回测(Bet365 开盘→终盘,500.com 来源 32095 场已结算): 上盘加深后上盘赢盘率 48.1%(±1.2,n=6740,按时间三等分 48.4/47.8/48.1%;"
+    "加深≥0.5 球 46.3%,±2.5,n=1470),上盘变浅 51.7%(n=4525),盘口不变 50.0%(n=10604)。效应方向稳定但幅度不大(约 2~4 个百分点)。"
+    "价格口径(终盘水位,27554 场): 无差别买上盘 ROI 约 -3.8%、买下盘约 -3.0%,两边都亏掉庄家抽水,没有哪一边天然占便宜;"
+    "上盘加深后买下盘 ROI -1.5%、买上盘 -5.3%(n=7625),下盘相对少亏但仍为负,即命中率的差距不足以变成正收益。"
 )
 
 
@@ -51,6 +52,62 @@ def signal_text(open_raw, cur_raw, home: str, away: str) -> str:
     extra = "上盘加深不等于看好上盘,历史上加深后上盘反而偏弱,但价格上买下盘仍不划算。" if kind == "deeper" else ""
     return (head + f"本场 Bet365 上盘({up})开盘→即时盘 {word},对应历史分组「{label}」上盘赢盘率 {rate}%(n={n})。"
             "注意:统计的是开盘→终盘,本场尚未到终盘,仅作参考。" + extra + SIGNAL_NOTE)
+
+
+# ---- 同盘口水位变动(Bet365 开盘→终盘, 盘口不变的 12384 行; backtest_signals.py 可复算) ----
+WATER_SIGNALS = {
+    "drop": (53.1, 1.6, 3884, "上盘水位下降超过 0.05"),
+    "flat": (50.3, 1.6, 3723, "水位变化不超过 0.05"),
+    "rise": (47.0, 1.7, 3397, "上盘水位上升超过 0.05"),
+}
+WATER_NOTE = (
+    "回测(Bet365 开盘→终盘,盘口全程不变的 12384 行): 上盘水位降超过 0.05 后上盘赢盘率 53.1%(±1.6,n=3884),水位变化不超过 0.05 为 50.3%(n=3723),"
+    "上盘水位升超过 0.05 为 47.0%(±1.7,n=3397);按时间三等分,降水组 52.4/52.9/53.6%、升水组 45.3/48.9/45.9%,方向稳定。"
+    "但按终盘价格买,降水后买上盘 ROI -0.7%(n=4195)、升水后买下盘 -0.9%(n=3671),基本打平——水位变动的信息已被价格吸收,"
+    "它说明\"资金/信息的方向\",不构成可直接下注的优势。注意:水位变动(同盘口)顺势、盘口加深(见【历史信号】)逆势,两者方向相反,不要混为一谈;"
+    "统计只用了 Bet365 单家、开盘→终盘,多家公司一致性和赛前某个时点的变动没有回测。"
+)
+
+
+def water_signal(asian: List[Dict[str, Any]], home: str, away: str) -> Optional[Dict[str, Any]]:
+    """Bet365 在盘口不变的前提下, 上盘一侧水位 开盘→即时 的变化; 再给出同盘口各公司的方向分布(描述性, 未回测)。"""
+    def side_water(a):
+        i, cu = a.get("initial") or {}, a.get("current") or {}
+        hi, hc = _f(i.get("handicap")), _f(cu.get("handicap"))
+        if hi is None or hc is None or hc == 0 or abs(hi - hc) > 1e-9:
+            return None
+        up_home = hc > 0
+        wo, wc = _f(i.get("home" if up_home else "away")), _f(cu.get("home" if up_home else "away"))
+        if wo is None or wc is None or not (0.3 < wo < 1.6 and 0.3 < wc < 1.6):
+            return None
+        return up_home, wo, wc
+    b = next((a for a in asian or [] if a.get("bookmaker") == "Bet365"), None)
+    r = side_water(b) if b else None
+    if not r:
+        return None
+    up_home, wo, wc = r
+    d = round(wc - wo, 3)                      # 避免 0.05 边界上的浮点误差
+    kind = "drop" if d < -0.05 else "rise" if d > 0.05 else "flat"
+    tally = {"drop": 0, "rise": 0, "flat": 0}
+    for a in asian or []:
+        x = side_water(a)
+        if x and x[0] == up_home:
+            dd = round(x[2] - x[1], 3)
+            tally["drop" if dd < -0.05 else "rise" if dd > 0.05 else "flat"] += 1
+    return {"kind": kind, "delta": d, "wo": wo, "wc": wc, "up": home if up_home else away, "tally": tally}
+
+
+def water_signal_text(asian: List[Dict[str, Any]], home: str, away: str) -> str:
+    w = water_signal(asian, home, away)
+    head = "【同盘口水位信号】"
+    if not w:
+        return head + "本场 Bet365 开盘至今盘口已变动、为平手盘或水位异常,同盘口水位变动统计不适用。" + WATER_NOTE
+    rate, ci, n, label = WATER_SIGNALS[w["kind"]]
+    t = w["tally"]
+    cross = (f"同盘口各公司上盘水位变化:降 {t['drop']} 家 / 升 {t['rise']} 家 / 基本不变 {t['flat']} 家(多家一致性未经回测,仅描述)。"
+             if sum(t.values()) > 1 else "")
+    return (head + f"本场 Bet365 盘口不变,上盘({w['up']})水位 {w['wo']:g}→{w['wc']:g}(变化 {w['delta']:+.2f}),对应历史分组「{label}」"
+            f"上盘赢盘率 {rate}%(±{ci},n={n})。" + cross + WATER_NOTE)
 
 
 def _devig2(w_a, w_b) -> Optional[Tuple[float, float]]:

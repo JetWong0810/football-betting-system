@@ -30,6 +30,9 @@ def _pnl(label, side, w):
     return -1 if label in ("上盘", "下盘") else -0.5
 
 
+COMPANY = "Bet365-500"      # 500.com 来源(32095 场)。足彩网来源(company='Bet365')约 12% 终盘混入开赛后滚球盘口, 不要用
+
+
 def main():
     with get_db() as c:
         cur = c.cursor()
@@ -37,7 +40,7 @@ def main():
                        h.close_home_odds ho, h.close_away_odds ao
                        FROM matches m JOIN jczq_ah_history h ON h.match_id=m.match_id
                        WHERE m.home_score IS NOT NULL AND h.open_handicap IS NOT NULL AND h.close_handicap IS NOT NULL
-                       AND h.company IN ('Bet365','bet365','365')""")
+                       AND h.company = %s""", (COMPANY,))
         rows = sorted(cur.fetchall(), key=lambda r: r["ts"] or 0)
     ok = [r for r in rows if float(r["ch"]) != 0 and float(r["oh"]) != 0 and (float(r["oh"]) < 0) == (float(r["ch"]) < 0)]
     grp = {"deeper": [r for r in ok if abs(float(r["ch"])) > abs(float(r["oh"]))],
@@ -63,5 +66,45 @@ def main():
         print("无差别买", side, "ROI%", round(tot / n * 100, 1) if n else None, "n", n)
 
 
+def water():
+    """同盘口(开盘=终盘)上盘水位变动分组的上盘赢盘率与终盘价格 ROI。"""
+    with get_db() as c:
+        cur = c.cursor()
+        cur.execute("""SELECT h.company, m.match_timestamp ts, m.home_score hs, m.away_score a, h.close_handicap ch,
+                       h.open_home_odds oho, h.open_away_odds oao, h.close_home_odds cho, h.close_away_odds cao
+                       FROM jczq_ah_history h JOIN matches m ON m.match_id=h.match_id
+                       WHERE m.home_score IS NOT NULL AND h.close_handicap<>0 AND h.open_handicap=h.close_handicap
+                       AND h.open_home_odds BETWEEN 0.4 AND 1.4 AND h.open_away_odds BETWEEN 0.4 AND 1.4
+                       AND h.close_home_odds BETWEEN 0.4 AND 1.4 AND h.close_away_odds BETWEEN 0.4 AND 1.4""")
+        rows = sorted(cur.fetchall(), key=lambda r: r["ts"] or 0)
+
+    def d(r):
+        ch = float(r["ch"])
+        uo, uc = (float(r["oho"]), float(r["cho"])) if ch < 0 else (float(r["oao"]), float(r["cao"]))
+        return uc - uo
+
+    def roi(sel, side):
+        tot = n = 0
+        for r in sel:
+            ch = float(r["ch"])
+            o = _ah_outcome(int(r["hs"]), int(r["a"]), ch)
+            if not o:
+                continue
+            uw, lw = (float(r["cho"]), float(r["cao"])) if ch < 0 else (float(r["cao"]), float(r["cho"]))
+            tot += _pnl(o[0], side, uw if side == "upper" else lw)
+            n += 1
+        return (round(tot / n * 100, 1), n) if n else None
+
+    grp = {"drop": [r for r in rows if d(r) < -0.05], "rise": [r for r in rows if d(r) > 0.05],
+           "flat": [r for r in rows if abs(d(r)) <= 0.05]}
+    print("同盘口水位变动 行数", len(rows))
+    for k, v in grp.items():
+        print(k, "上盘赢盘率/n", _rate(v))
+    b5 = [r for r in rows if r["company"] == "Bet365-500"]
+    print("Bet365-500 降水后买上盘 ROI", roi([r for r in b5 if d(r) < -0.05], "upper"),
+          " 升水后买下盘 ROI", roi([r for r in b5 if d(r) > 0.05], "lower"))
+
+
 if __name__ == "__main__":
     main()
+    water()

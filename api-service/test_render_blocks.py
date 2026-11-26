@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from database import get_db  # noqa: E402
 from match_chat.context import build_context  # noqa: E402
 
-BLOCKS = ["【盘口读法】", "【赢盘基准】", "【同盘口历史净胜分布】", "【市场先验】", "【水位参考·亚盘】", "【最优价】", "【历史信号】"]
+BLOCKS = ["【盘口读法】", "【赢盘基准】", "【同盘口历史净胜分布】", "【市场先验】", "【水位参考·亚盘】", "【最优价】", "【历史信号】", "【同盘口水位信号】"]
 
 
 def main():
