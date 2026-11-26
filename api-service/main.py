@@ -348,6 +348,8 @@ async def startup_event():
     try:
         from api_football.auto import start as _af_start
         _af_start()
+        from api_football.live import start as _af_live_start
+        _af_live_start()
     except Exception as e:  # noqa: BLE001  映射失败不影响 API 启动
         logger.warning(f"API-Football 自动映射启动失败: {e}")
 
