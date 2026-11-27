@@ -110,6 +110,17 @@ DDL += [
 ]
 
 
+DDL += [
+    """CREATE TABLE IF NOT EXISTS af_standings_cache (
+      af_league_id INT NOT NULL,
+      season INT NOT NULL,
+      payload_json LONGTEXT,
+      fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (af_league_id, season)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+]
+
+
 def ensure_tables() -> None:
     with get_db() as conn:
         cur = conn.cursor()

@@ -37,6 +37,11 @@ def test_prompt_has_graded_leans_and_no_price_veto():
     assert "至少两类互相独立的证据" in SYSTEM_TMPL and "只有一类证据、证据互相矛盾" not in SYSTEM_TMPL
 
 
+def test_ou_prompt_guards_against_double_counting_line_moves():
+    from match_chat.service import SYSTEM_TMPL
+    assert "已经体现在当前的 μ 里" in SYSTEM_TMPL and "不要用\"盘口已定价\"当作不给倾向的理由" in SYSTEM_TMPL
+
+
 def test_extract_verdict():
     body, v = extract_verdict("正文\n[[NEXT]] 问题一 || 问题二\n[[V]] ah=下盘; ou=不确定")
     assert v == {"ah": "下盘", "ou": "不确定"} and "[[V]]" not in body and "[[NEXT]]" in body, (body, v)

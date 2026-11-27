@@ -63,6 +63,22 @@ def render_fenxi(m: Dict[str, Any], data: Dict[str, Any], at: datetime) -> Tuple
         L.append("\n【未来赛程】(赛程密度/轮换参考)")
         L.extend(fut)
     try:
+        from .ou_model import recent_goals_text
+        def _tot(rows):
+            out = []
+            for r in rows[:10]:
+                try:
+                    a, b = str(r.get("score") or "").split("-")
+                    out.append(int(a) + int(b))
+                except ValueError:
+                    pass
+            return out
+        rg = recent_goals_text(ht, _tot(hr), at_n, _tot(ar))
+        if rg:
+            L.append(rg)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         from .schedule import schedule_text
         st = schedule_text(cutoff, ht, at_n, hr, ar, data.get("homeFuture"), data.get("awayFuture"))
         if st:

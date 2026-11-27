@@ -186,6 +186,20 @@ def render_form(match: Dict[str, Any], form: Optional[Dict[str, Any]], n_h2h: in
         L.append("\n【未来赛程】(赛程密度/轮换参考)")
         L.extend(fut)
     try:
+        from .ou_model import recent_goals_text
+        def _totals(rows, team):
+            out = []
+            for r in rows[:10]:
+                sc = _score_of(r.get("match") or "")
+                if sc and team and (team[:2] in sc[0] or team[:2] in sc[3]):
+                    out.append(int(sc[1]) + int(sc[2]))
+            return out
+        rg = recent_goals_text(ht, _totals(hr, ht), at, _totals(ar, at))
+        if rg:
+            L.append(rg)
+    except Exception:  # noqa: BLE001
+        logger.exception("近期总进球计算失败")
+    try:
         from .schedule import schedule_text
         st = schedule_text(cutoff, ht, at, hr, ar, form.get("homeFuture"), form.get("awayFuture"))
         if st:
@@ -717,6 +731,24 @@ def render_market(match_id: str, match: Dict[str, Any]) -> Tuple[str, Dict[str, 
             i, cu = o.get("initial") or {}, o.get("current") or {}
             L.append(f"- {o.get('bookmaker')}: {i.get('line')}→{cu.get('line')} | 大水{_w(i.get('over'), cu.get('over'))} 小水{_w(i.get('under'), cu.get('under'))}"
                      + (f" | 最新变动 {str(o.get('asof'))[5:16]}" if o.get("src500") else " | 来源足彩网快照") + _odd_open("ou", i))
+        delta_mu, delta_note = 0.0, ""
+        try:
+            from api_football.standings import render as render_stakes, stakes as stakes_of
+            hn, an = (match or {}).get("home_team_name") or "主队", (match or {}).get("away_team_name") or "客队"
+            sk = stakes_of(match_id)
+            if sk:
+                L.append(render_stakes(match_id, hn, an))
+                if sk["delta"]:
+                    delta_mu, delta_note = sk["delta"], "战意(至少一方无欲无求,回测约 +3.6pp、在衰减)折合"
+        except Exception:  # noqa: BLE001  战意不可用不影响其余内容
+            logger.exception("战意计算失败")
+        try:
+            from .ou_model import ou_block
+            ob = ou_block(ou_c, delta_mu, delta_note)
+            if ob:
+                L.append(ob)
+        except Exception:  # noqa: BLE001  概率分布算不出来不影响其余内容
+            logger.exception("大小球概率分布计算失败")
     paths, pn = render_tick_paths(match_id)
     if paths:
         L.append(paths)
@@ -791,7 +823,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"), ("官方首发", "lineup"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"), ("官方首发", "lineup"), ("战意", "odds"), ("近期总进球", "recent"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"), ("赛程密度", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章", "inj": "伤停", "lineup": "官方首发"}
