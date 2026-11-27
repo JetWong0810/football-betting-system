@@ -42,6 +42,23 @@ def test_ou_prompt_guards_against_double_counting_line_moves():
     assert "已经体现在当前的 μ 里" in SYSTEM_TMPL and "不要用\"盘口已定价\"当作不给倾向的理由" in SYSTEM_TMPL
 
 
+def test_motivation_news_guidance():
+    from match_chat.service import NO_WEB_OU_NOTE, WEB_ON_NOTE
+    assert "战意与赛前情报" in WEB_ON_NOTE and "主帅或球队官方原话" in WEB_ON_NOTE and "没有回测,只能给方向" in WEB_ON_NOTE
+    assert "缺少赛前新闻和主帅发言" in NO_WEB_OU_NOTE
+
+
+def test_news_and_article_intel_not_downgraded():
+    from match_chat.service import SYSTEM_TMPL
+    # 新闻/发言/文章情报被明确列为新信息, 且有"新闻时间 vs 盘口变动时间"的吸收判断
+    assert "联网查到的主帅发言和内部消息" in SYSTEM_TMPL and "关联文章里已证实或能交叉验证的事实" in SYSTEM_TMPL
+    assert "新闻发布时间对照盘口最近一次变动时间" in SYSTEM_TMPL and "尚未被定价的信息,这时它的分量最大" in SYSTEM_TMPL
+    # 新闻情报按事实计类, 可以撑起中等强度; 文章事实与观点分开
+    assert "新闻情报内部按\"事实\"而不是按渠道数" in SYSTEM_TMPL and "可以和其他因素一起撑起\"中等\"强度" in SYSTEM_TMPL
+    assert "事实(伤停、停赛、首发消息" in SYSTEM_TMPL and "观点" in SYSTEM_TMPL
+    assert "④对照【历史信号】" in SYSTEM_TMPL and "④③" not in SYSTEM_TMPL
+
+
 def test_extract_verdict():
     body, v = extract_verdict("正文\n[[NEXT]] 问题一 || 问题二\n[[V]] ah=下盘; ou=不确定")
     assert v == {"ah": "下盘", "ou": "不确定"} and "[[V]]" not in body and "[[NEXT]]" in body, (body, v)

@@ -72,7 +72,7 @@ def test_recent_goals_text_needs_five_games():
 def test_ou_request_bundles_inputs():
     from match_chat.service import wanted_sections
     w = wanted_sections("请关联本场大小球相关数据,判断总进球偏大还是偏小")
-    assert {"odds", "inj", "lineup", "recent"} <= set(w)
+    assert {"odds", "inj", "lineup", "recent", "arts"} <= set(w)               # 关联文章里的情报也要带上
     assert wanted_sections("大小球一般怎么看") == []                    # 没有关联意图不触发
     assert "inj" not in wanted_sections("请关联本场盘口数据")            # 不问大小球时不自动带伤停
 
