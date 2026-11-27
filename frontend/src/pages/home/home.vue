@@ -142,9 +142,6 @@
     <BetRecordDialog v-model:visible="showDialog" @success="handleRecordSuccess" />
     <CoolDownAlert />
 
-    <!-- 数据查询助手 -->
-    <DataQueryFab @open="showQueryPanel = true" />
-    <DataQueryPanel :visible="showQueryPanel" @close="showQueryPanel = false" />
 
     <!-- 快速记录入口 -->
     <QuickRecordFab />
@@ -159,8 +156,6 @@ import { useConfigStore } from '@/stores/configStore'
 import { useStatStore } from '@/stores/statStore'
 import ChartProfit from '@/components/ChartProfit.vue'
 import BetRecordDialog from '@/components/BetRecordDialog.vue'
-import DataQueryFab from '@/components/DataQueryFab.vue'
-import DataQueryPanel from '@/components/DataQueryPanel.vue'
 import QuickRecordFab from '@/components/QuickRecordFab.vue'
 import { formatCurrency, formatPercent } from '@/utils/formatters'
 import { getStrategyPreset, generateAdvice, checkRiskStatus, calcTieredStakes } from '@/utils/strategyEngine'
@@ -174,7 +169,6 @@ const config = useConfigStore()
 const statStore = useStatStore()
 const controlStore = useControlStore()
 const showDialog = ref(false)
-const showQueryPanel = ref(false)
 
 const bankroll = computed(() => betStore.bankroll)
 const targetProgress = computed(() => Math.min(Math.max(statStore.targetProgress, 0), 2))

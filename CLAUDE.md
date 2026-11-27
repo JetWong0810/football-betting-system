@@ -32,7 +32,6 @@
 | `api-service/jczq_similar_odds.py` | 历史同赔匹配引擎(spf池+find_similar_spf+_ah_outcome) |
 | `api-service/main.py` | FastAPI 路由(预测/批量同赔/赛果/同赔查询) |
 | `api-service/odds500_service.py` | 500.com 抓取(亚盘/欧赔/fid/score) |
-| `api-service/analysis_functions.py` | NL 查询→同赔分析函数 |
 | `scraper-service/scraper/sporttery_service.py` | 竞彩官方 API 抓取 |
 | `scraper-service/repository.py` | DB 读写(含 spf/nspf 变动记录) |
 | `frontend/src/pages/predict/predict.vue` | 预测页(选赛事+7因子+同赔弹窗) |

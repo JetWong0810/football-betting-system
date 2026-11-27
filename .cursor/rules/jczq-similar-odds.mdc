@@ -1,6 +1,6 @@
 ---
 description: 竞彩7因子预测+历史同赔匹配(spf口径)的完整逻辑、过滤条件、盘路算法、readpl/spf回填坑、批量同赔分析
-globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-service/analysis_functions.py, api-service/main.py, api-service/backfill_spf_history.py, api-service/backfill_ah_500.py, api-service/backfill_ah_history.py, api-service/seed_live_spf_from_had.py, frontend/src/pages/predict/predict.vue, frontend/src/pages/predict/batch-analysis.vue
+globs: api-service/jczq_similar_odds.py, api-service/predict_service.py, api-service/main.py, api-service/backfill_spf_history.py, api-service/backfill_ah_500.py, api-service/backfill_ah_history.py, api-service/seed_live_spf_from_had.py, frontend/src/pages/predict/predict.vue, frontend/src/pages/predict/batch-analysis.vue
 ---
 
 # 竞彩 7 因子 + 历史同赔(F6)
@@ -69,6 +69,3 @@ sporttery scraper 只在赔率变>0.005 才追加 spf 变动行;部分在售场 
 
 同赔弹窗(predict.vue / batch-analysis.vue)
 表头:相似度/主队/比分/客队/结果/盘路/亚初/亚终/初盘/终盘/日期/联赛。单关不占列:行浅红底,相似度右侧描边「单」标记(占位对齐,无竖线)。亚初/亚终=jczq_ah_history Bet365 系 open/close_handicap。**缺亚盘终盘的同赔场不展示、不进弹窗胜平负/盘路统计**。同联赛蓝色高亮,结果色(主胜红/平黄/客胜绿),盘路色(上盘红/下盘绿/走水灰)。横向滚动。
-
-## NL 查询(analysis_functions.similar_odds)
-优先竞彩 spf 池(`find_match_by_question` 按问题文本搜队名,绕过 KNOWN_TEAMS),回退世界杯 SQLite。`_jczq_similar_rows` 用 `_ah_outcome` 算盘口结果 + 亚盘让球列。
