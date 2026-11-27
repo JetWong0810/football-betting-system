@@ -62,6 +62,13 @@ def render_fenxi(m: Dict[str, Any], data: Dict[str, Any], at: datetime) -> Tuple
     if fut:
         L.append("\n【未来赛程】(赛程密度/轮换参考)")
         L.extend(fut)
+    try:
+        from .schedule import schedule_text
+        st = schedule_text(cutoff, ht, at_n, hr, ar, data.get("homeFuture"), data.get("awayFuture"))
+        if st:
+            L.append(st)
+    except Exception:  # noqa: BLE001  赛程密度算不出来不影响其余内容
+        pass
     return "\n".join(L), {"h2h": len(h2h), "home": len(hr), "away": len(ar)}
 
 
