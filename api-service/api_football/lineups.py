@@ -96,7 +96,15 @@ def fetch(match_id: str, force: bool = False, client: Optional[AfClient] = None)
         lu = parse_lineups(c.get("/fixtures/lineups", {"fixture": fid}).get("response", []))
         data: Dict[str, Any] = {}
         if lu:
+            from . import players as af_players
             for tid, t in lu.items():
+                if mp.get("af_league_id") and mp.get("af_season"):
+                    st = af_players.team_stats(c, int(tid), int(mp["af_league_id"]), int(mp["af_season"]))
+                    if st.get("games"):
+                        t["games"] = st["games"]
+                        t["regulars"] = sorted(
+                            [{"id": int(pid), "name": p["name"], "share": p["share"], "starts": p["starts"], "goals": p["goals"]}
+                             for pid, p in st["players"].items() if p["role"] == "主力"], key=lambda r: -(r["share"] or 0))
                 prev = _prev_xi(c, int(tid), fid)
                 if prev:
                     t["rotation"] = rotation([x["id"] for x in t["xi"]], prev["ids"])
@@ -129,6 +137,21 @@ def _xi_text(t: Dict[str, Any]) -> str:
     return f"阵型 {t.get('formation') or '未知'},教练 {t.get('coach') or '未知'}。首发: {body}{rot}"
 
 
+def regulars_missing(t: Dict[str, Any], injured: Dict[str, str]) -> str:
+    """本季常规主力里没进首发的人(按分钟占比排序, 最多 6 个), 并标注是否在伤停名单里。没有统计数据返回空串。"""
+    if not t.get("regulars"):
+        return ""
+    in_xi = {x["id"] for x in t["xi"]}
+    miss = [r for r in t["regulars"] if r["id"] not in in_xi][:6]
+    if not miss:
+        return f"本季常规主力(共 {len(t['regulars'])} 人)全部在首发。"
+    def f(r):
+        tag = f"、{injured[r['name']]}" if r["name"] in injured else "、不在伤停名单,可能是轮换/战术安排"
+        return f"{r['name']}(分钟占比 {int((r['share'] or 0) * 100)}%{tag})"
+    small = f"(样本仅 {t['games']} 场)" if t.get("games") and t["games"] < 5 else ""
+    return f"本季常规主力未首发{small}: " + "; ".join(f(r) for r in miss)
+
+
 def render(match_id: str, home: str, away: str) -> str:
     c = load_cached(match_id)
     if c is None:
@@ -143,14 +166,23 @@ def render(match_id: str, home: str, away: str) -> str:
     th, ta = teams.get(str(d.get("home_id"))), teams.get(str(d.get("away_id")))
     if not th or not ta:
         return f"\n【官方首发】(来源 API-Football,查询于 {at})返回的球队与本场对不上,不能使用。"
+    inj = load_injuries(match_id)
+    injured_by_name = {}
+    if inj:
+        for x in inj["items"]:
+            injured_by_name[x["name"]] = "在伤停名单(缺阵)" if x.get("type") == "Missing Fixture" else "在伤停名单(存疑)"
     lines = [f"\n【官方首发】(来源 API-Football,查询于 {at} 北京时间;接口不给公布时间,不能判断盘口是否已反映)",
              f"主队{home}: {_xi_text(th)}", f"客队{away}: {_xi_text(ta)}"]
-    inj = load_injuries(match_id)
+    for lab, nm, t in (("主队", home, th), ("客队", away, ta)):
+        rm = regulars_missing(t, injured_by_name)
+        if rm:
+            lines.append(f"{lab}{nm}: {rm}")
     if inj:
         names = {x["name"]: x for x in inj["items"] if x.get("type") == "Missing Fixture"}
         hit = [x["name"] for t in (th, ta) for x in t["xi"] if x.get("name") in names]
         if hit:
             lines.append("交叉提示: 伤停名单里标为缺阵的球员出现在首发: " + "、".join(hit) + "(两份数据来源可能不同步,以官方首发为准,并说明伤停数据可能过时)")
-    lines.append("说明: 轮换人数只是粗略指标,杯赛/欧战前后轮换更常见;"
-                 "主力是否在首发要结合近期战绩判断,接口没有出场时间。首发是尚未被定价的新信息,但只有和盘口最新变动方向对照后才能作为证据。")
+    lines.append("说明: 轮换人数只是粗略指标,杯赛/欧战前后轮换更常见;\"常规主力\"按本联赛本赛季的分钟占比和首发率划分,"
+                 "赛季初期样本小时不稳。常规主力没进首发又不在伤停名单,多半是轮换或战术安排,要结合赛程判断,不要直接当作利空。"
+                 "首发是尚未被定价的新信息,但只有和盘口最新变动方向对照后才能作为证据。")
     return "\n".join(lines)
