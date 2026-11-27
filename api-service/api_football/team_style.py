@@ -91,7 +91,7 @@ def team_style(team_id: int, league_id: Optional[int] = None, season: Optional[i
         cur.execute(f"SELECT af_fixture_id AS fid, MIN(minute) AS m FROM af_match_event WHERE team_id=%s AND type='subst' AND af_fixture_id IN ({ph}) GROUP BY af_fixture_id",
                     (team_id, *ids))
         subs = [int(r["m"]) for r in cur.fetchall()]
-        cur.execute(f"SELECT minute FROM af_match_event WHERE team_id=%s AND type='Goal' AND detail<>'Missed Penalty' AND af_fixture_id IN ({ph})", (team_id, *ids))
+        cur.execute(f"SELECT minute FROM af_match_event WHERE team_id=%s AND type='Goal' AND detail<>'Missed Penalty' AND minute<=90 AND af_fixture_id IN ({ph})", (team_id, *ids))
         goals = [int(r["minute"]) for r in cur.fetchall()]
     return summarize(ms, subs, goals)
 

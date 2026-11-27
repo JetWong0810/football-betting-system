@@ -215,6 +215,18 @@ DDL += [
 ]
 
 
+DDL += [
+    """CREATE TABLE IF NOT EXISTS af_referee_profile (
+      ref_key VARCHAR(160) NOT NULL COMMENT '规范化后的裁判名(首字母+姓)',
+      league_id INT NOT NULL COMMENT '统计时以哪个联赛为中心(决定扫描的赛事范围)',
+      season INT NOT NULL,
+      payload_json LONGTEXT COMMENT '该裁判近 3 个赛季每场的精简记录(牌/点球/比分), 不含球员数据',
+      fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (ref_key, league_id, season)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+]
+
+
 def ensure_tables() -> None:
     with get_db() as conn:
         cur = conn.cursor()
