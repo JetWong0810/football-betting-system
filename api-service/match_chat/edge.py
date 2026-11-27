@@ -164,7 +164,7 @@ def best_price_text(asian: List[Dict[str, Any]], home: str, away: str) -> str:
               f"买{home}最优价 {bp['ev_home']:+.1f}%,买{away}最优价 {bp['ev_away']:+.1f}%。"
               "粗估假设 Pinnacle 去水即真实概率,忽略半赢半输,只说明\"某家价格相对 Pinnacle 是便宜还是贵\",不是下注建议;")
         best = max(bp["ev_home"], bp["ev_away"])
-        s += ("两边期望都不为正,价格上没有可下手的一边。" if best <= 0 else
+        s += ("两边期望都不为正,水位上没有额外优势(与倾向强弱是两回事)。" if best <= 0 else
               ("最好的一边期望为正但不足 2%,在估算误差之内,不视为有价值。" if best < 2.0 else
                f"最好的一边期望约 {best:+.1f}%,价格上相对 Pinnacle 有优势,但仍需有独立证据支持该方向。"))
     else:

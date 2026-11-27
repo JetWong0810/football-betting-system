@@ -28,9 +28,24 @@ def test_base_rate_section_kept():
     assert "赢盘基准" in odds and "水位参考" in odds
 
 
+def test_prompt_has_graded_leans_and_no_price_veto():
+    from match_chat.service import SYSTEM_TMPL
+    assert "微弱倾向" in SYSTEM_TMPL and "中等倾向" in SYSTEM_TMPL and "较明显倾向" in SYSTEM_TMPL
+    assert "不要用\"价格上不下手\"当结论" in SYSTEM_TMPL and "买什么盘口水位合适" not in SYSTEM_TMPL
+    from match_chat.service import SUMMARY_NOTE
+    assert "买什么盘口水位合适" not in SUMMARY_NOTE and "证据不足一律写不确定" not in SUMMARY_NOTE
+    assert "至少两类互相独立的证据" in SYSTEM_TMPL and "只有一类证据、证据互相矛盾" not in SYSTEM_TMPL
+
+
 def test_extract_verdict():
     body, v = extract_verdict("正文\n[[NEXT]] 问题一 || 问题二\n[[V]] ah=下盘; ou=不确定")
     assert v == {"ah": "下盘", "ou": "不确定"} and "[[V]]" not in body and "[[NEXT]]" in body, (body, v)
+    body, v = extract_verdict("正文\n[[V]] ah=上盘/微弱; ou=不确定")
+    assert v == {"ah": "上盘", "ou": "不确定", "ah_s": "微弱"} and "[[V]]" not in body, (body, v)
+    body, v = extract_verdict("正文\n[[V]] ah=下盘/中等; ou=大球/较明显")
+    assert v == {"ah": "下盘", "ou": "大球", "ah_s": "中等", "ou_s": "较明显"}, v
+    body, v = extract_verdict("x\n[[V]] ah=上盘/随便; ou=无")           # 非法强度忽略, 方向仍保留
+    assert v == {"ah": "上盘", "ou": "无"}, v
     body, v = extract_verdict("没有倾向的回复")
     assert v is None and body == "没有倾向的回复"
     body, v = extract_verdict("x\n[[V]] 格式不对")

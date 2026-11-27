@@ -67,6 +67,7 @@ def verdict_report(days: int = 30) -> Dict[str, Any]:
         dist = {"ah": {}, "ou": {}}
         ah_rows: List[Dict[str, Any]] = []
         ou_rows: List[Dict[str, Any]] = []
+        by_strength: Dict[str, List[Dict[str, Any]]] = {}      # 强度 -> 已结算的让球倾向(看"微弱倾向"到底有没有用)
         clv = {"favorable": 0, "unfavorable": 0, "flat": 0}
         pending = no_snap = 0
         detail: List[Dict[str, Any]] = []
@@ -87,6 +88,7 @@ def verdict_report(days: int = 30) -> Dict[str, Any]:
                 res = edge.settle_ah(ah, ahs.get("line"), ahs.get("home"), ahs.get("away"), sc[0], sc[1])
                 if res:
                     ah_rows.append(res)
+                    by_strength.setdefault(v.get("ah_s") or "未标强度", []).append(res)
                     item["ah"] = {"pick": ah, "line": ahs.get("line"), **res}
                     close = _closing_line(cur, mid)
                     entry = ahs.get("line")
@@ -103,6 +105,6 @@ def verdict_report(days: int = 30) -> Dict[str, Any]:
                     item["ou"] = {"pick": ou, "line": ous.get("line"), **res}
             detail.append(item)
     return {"days": days, "matches": len(last), "distribution": dist, "settledAh": edge.tally(ah_rows),
-            "settledOu": edge.tally(ou_rows), "lineMove": clv, "pending": pending, "noSnapshot": no_snap,
+            "settledOu": edge.tally(ou_rows), "ahByStrength": {k: edge.tally(rs) for k, rs in by_strength.items()}, "lineMove": clv, "pending": pending, "noSnapshot": no_snap,
             "note": "以倾向发出时的盘口/水位结算(半赢半输按 0.5 计命中,ROI 为每单位本金);lineMove=倾向发出后到终盘,盘口是否朝倾向方向走(favorable)。"
                     "只有部署该功能之后产生、带盘口快照的倾向才会被结算。", "detail": detail[-30:]}
