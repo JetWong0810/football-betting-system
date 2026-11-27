@@ -86,6 +86,18 @@ DDL += [
 ]
 
 
+DDL += [
+    """CREATE TABLE IF NOT EXISTS af_lineup_cache (
+      match_id VARCHAR(100) NOT NULL,
+      af_fixture_id INT NOT NULL,
+      published TINYINT NOT NULL DEFAULT 0,
+      payload_json LONGTEXT,
+      fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (match_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+]
+
+
 def ensure_tables() -> None:
     with get_db() as conn:
         cur = conn.cursor()

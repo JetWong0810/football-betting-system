@@ -784,10 +784,10 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"), ("官方首发", "lineup"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
-                 "recent": "近期战绩与赛程", "arts": "关联文章", "inj": "伤停"}
+                 "recent": "近期战绩与赛程", "arts": "关联文章", "inj": "伤停", "lineup": "官方首发"}
 
 
 def split_sections(text: str) -> Dict[str, str]:
@@ -836,7 +836,13 @@ def build_context(match_id: str) -> Dict[str, Any]:
         inj_text = render_inj(match_id, it["homeTeam"]["name"], it["awayTeam"]["name"])
     except Exception:  # noqa: BLE001  伤停表不可用不影响聊天
         logger.exception("伤停渲染失败 %s", match_id)
-    text = render_text(it, pred, arts) + market_text + form_text + inj_text
+    lu_text = ""
+    try:
+        from api_football.lineups import render as render_lu
+        lu_text = render_lu(match_id, it["homeTeam"]["name"], it["awayTeam"]["name"])
+    except Exception:  # noqa: BLE001
+        logger.exception("首发渲染失败 %s", match_id)
+    text = render_text(it, pred, arts) + market_text + form_text + inj_text + lu_text
     f6 = it.get("f6") or {}
     summary = {
         "asian": mk["asian"], "euro": mk["euro"], "ou": mk["ou"], "ticks": mk["ticks"],

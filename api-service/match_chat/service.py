@@ -67,6 +67,7 @@ _SEC_RE = {
     "recent": re.compile(r"近期|战绩|状态|赛程|近况"),
     "arts": re.compile(r"文章|公众号"),
     "inj": re.compile(r"伤停|伤病|伤情|缺阵|停赛|受伤|阵容缺"),
+    "lineup": re.compile(r"首发|阵容|阵型|轮换|出场名单"),
 }
 
 
@@ -231,6 +232,15 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
             logger.warning("伤停抓取异常 %s: %s", match_id, e)
             inj_res = {"ok": False, "reason": "error"}
         yield {"type": "status", "text": "伤停已更新" if (inj_res or {}).get("ok") else "伤停没有抓到,使用已有数据"}
+    lu_res = None
+    if "lineup" in want and not bd:
+        try:
+            from api_football import lineups as af_lu
+            lu_res = af_lu.fetch(match_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("首发抓取异常 %s: %s", match_id, e)
+            lu_res = {"ok": False, "reason": "error"}
+        yield {"type": "status", "text": ("首发已更新" if lu_res.get("published") else "官方首发尚未公布") if lu_res.get("ok") else "首发没有抓到,使用已有数据"}
     if reason:
         yield {"type": "status", "text": reason}
         try:
@@ -249,6 +259,10 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
     data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
     if refresh is not None:
         data += "\n" + refresh_note(refresh) + "\n"
+    if lu_res is not None and not lu_res.get("ok"):
+        why = "本场还没有对应到 API-Football 的比赛" if lu_res.get("reason") == "no_mapping" else "接口请求失败"
+        data += (f"\n【本次抓取首发失败】原因:{why}。回答时如实告诉用户没有拿到首发数据(若上方【官方首发】有内容则是之前存的旧数据,须注明查询时间),"
+                 "不要凭印象补写首发;可以建议用户打开联网搜索查官方首发。\n")
     if inj_res is not None and not inj_res.get("ok"):
         why = "本场还没有对应到 API-Football 的比赛" if inj_res.get("reason") == "no_mapping" else "接口请求失败"
         data += (f"\n【本次抓取伤停失败】原因:{why}。回答时如实告诉用户没有拿到伤停数据(若上方【伤停】有内容则是之前存的旧数据,须注明抓取时间),"
