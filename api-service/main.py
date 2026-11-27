@@ -1507,7 +1507,6 @@ def batch_similar(
     return {"date": date, "status": status, "summary": summary, "items": items}
 
 
-
 @app.get("/api/predict/dates")
 def list_predict_dates(
     status: str = Query(default="finished", description="not_started 或 finished"),
@@ -2007,17 +2006,6 @@ def predict_similar_odds_detail(
         "oddsKind": f6.get("oddsKind") or odds_kind,
         "jcHandicap": f6.get("jcHandicap") if f6.get("jcHandicap") is not None else jc_hc,
     }
-
-
-@app.get("/api/predict/{match_id}/japan-context")
-def predict_japan_context(match_id: str):
-    """日职辅助情报（阵容/天气/进攻点），仅展示参考，不参与因子加权。"""
-    from japan_context_service import get_japan_context
-
-    match = repo.get_match(match_id)
-    if not match:
-        raise HTTPException(status_code=404, detail="未找到比赛")
-    return get_japan_context(match_id)
 
 
 @app.get("/api/predict/{match_id}/intel")
