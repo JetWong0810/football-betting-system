@@ -204,6 +204,17 @@ DDL += [
 ]
 
 
+DDL += [
+    """CREATE TABLE IF NOT EXISTS af_referee_cache (
+      match_id VARCHAR(100) NOT NULL,
+      af_fixture_id INT NOT NULL,
+      referee VARCHAR(160) DEFAULT NULL,
+      fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (match_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+]
+
+
 def ensure_tables() -> None:
     with get_db() as conn:
         cur = conn.cursor()

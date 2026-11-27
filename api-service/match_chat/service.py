@@ -78,6 +78,7 @@ _SEC_RE = {
     "arts": re.compile(r"文章|公众号"),
     "inj": re.compile(r"伤停|伤病|伤情|缺阵|停赛|受伤|阵容缺"),
     "lineup": re.compile(r"首发|阵容|阵型|轮换|出场名单"),
+    "ref": re.compile(r"裁判|主裁|执法|吹罚|判罚"),
 }
 
 
@@ -153,6 +154,8 @@ WEB_ON_NOTE = """
 - 纯知识性或只涉及已载入数据的问题不用搜。
 - 战意与赛前情报(分析大小球/让球时必须查):积分榜只能说明"数学上还争不争",主帅想不想赢要靠新闻。依次查:①主帅赛前发布会对轮换、主力是否出战、伤病、本场目标的原话;②赛程优先级(下一场是否欧战/杯赛/德比、是否有人提前保留主力);③积分形势背后的目标(争冠、欧战资格、保级、已无欲无求)和特殊背景(新帅首战、主帅帽子不稳、球员转会/合同传闻、重大纪念日或仪式、球迷抗议、更衣室矛盾)。关键词用队名+主帅名+"发布会/轮换/战意"并中英文各试一次。
 - 战意情报的可信度排序:主帅或球队官方原话 > 主流体育媒体的跟队记者 > 聚合站和论坛;每条都标来源和日期,并区分"主帅说"和"媒体猜测";只有单一来源、或来源互相矛盾时要明说;查到的只是套话(如"每场都要拼")不算信息,直接略去。
+- 裁判风格与倾向(用户问裁判、或分析大小球让球时涉及裁判):先确定当值裁判(数据区【裁判】里有就直接用,没有就联网查官方指派),再查这位裁判:①近 1~3 个赛季的场均黄牌、红牌、点球、犯规,每项都写样本场次;②执法尺度(对身体对抗和犯规的宽松程度、补时习惯、VAR 介入习惯);③对主客队的判罚差异(主客场黄牌和点球分布);④执法过本场两队的历史场次(两队战绩、点球和红牌判罚);⑤争议判罚和是否被停派。可用来源:各联赛官方指派、WhoScored、Transfermarkt、FBref、Sofascore、懂球帝、虎扑,中英文各查一次,多个来源交叉。
+- 裁判情报的写法:区分"统计数据"(要有样本数)和"评论/传闻"(只作线索);只有一个来源或样本不足 10 场的要明说;**不得暗示裁判受贿、操纵比赛或有意偏袒**,只讨论可观测的判罚倾向;"与两队渊源/偏向某队"必须给出具体场次和数据,没有就写"没有证据"。裁判因素对大小球和让球的影响没有回测,点球和红牌更多是随机的,只能给方向和"微弱"强度,不能单独作为倾向依据。
 - 战意情报对总进球的影响没有回测,只能给方向和一句理由,不能给具体数值:主帅明确要保留进攻主力、赛前已定轮换前场→偏小;后防或门将轮换、或明确说"放开打"→偏大;双方都已无欲无求(这一条有积分榜回测支持,见【战意】块)→偏大;关键战、双方都输不起→不给方向。多条互相矛盾的消息不要叠加成"很有把握"。
 """
 
@@ -275,6 +278,15 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
             af_st.fetch(match_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("积分榜抓取异常 %s: %s", match_id, e)
+    ref_res = None
+    if "ref" in want and not bd:
+        try:
+            from api_football import referee as af_ref
+            ref_res = af_ref.fetch(match_id)
+        except Exception as e:  # noqa: BLE001  裁判查询失败不影响聊天
+            logger.warning("裁判查询异常 %s: %s", match_id, e)
+            ref_res = {"ok": False, "reason": "error"}
+        yield {"type": "status", "text": (("当值裁判:" + ref_res["referee"]) if ref_res.get("referee") else "当值裁判尚未公布") if ref_res.get("ok") else "裁判没有查到,将联网搜索"}
     lu_res = None
     if "lineup" in want and not bd:
         try:
@@ -302,6 +314,9 @@ def run_turn(user_id: int, match_id: str, text: str, images: List[Dict[str, str]
     data = DATA_RULES.format(now=datetime.now().strftime("%Y-%m-%d %H:%M"), body=body) if body else ""
     if refresh is not None:
         data += "\n" + refresh_note(refresh) + "\n"
+    if ref_res is not None and not ref_res.get("ok"):
+        data += ("\n【本次查询当值裁判失败】本场没有对应到 API-Football 或接口失败。请联网搜索官方指派的当值裁判;"
+                 "查不到就明说\"裁判未查到\",不要凭印象写裁判。\n")
     if lu_res is not None and not lu_res.get("ok"):
         why = "本场还没有对应到 API-Football 的比赛" if lu_res.get("reason") == "no_mapping" else "接口请求失败"
         data += (f"\n【本次抓取首发失败】原因:{why}。回答时如实告诉用户没有拿到首发数据(若上方【官方首发】有内容则是之前存的旧数据,须注明查询时间),"
