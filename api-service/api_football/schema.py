@@ -121,6 +121,89 @@ DDL += [
 ]
 
 
+DDL += [
+    """CREATE TABLE IF NOT EXISTS af_team (
+      af_team_id INT NOT NULL,
+      name VARCHAR(128) NOT NULL,
+      code VARCHAR(16) DEFAULT NULL,
+      country VARCHAR(64) DEFAULT NULL,
+      founded INT DEFAULT NULL,
+      national TINYINT NOT NULL DEFAULT 0,
+      venue_id INT DEFAULT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (af_team_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS af_venue (
+      af_venue_id INT NOT NULL,
+      name VARCHAR(160) DEFAULT NULL,
+      city VARCHAR(128) DEFAULT NULL,
+      country VARCHAR(64) DEFAULT NULL,
+      address VARCHAR(255) DEFAULT NULL,
+      capacity INT DEFAULT NULL,
+      surface VARCHAR(32) DEFAULT NULL,
+      lat DECIMAL(9,6) DEFAULT NULL,
+      lon DECIMAL(9,6) DEFAULT NULL,
+      tz VARCHAR(48) DEFAULT NULL,
+      geocoded_at TIMESTAMP NULL DEFAULT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (af_venue_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS af_match (
+      af_fixture_id INT NOT NULL,
+      league_id INT NOT NULL,
+      season INT NOT NULL,
+      round VARCHAR(64) DEFAULT NULL,
+      match_ts BIGINT NOT NULL,
+      home_id INT NOT NULL,
+      away_id INT NOT NULL,
+      venue_id INT DEFAULT NULL,
+      referee VARCHAR(96) DEFAULT NULL,
+      status VARCHAR(8) NOT NULL,
+      home_goals INT DEFAULT NULL,
+      away_goals INT DEFAULT NULL,
+      ht_home INT DEFAULT NULL,
+      ht_away INT DEFAULT NULL,
+      has_stats TINYINT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (af_fixture_id),
+      KEY idx_league_season (league_id, season, match_ts),
+      KEY idx_home (home_id, match_ts),
+      KEY idx_away (away_id, match_ts)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS af_match_lineup (
+      af_fixture_id INT NOT NULL,
+      team_id INT NOT NULL,
+      formation VARCHAR(16) DEFAULT NULL,
+      coach_id INT DEFAULT NULL,
+      coach_name VARCHAR(96) DEFAULT NULL,
+      xi_json TEXT,
+      subs_json TEXT,
+      PRIMARY KEY (af_fixture_id, team_id),
+      KEY idx_team (team_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS af_match_event (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      af_fixture_id INT NOT NULL,
+      minute INT NOT NULL,
+      extra_minute INT NOT NULL DEFAULT 0,
+      type VARCHAR(24) NOT NULL,
+      detail VARCHAR(64) NOT NULL DEFAULT '',
+      team_id INT NOT NULL DEFAULT 0,
+      player_id INT NOT NULL DEFAULT 0,
+      player VARCHAR(96) NOT NULL DEFAULT '',
+      assist VARCHAR(96) DEFAULT NULL,
+      UNIQUE KEY uk_ev (af_fixture_id, minute, extra_minute, type, detail, team_id, player_id, player),
+      KEY idx_team (team_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS af_match_stats (
+      af_fixture_id INT NOT NULL,
+      team_id INT NOT NULL,
+      stats_json TEXT,
+      PRIMARY KEY (af_fixture_id, team_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+]
+
+
 def ensure_tables() -> None:
     with get_db() as conn:
         cur = conn.cursor()

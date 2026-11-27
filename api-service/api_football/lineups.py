@@ -32,7 +32,7 @@ def _team_xi(t: Dict[str, Any]) -> Dict[str, Any]:
     xi = [{"id": (x.get("player") or {}).get("id"), "name": (x.get("player") or {}).get("name"),
            "pos": (x.get("player") or {}).get("pos"), "grid": (x.get("player") or {}).get("grid")} for x in t.get("startXI") or []]
     return {"team_id": (t.get("team") or {}).get("id"), "team": (t.get("team") or {}).get("name"),
-            "formation": t.get("formation"), "coach": (t.get("coach") or {}).get("name"), "xi": xi}
+            "formation": t.get("formation"), "coach": (t.get("coach") or {}).get("name"), "coach_id": (t.get("coach") or {}).get("id"), "xi": xi}
 
 
 def parse_lineups(resp: List[Dict[str, Any]]) -> Optional[Dict[str, Dict[str, Any]]]:
@@ -173,16 +173,26 @@ def render(match_id: str, home: str, away: str) -> str:
             injured_by_name[x["name"]] = "在伤停名单(缺阵)" if x.get("type") == "Missing Fixture" else "在伤停名单(存疑)"
     lines = [f"\n【官方首发】(来源 API-Football,查询于 {at} 北京时间;接口不给公布时间,不能判断盘口是否已反映)",
              f"主队{home}: {_xi_text(th)}", f"客队{away}: {_xi_text(ta)}"]
-    for lab, nm, t in (("主队", home, th), ("客队", away, ta)):
+    ko = _kickoff(match_id)
+    for lab, nm, t, is_home in (("主队", home, th, True), ("客队", away, ta, False)):
         rm = regulars_missing(t, injured_by_name)
         if rm:
             lines.append(f"{lab}{nm}: {rm}")
+        try:
+            from .style_text import lineup_compare_text
+            from .team_style import team_matches
+            cmp_line = lineup_compare_text(lab, nm, t["xi"], t.get("formation"), t.get("coach"),
+                                           team_matches(int(t["team_id"]), before_ts=ko), is_home, t.get("coach_id"))
+            if cmp_line:
+                lines.append(cmp_line)
+        except Exception:  # noqa: BLE001  本赛季比赛库不可用不影响首发本身
+            logger.exception("首发对比计算失败 %s", match_id)
     if inj:
         names = {x["name"]: x for x in inj["items"] if x.get("type") == "Missing Fixture"}
         hit = [x["name"] for t in (th, ta) for x in t["xi"] if x.get("name") in names]
         if hit:
             lines.append("交叉提示: 伤停名单里标为缺阵的球员出现在首发: " + "、".join(hit) + "(两份数据来源可能不同步,以官方首发为准,并说明伤停数据可能过时)")
-    lines.append("说明: 轮换人数只是粗略指标,杯赛/欧战前后轮换更常见;\"常规主力\"按本联赛本赛季的分钟占比和首发率划分,"
+    lines.append("说明: \"阵容对比\"是相对该队自己本赛季习惯的描述,阵型/换人和进球的关系没有回测,只作端倪,不是方向证据;轮换人数只是粗略指标,杯赛/欧战前后轮换更常见;\"常规主力\"按本联赛本赛季的分钟占比和首发率划分,"
                  "赛季初期样本小时不稳。常规主力没进首发又不在伤停名单,多半是轮换或战术安排,要结合赛程判断,不要直接当作利空。"
                  "首发是尚未被定价的新信息,但只有和盘口最新变动方向对照后才能作为证据。")
     return "\n".join(lines)

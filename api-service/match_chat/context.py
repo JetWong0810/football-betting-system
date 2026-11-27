@@ -206,6 +206,13 @@ def render_form(match: Dict[str, Any], form: Optional[Dict[str, Any]], n_h2h: in
             L.append(st)
     except Exception:  # noqa: BLE001  赛程密度算不出来不影响其余内容
         logger.exception("赛程密度计算失败")
+    try:
+        from api_football.style_text import travel_note
+        tn = travel_note(match.get("match_id") or "", at)
+        if tn:
+            L.append(tn)
+    except Exception:  # noqa: BLE001
+        logger.exception("客场旅途计算失败")
     return "\n".join(L), {"h2h": len(h2h), "home": len(hr), "away": len(ar)}
 
 
@@ -823,7 +830,7 @@ def render_text(it: Dict[str, Any], pred: Optional[Dict[str, Any]], arts: Option
     return "\n".join(L)
 
 
-_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"), ("官方首发", "lineup"), ("战意", "odds"), ("近期总进球", "recent"),
+_HEAD_KEY = (("比赛", "id"), ("盘口", "odds"), ("欧赔", "odds"), ("大小球", "odds"), ("其他公司", "odds"), ("水位参考", "odds"), ("赢盘基准", "odds"), ("市场先验", "odds"), ("最优价", "odds"), ("历史信号", "odds"), ("同盘口水位", "odds"), ("同盘口历史", "odds"), ("历史同赔", "f6"), ("七因子", "pred"), ("公众号文章", "arts"), ("伤停", "inj"), ("官方首发", "lineup"), ("战意", "odds"), ("近期总进球", "recent"), ("客场旅途", "recent"),
              ("交锋历史", "h2h"), ("赛前联赛积分", "recent"), ("主队近期战绩", "recent"), ("客队近期战绩", "recent"), ("未来赛程", "recent"), ("赛程密度", "recent"))
 SECTION_LABEL = {"odds": "盘口赔率", "f6": "历史同赔", "pred": "七因子预测", "h2h": "交锋历史",
                  "recent": "近期战绩与赛程", "arts": "关联文章", "inj": "伤停", "lineup": "官方首发"}
